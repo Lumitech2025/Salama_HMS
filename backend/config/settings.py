@@ -31,6 +31,7 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    'jazzmin',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -39,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'rest_framework_simplejwt',
     'core',
     'django_filters',
 ]
@@ -109,7 +111,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Africa/Nairobi'
 
 USE_I18N = True
 
@@ -122,5 +124,47 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
+    "http://localhost:5173", 
+    "http://127.0.0.1:5173",
 ]
+
+AUTH_USER_MODEL = 'core.User'
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    )
+}
+
+JAZZMIN_SETTINGS = {
+    "site_title": "Salama HMS",
+    "site_header": "Salama",
+    "site_brand": "Salama Hospital Management",
+    "welcome_sign": "Welcome to Salama HMS Administration",
+    "copyright": "Salama HMS Ltd",
+    "search_model": ["core.Patient"], # Quick search for patients
+    
+    # Sidebar navigation setup
+    "show_sidebar": True,
+    "navigation_expanded": True,
+    
+    # Custom icons for your core clinical models
+    "icons": {
+        "auth": "fas fa-users-cog",
+        "auth.user": "fas fa-user-md",      # Doctor icon for users
+        "core.Patients": "fas fa-hospital-user",
+        "core.Bills": "fas fa-file-invoice-dollar",
+        "core.Drugs": "fas fa-pills",
+        "core.Labresults": "fas fa-microscope",
+        "core.Protocols": "fas fa-clipboard-list",
+        "core.Treatments": "fas fa-hand-holding-medical",
+    },
+    
+    # Hide models we don't use often or group them
+    "order_with_respect_to": ["core.Patients", "core.Treatments", "core.Labresults", "core.Bills"],
+}
+
+JAZZMIN_UI_TWEAKS = {
+    "theme": "flatly", # Professional clean blue
+    "dark_mode_theme": None,
+}

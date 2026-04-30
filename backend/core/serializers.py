@@ -1,14 +1,37 @@
 from rest_framework import serializers
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model # Use this to get your custom user
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import Patient, Protocol, Treatment, ChemoSession, Drug, LabResult, Bill
 
-# --- User Serializer (For Staff tracking) ---
+User = get_user_model()
+
+# --- NEW: JWT Custom "Stamping" Serializer ---
+class SalamaTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+
+        # "Stamp" the role into the encrypted token payload
+        token['role'] = user.role
+        token['username'] = user.username
+        return token
+
+    def validate(self, attrs):
+        # This data is returned in the plain-text JSON response to React
+        data = super().validate(attrs)
+        
+        data['role'] = self.user.role
+        data['username'] = self.user.username
+        data['employee_id'] = getattr(self.user, 'employee_id', 'N/A')
+        return data
+
+# --- Updated User Serializer (Using Custom Model) ---
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'username', 'first_name', 'last_name', 'email']
+        fields = ['id', 'username', 'first_name', 'last_name', 'email', 'role'] # Added role
 
-# --- Oncology Specific Serializers ---
+# --- Oncology Specific Serializers (Keep your existing ones below) ---
 class ProtocolSerializer(serializers.ModelSerializer):
     class Meta:
         model = Protocol
