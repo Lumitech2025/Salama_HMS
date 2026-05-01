@@ -40,10 +40,13 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'authentication',
     'rest_framework_simplejwt',
     'core',
     'django_filters',
 ]
+
+AUTH_USER_MODEL = 'authentication.User'
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware', 
@@ -128,7 +131,6 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 
-AUTH_USER_MODEL = 'core.User'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -139,32 +141,73 @@ REST_FRAMEWORK = {
 JAZZMIN_SETTINGS = {
     "site_title": "Salama HMS",
     "site_header": "Salama",
-    "site_brand": "Salama Hospital Management",
-    "welcome_sign": "Welcome to Salama HMS Administration",
+    "site_brand": "Salama Hospital",
+    "site_logo": None, # You can add a medical cross icon here later
+    "welcome_sign": "Salama HMS Portal",
     "copyright": "Salama HMS Ltd",
-    "search_model": ["core.Patient"], # Quick search for patients
+    "search_model": ["core.Patient"], # Vital: Search patients directly from the top bar
     
-    # Sidebar navigation setup
+    "topmenu_links": [
+        {"name": "Home",  "url": "admin:index", "permissions": ["auth.view_user"]},
+        {"name": "Support", "url": "https://salama-hms.com/support", "new_window": True},
+    ],
+
     "show_sidebar": True,
     "navigation_expanded": True,
-    
-    # Custom icons for your core clinical models
+
+    # Custom Icons for the sidebar (Font Awesome)
     "icons": {
         "auth": "fas fa-users-cog",
-        "auth.user": "fas fa-user-md",      # Doctor icon for users
-        "core.Patients": "fas fa-hospital-user",
-        "core.Bills": "fas fa-file-invoice-dollar",
-        "core.Drugs": "fas fa-pills",
-        "core.Labresults": "fas fa-microscope",
-        "core.Protocols": "fas fa-clipboard-list",
-        "core.Treatments": "fas fa-hand-holding-medical",
+        "auth.user": "fas fa-user-md",
+        "core.Patient": "fas fa-hospital-user",
+        "core.Treatment": "fas fa-hand-holding-medical",
+        "core.ChemoSession": "fas fa-Syringe",
+        "core.Drug": "fas fa-pills",
+        "core.LabResult": "fas fa-microscope",
+        "core.Bill": "fas fa-file-invoice-dollar",
+        "core.Protocol": "fas fa-clipboard-list",
     },
     
-    # Hide models we don't use often or group them
-    "order_with_respect_to": ["core.Patients", "core.Treatments", "core.Labresults", "core.Bills"],
+    # Organize the Sidebar into logical groups
+    "order_with_respect_to": [
+        "core.Patient", 
+        "core.Treatment", 
+        "core.ChemoSession", 
+        "core.LabResult", 
+        "core.Drug", 
+        "core.Bill",
+        "auth"
+    ],
 }
 
 JAZZMIN_UI_TWEAKS = {
-    "theme": "flatly", # Professional clean blue
+    "navbar_small_text": False,
+    "footer_small_text": True,
+    "body_small_text": False,
+    "brand_small_text": False,
+    "brand_colour": "navbar-dark",
+    "accent": "accent-primary",
+    "navbar": "navbar-dark",
+    "no_navbar_border": False,
+    "navbar_fixed": True,
+    "layout_boxed": False,
+    "footer_fixed": False,
+    "sidebar_fixed": True,
+    "sidebar": "sidebar-dark-primary",
+    "sidebar_nav_small_text": False,
+    "sidebar_disable_expand": False,
+    "sidebar_nav_child_indent": True,
+    "sidebar_nav_compact_style": False,
+    "sidebar_nav_legacy_style": False,
+    "sidebar_nav_flat_style": False,
+    "theme": "flatly", # This gives that clean, blue/white hospital feel
     "dark_mode_theme": None,
+    "button_classes": {
+        "primary": "btn-primary",
+        "secondary": "btn-secondary",
+        "info": "btn-info",
+        "warning": "btn-warning",
+        "danger": "btn-danger",
+        "success": "btn-success"
+    }
 }

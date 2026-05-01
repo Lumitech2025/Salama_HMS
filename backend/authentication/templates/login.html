@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Salama HMS | Secure Gateway</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+        
+        .glass-card {
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-gradient {
+            background: linear-gradient(135deg, #0d9488 0%, #0f172a 100%);
+            transition: all 0.3s ease;
+        }
+
+        .btn-gradient:hover {
+            box-shadow: 0 10px 20px -10px #0d9488;
+            transform: translateY(-1px);
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen relative overflow-hidden bg-slate-900">
+    
+    <!-- Background Image with Overlay -->
+    <div class="absolute inset-0 z-0">
+        <img src="https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&q=80&w=2000" 
+             class="w-full h-full object-cover opacity-40">
+        <div class="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-slate-900/50"></div>
+    </div>
+
+    <div class="glass-card p-10 rounded-[2.5rem] shadow-2xl w-full max-w-md z-10 mx-4 border border-white/20">
+        <!-- Brand Identity -->
+        <div class="text-center mb-10">
+            <div class="inline-flex items-center justify-center w-16 h-16 bg-teal-50 text-teal-600 rounded-2xl mb-6 shadow-inner">
+                <i class="fas fa-leaf text-3xl"></i>
+            </div>
+            <h1 class="text-3xl font-extrabold text-slate-800 tracking-tight">SALAMA <span class="text-teal-600">HMS</span></h1>
+            <div class="flex items-center justify-center space-x-2 mt-2">
+                <span class="h-[1px] w-4 bg-teal-200"></span>
+                <p class="text-[10px] tracking-[0.2em] text-slate-400 uppercase font-semibold">Compassionate Oncology Care</p>
+                <span class="h-[1px] w-4 bg-teal-200"></span>
+            </div>
+        </div>
+
+        <form method="POST" action="{% url 'login' %}" class="space-y-5">
+            {% csrf_token %}
+            
+            {% if messages %}
+                <div class="animate-pulse">
+                    {% for message in messages %}
+                        <div class="p-3 rounded-xl text-xs bg-red-50 text-red-600 border border-red-100 flex items-center">
+                            <i class="fas fa-circle-exclamation mr-2"></i> {{ message }}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            <!-- Input Group -->
+            <div class="space-y-4">
+                <div>
+                    <label class="ml-1 block text-[11px] font-bold text-slate-500 uppercase mb-2 tracking-wider">Employee ID</label>
+                    <div class="relative group">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400 group-focus-within:text-teal-600 transition-colors">
+                            <i class="fas fa-id-card-clip"></i>
+                        </span>
+                        <input type="text" name="employee_id" required
+                               class="w-full pl-12 pr-4 py-4 bg-slate-50/50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 focus:bg-white outline-none transition-all placeholder:text-slate-300"
+                               placeholder="SHMS-000-00">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="ml-1 block text-[11px] font-bold text-slate-500 uppercase mb-2 tracking-wider">Secure Password</label>
+                    <div class="relative group">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400 group-focus-within:text-teal-600 transition-colors">
+                            <i class="fas fa-fingerprint"></i>
+                        </span>
+                        <input type="password" name="password" required
+                               class="w-full pl-12 pr-4 py-4 bg-slate-50/50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-teal-500/10 focus:border-teal-500 focus:bg-white outline-none transition-all placeholder:text-slate-300"
+                               placeholder="••••••••••••">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action -->
+            <button type="submit" 
+                    class="btn-gradient w-full text-white font-bold py-4 rounded-2xl shadow-xl flex items-center justify-center space-x-3 mt-8">
+                <span class="uppercase tracking-widest text-sm">Initialize Session</span>
+                <i class="fas fa-arrow-right-long text-xs opacity-70"></i>
+            </button>
+        </form>
+
+        <!-- Footer -->
+        <div class="mt-10 text-center">
+            <p class="text-[9px] text-slate-400 uppercase tracking-widest leading-relaxed">
+                <i class="fas fa-lock mr-1 opacity-50"></i> End-to-End Encrypted Node<br>
+                Salama Cancer Centre • Meru, Kenya
+            </p>
+        </div>
+    </div>
+</body>
+</html>

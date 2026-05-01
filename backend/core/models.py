@@ -1,37 +1,26 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.conf import settings
 
-class User(AbstractUser):
-    ROLE_CHOICES = [
-        ('ONCOLOGIST', 'Oncologist'),
-        ('NURSE', 'Nurse'),
-        ('PHARMACIST', 'Pharmacist'),
-        ('BILLING', 'Billing Officer'),
-        ('RECEPTIONIST', 'Receptionist'),
-        ('LAB_TECH', 'Lab Technician'),
-        ('RADIOLOGIST', 'Radiologist'),
-        ('ADMIN', 'HMS Admin'),
-    ]
-    
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='RECEPTIONIST')
-    employee_id = models.CharField(max_length=15, unique=True, null=True, blank=True)
-    phone_number = models.CharField(max_length=15, blank=True)
-
-    def __str__(self):
-        return f"{self.username} ({self.get_role_display()})"
 
 # --- Clinical Models ---
 
 class Patient(models.Model):
     GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
+    BLOOD_GROUPS = [('A+', 'A+'), ('A-', 'A-'), ('B+', 'B+'), ('B-', 'B-'), ('O+', 'O+'), ('O-', 'O-'), ('AB+', 'AB+'), ('AB-', 'AB-')]
     
     name = models.CharField(max_length=255)
     registry_no = models.CharField(max_length=50, unique=True)
-    dob = models.DateField()
+    dob = models.DateField(verbose_name="Date of Birth")
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
+    blood_group = models.CharField(max_length=3, choices=BLOOD_GROUPS, blank=True)
+    
+    # Oncology Specifics
     cancer_type = models.CharField(max_length=255)
     staging = models.CharField(max_length=50, blank=True)
-    biomarkers = models.TextField(blank=True)
+    biomarkers = models.TextField(blank=True, help_text="Relevant genetic or protein markers")
+    
+    emergency_contact = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -41,43 +30,66 @@ class Protocol(models.Model):
     """Standardized treatment plans (e.g., AC-T for Breast Cancer)"""
     name = models.CharField(max_length=255)
     description = models.TextField()
-    total_cycles = models.IntegerField(default=1)
+    total_cycles = models.PositiveIntegerField(default=1)
 
     def __str__(self):
         return self.name
 
 class Treatment(models.Model):
+    STATUS_CHOICES = [
+        ('ACTIVE', 'Active'),
+        ('COMPLETED', 'Completed'),
+        ('ON_HOLD', 'On Hold'),
+        ('TERMINATED', 'Terminated'),
+    ]
+
+    
+    
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='treatments')
     protocol = models.ForeignKey(Protocol, on_delete=models.SET_NULL, null=True)
+    oncologist = models.ForeignKey(
+        settings.AUTH_USER_MODEL,  # Use the setting, not the class name
+        on_delete=models.SET_NULL, 
+        null=True, 
+        limit_choices_to={'role': 'ONCOLOGIST'}
+    )
     start_date = models.DateField()
-    status = models.CharField(max_length=20, default='ACTIVE')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='ACTIVE')
 
     def __str__(self):
-        return f"Treatment for {self.patient.name}"
+        return f"{self.protocol.name if self.protocol else 'Custom'} for {self.patient.name}"
 
 class ChemoSession(models.Model):
-    treatment = models.ForeignKey(Treatment, on_delete=models.CASCADE)
+    treatment = models.ForeignKey(Treatment, on_delete=models.CASCADE, related_name='sessions')
     date = models.DateTimeField()
     cycle_no = models.IntegerField()
+    administered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        limit_choices_to={'role': 'NURSE'}
+    )
     notes = models.TextField(blank=True)
 
     def __str__(self):
-        return f"Session {self.cycle_no} - {self.treatment.patient.name}"
+        return f"Cycle {self.cycle_no} - {self.treatment.patient.name}"
 
 class Drug(models.Model):
     name = models.CharField(max_length=255)
     batch_no = models.CharField(max_length=100)
-    stock_quantity = models.IntegerField()
+    stock_quantity = models.PositiveIntegerField()
+    expiry_date = models.DateField(null=True) # Critical safety field
 
     def __str__(self):
-        return self.name
+        return f"{self.name} (Batch: {self.batch_no})"
 
-class LabResult(models.Model): # This resolves your ImportError
+class LabResult(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
     test_name = models.CharField(max_length=255)
     result_value = models.CharField(max_length=255)
-    is_critical = models.BooleanField(default=False)
+    is_critical = models.BooleanField(default=False, help_text="Flags for immediate attention")
     test_date = models.DateTimeField(auto_now_add=True)
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, limit_choices_to={'role': 'LAB_TECH'})
 
     def __str__(self):
         return f"{self.test_name}: {self.patient.name}"
@@ -86,6 +98,7 @@ class Bill(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     is_paid = models.BooleanField(default=False)
+    billing_officer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, limit_choices_to={'role': 'BILLING'})
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
