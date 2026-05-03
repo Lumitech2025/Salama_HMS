@@ -41,7 +41,7 @@ const Login = () => {
                 // should hit the main Dashboard 'brain' at the root (/)
                 if (role === 'HMS ADMIN' || role === 'ADMIN') {
                     navigate('/admin-dashboard');
-                } else if (['ONCOLOGIST', 'NURSE', 'LAB_TECH', 'LABORATORY', 'PHARMACIST', 'RADIOLOGIST'].includes(role)) {
+                } else if (['ONCOLOGIST', 'NURSE', 'LAB_TECH',  'PHARMACIST', 'RADIOLOGIST', 'RECEPTIONIST'].includes(role)) {
                     // Send all clinical staff to the root path
                     // ProtectedRoute will verify them, and Dashboard will show the right UI
                     navigate('/'); 

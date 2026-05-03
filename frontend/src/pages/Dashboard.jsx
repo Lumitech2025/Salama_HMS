@@ -5,6 +5,7 @@ import NurseDashboard from "../components/dashboards/nurse/NurseDashboard";
 import LabTechDashboard from "../components/dashboards/lab-tech/LabTechDashboard";
 import PharmacistDashboard from "../components/dashboards/pharmacist/PharmacistDashboard";
 import RadiologistDashboard from "../components/dashboards/radiologist/RadiologistDashboard";
+import ReceptionistDashboard from "../components/dashboards/receptionist/ReceptionistDashboard"; // Placeholder for Receptionist Dashboard
 
 
 const Dashboard = () => {
@@ -35,6 +36,9 @@ const Dashboard = () => {
 
             case 'RADIOLOGIST':
                 return <RadiologistDashboard />;
+
+            case 'RECEPTIONIST':
+                return <ReceptionistDashboard />; // Placeholder for Receptionist Dashboard
 
             default:
                 return (
