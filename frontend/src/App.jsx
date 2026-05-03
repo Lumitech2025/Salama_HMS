@@ -29,7 +29,7 @@ function App() {
     'NURSE', 
     'RECEPTIONIST', 
     'PHARMACIST', 
-    'BILLING', 
+    'BILLING_OFFICER', 
     'STAFF',
     'LAB_TECH',
     'RADIOLOGIST', 
