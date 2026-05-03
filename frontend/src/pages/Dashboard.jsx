@@ -3,6 +3,9 @@ import OncologistDashboard from "../components/dashboards/oncologist/OncologistD
 import NurseDashboard from "../components/dashboards/nurse/NurseDashboard"; 
 // 1. Import your new Lab Tech Dashboard
 import LabTechDashboard from "../components/dashboards/lab-tech/LabTechDashboard";
+import PharmacistDashboard from "../components/dashboards/pharmacist/PharmacistDashboard";
+import RadiologistDashboard from "../components/dashboards/radiologist/RadiologistDashboard";
+
 
 const Dashboard = () => {
     // We check for 'designation' first (from your latest API response) 
@@ -28,17 +31,10 @@ const Dashboard = () => {
                 return <OncologistDashboard />; 
 
             case 'PHARMACIST':
-                return (
-                    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-10">
-                        <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mb-4 text-3xl">
-                            💊
-                        </div>
-                        <h2 className="text-2xl font-black text-slate-800 tracking-tighter">Pharmacy Portal</h2>
-                        <p className="text-slate-500 max-w-xs mt-2">
-                            The Salama Pharmacy & Inventory module is currently under deployment.
-                        </p>
-                    </div>
-                );
+                 return <PharmacistDashboard />;
+
+            case 'RADIOLOGIST':
+                return <RadiologistDashboard />;
 
             default:
                 return (

@@ -31,8 +31,8 @@ function App() {
     'PHARMACIST', 
     'BILLING', 
     'STAFF',
-    'LAB_TECH',     // Required for Meryln's module
-    'LABORATORY'    // Support for flexible DB naming
+    'LAB_TECH',
+    'RADIOLOGIST', 
   ];
 
   return (

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Fingerprint, IdCard, Leaf, ArrowRight, Loader2 } from 'lucide-react';
+import salamaBg from '../assets/salama.jpg';
 
 const Login = () => {
     const [employeeId, setEmployeeId] = useState('');
@@ -29,14 +30,18 @@ const Login = () => {
                 localStorage.setItem('user_role', data.designation);
                 
                 // 2. Normalize role for logic check
-                const role = data.designation?.toUpperCase().trim();
+                    const role = data.designation?.toUpperCase().trim();
 
+                    if (!role) {
+                        setError("Account configuration error: No role assigned. Contact Admin.");
+                        return;
+                    }
                 // 3. Hospital Routing Logic
                 // Admins usually have a unique layout, but clinical staff 
                 // should hit the main Dashboard 'brain' at the root (/)
                 if (role === 'HMS ADMIN' || role === 'ADMIN') {
                     navigate('/admin-dashboard');
-                } else if (['ONCOLOGIST', 'NURSE', 'LAB_TECH', 'LABORATORY'].includes(role)) {
+                } else if (['ONCOLOGIST', 'NURSE', 'LAB_TECH', 'LABORATORY', 'PHARMACIST', 'RADIOLOGIST'].includes(role)) {
                     // Send all clinical staff to the root path
                     // ProtectedRoute will verify them, and Dashboard will show the right UI
                     navigate('/'); 
@@ -63,8 +68,8 @@ const Login = () => {
             {/* Background Architecture */}
             <div className="absolute inset-0 z-0">
                 <img 
-                    src="https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?auto=format&fit=crop&q=80&w=2000" 
-                    className="w-full h-full object-cover opacity-20 grayscale"
+                    src={salamaBg}
+                    className="w-full h-full object-cover opacity-15 grayscale"
                     alt="Background"
                 />
                 <div className="absolute inset-0 bg-gradient-to-tr from-slate-950 via-teal-950/30 to-slate-900"></div>
