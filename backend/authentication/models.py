@@ -12,6 +12,9 @@ class User(AbstractUser):
         ('LAB_TECH', 'Lab Technician'),
         ('RADIOLOGIST', 'Radiologist'),
         ('ADMIN', 'HMS Admin'),
+        ('STAFF', 'General Staff'),
+        ('PATIENT', 'Patient'),
+        ('CLIENT', 'Client'),
     ]
     
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='RECEPTIONIST')

@@ -6,7 +6,8 @@ import LabTechDashboard from "../components/dashboards/lab-tech/LabTechDashboard
 import PharmacistDashboard from "../components/dashboards/pharmacist/PharmacistDashboard";
 import RadiologistDashboard from "../components/dashboards/radiologist/RadiologistDashboard";
 import ReceptionistDashboard from "../components/dashboards/receptionist/ReceptionistDashboard"; // Placeholder for Receptionist Dashboard
-
+import BillingOfficerDashboard from "../components/dashboards/billingofficer/BillingOfficerDashboard";
+import PatientDashboard from "../components/dashboards/patient/PatientDashboard";
 
 const Dashboard = () => {
     // We check for 'designation' first (from your latest API response) 
@@ -39,6 +40,13 @@ const Dashboard = () => {
 
             case 'RECEPTIONIST':
                 return <ReceptionistDashboard />; // Placeholder for Receptionist Dashboard
+
+            case 'BILLING_OFFICER':
+                return <BillingOfficerDashboard />;
+
+            case 'PATIENT':
+            case 'CLIENT':
+                return <PatientDashboard />;
 
             default:
                 return (

@@ -32,7 +32,10 @@ function App() {
     'BILLING_OFFICER', 
     'STAFF',
     'LAB_TECH',
-    'RADIOLOGIST', 
+    'RADIOLOGIST',
+    'PATIENT',
+    'CLIENT',
+     
   ];
 
   return (
