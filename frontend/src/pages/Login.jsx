@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, Fingerprint, IdCard, Leaf, ArrowRight, Loader2 } from 'lucide-react';
+import { Lock, Fingerprint, IdCard, Leaf, ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
 import salamaBg from '../assets/salama.jpg';
 
 const Login = () => {
@@ -25,39 +25,20 @@ const Login = () => {
             const data = await response.json();
 
             if (response.ok) {
-                // 1. Securely store credentials
                 localStorage.setItem('access_token', data.access);
                 localStorage.setItem('user_role', data.designation);
-                
-                // 2. Normalize role for logic check
-                    const role = data.designation?.toUpperCase().trim();
+                const role = data.designation?.toUpperCase().trim();
 
-                    if (!role) {
-                        setError("Account configuration error: No role assigned. Contact Admin.");
-                        return;
-                    }
-                // 3. Hospital Routing Logic
-                // Admins usually have a unique layout, but clinical staff 
-                // should hit the main Dashboard 'brain' at the root (/)
                 if (role === 'HMS ADMIN' || role === 'ADMIN') {
                     navigate('/admin-dashboard');
-                } else if (['ONCOLOGIST', 'NURSE', 'LAB_TECH',  'PHARMACIST', 'RADIOLOGIST', 'RECEPTIONIST', 'BILLING_OFFICER', 'PATIENT', 'CLIENT'].includes(role)) {
-                    // Send all clinical staff to the root path
-                    // ProtectedRoute will verify them, and Dashboard will show the right UI
-                    navigate('/'); 
                 } else {
-                    // Fallback for generic staff or unknown roles
                     navigate('/'); 
                 }
             } else {
-                if (response.status === 401) {
-                    setError('Invalid Employee ID or Security Code.');
-                } else {
-                    setError(data.detail || 'Access Denied: Verification Failed');
-                }
+                setError(response.status === 401 ? 'Authentication Failed: Invalid Credentials' : 'Access Denied');
             }
         } catch (err) {
-            setError('Salama Network Connection Error. Contact Admin.');
+            setError('System Connection Error: Verify Server Status');
         } finally {
             setIsLoading(false);
         }
@@ -65,79 +46,75 @@ const Login = () => {
 
     return (
         <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-slate-950 font-['Inter'] antialiased">
-            {/* Background Architecture */}
+            {/* Background Layer */}
             <div className="absolute inset-0 z-0">
                 <img 
                     src={salamaBg}
-                    className="w-full h-full object-cover opacity-15 grayscale"
-                    alt="Background"
+                    className="w-full h-full object-cover"
+                    alt="Hospital Background"
                 />
-                <div className="absolute inset-0 bg-gradient-to-tr from-slate-950 via-teal-950/30 to-slate-900"></div>
+                {/* High-density mask for text protection */}
+                <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-[4px]"></div>
+                <div className="absolute inset-0 bg-gradient-to-b from-slate-950/80 via-transparent to-slate-950/90"></div>
             </div>
 
-            <div className="relative z-10 w-full max-w-md px-6">
-                <div className="bg-white/95 backdrop-blur-2xl p-12 rounded-[3rem] shadow-[0_32px_64px_rgba(0,0,0,0.5)] border border-white/20">
+            <div className="relative z-10 w-full max-w-[480px] px-6">
+                <div className="bg-slate-900/80 backdrop-blur-3xl rounded-[2rem] p-12 shadow-2xl border border-white/20">
                     
-                    {/* Brand Identity */}
-                    <div className="text-center mb-12">
-                        <div className="inline-flex items-center justify-center w-20 h-20 bg-teal-50/50 text-teal-600 rounded-3xl mb-6 shadow-sm animate-pulse">
-                            <Leaf size={40} strokeWidth={1.7} />
+                    {/* Header Section */}
+                    <div className="text-center mb-10">
+                        <div className="inline-flex items-center justify-center w-16 h-16 bg-teal-500 rounded-2xl mb-6">
+                            <Leaf size={36} className="text-slate-950" strokeWidth={2.5} />
                         </div>
-                        <h1 className="text-4xl font-black text-slate-900 tracking-tight font-['Plus_Jakarta_Sans']">
-                            SALAMA <span className="text-teal-600 font-medium">HMS</span>
+                        <h1 className="text-4xl font-black text-white tracking-tight uppercase">
+                            Salama <span className="text-teal-400 font-light">HMS</span>
                         </h1>
-                        <div className="flex items-center justify-center space-x-3 mt-3">
-                            <span className="h-px w-6 bg-teal-100"></span>
-                            <p className="text-[11px] tracking-[0.25em] text-slate-500 uppercase font-bold">
-                                Compassionate Oncology Care
-                            </p>
-                            <span className="h-px w-6 bg-teal-100"></span>
-                        </div>
+                        <p className="text-xs tracking-[0.3em] text-teal-500 font-bold uppercase mt-3">
+                            Oncology Management Portal
+                        </p>
                     </div>
 
-                    <form onSubmit={handleLogin} className="space-y-8">
+                    <form onSubmit={handleLogin} className="space-y-6 font-['Roboto']">
                         {error && (
-                            <div className="p-4 rounded-2xl text-xs font-semibold bg-red-50 text-red-600 border border-red-100 flex items-center animate-in fade-in slide-in-from-top-2 duration-300">
-                                <span className="mr-3 text-lg">⚠️</span> {error}
+                            <div className="p-4 rounded-xl text-xs font-bold bg-red-950/50 text-red-400 border border-red-500/30 flex items-center uppercase tracking-wider">
+                                <ShieldCheck size={18} className="mr-3" /> {error}
                             </div>
                         )}
 
                         <div className="space-y-5">
-                            <div className="group">
-                                <label className="ml-2 block text-[12px] font-bold text-slate-600 uppercase mb-2 tracking-widest">
-                                    Employee ID
+                            <div className="space-y-2">
+                                <label className="text-xs font-black text-white/70 uppercase tracking-widest ml-1">
+                                    Work ID
                                 </label>
                                 <div className="relative">
-                                    <span className="absolute inset-y-0 left-0 flex items-center pl-5 text-slate-400 group-focus-within:text-teal-600 transition-colors">
-                                        <IdCard size={20} strokeWidth={1.5} />
+                                    <span className="absolute inset-y-0 left-0 flex items-center pl-5 text-teal-500/50">
+                                        <IdCard size={20} />
                                     </span>
                                     <input 
                                         type="text" 
-                                        disabled={isLoading}
                                         value={employeeId}
                                         onChange={(e) => setEmployeeId(e.target.value)}
-                                        className="w-full pl-14 pr-6 py-5 bg-slate-50/50 border border-slate-200 rounded-[1.5rem] focus:ring-8 focus:ring-teal-500/5 focus:border-teal-500 focus:bg-white outline-none transition-all placeholder:text-slate-400 text-slate-900 font-medium disabled:opacity-50"
-                                        placeholder="Andrew1964"
+                                        className="w-full pl-14 pr-6 py-5 bg-white/10 border border-white/20 rounded-2xl focus:border-teal-400 focus:bg-white/15 outline-none transition-all text-white placeholder:text-white/20 font-bold text-lg"
+                                        placeholder="Enter ID"
                                         required
                                     />
                                 </div>
                             </div>
 
-                            <div className="group">
-                                <label className="ml-2 block text-[12px] font-bold text-slate-600 uppercase mb-2 tracking-widest">
-                                    Security Code
+                            <div className="space-y-2">
+                                <label className="text-xs font-black text-white/70 uppercase tracking-widest ml-1">
+                                    Password
                                 </label>
                                 <div className="relative">
-                                    <span className="absolute inset-y-0 left-0 flex items-center pl-5 text-slate-400 group-focus-within:text-teal-600 transition-colors">
-                                        <Fingerprint size={20} strokeWidth={1.5} />
+                                    <span className="absolute inset-y-0 left-0 flex items-center pl-5 text-teal-500/50">
+                                        <Fingerprint size={20} />
                                     </span>
                                     <input 
                                         type="password" 
-                                        disabled={isLoading}
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
-                                        className="w-full pl-14 pr-6 py-5 bg-slate-50/50 border border-slate-200 rounded-[1.5rem] focus:ring-8 focus:ring-teal-500/5 focus:border-teal-500 focus:bg-white outline-none transition-all placeholder:text-slate-400 text-slate-900 font-medium disabled:opacity-50"
-                                        placeholder="••••••••••••"
+                                        className="w-full pl-14 pr-6 py-5 bg-white/10 border border-white/20 rounded-2xl focus:border-teal-400 focus:bg-white/15 outline-none transition-all text-white placeholder:text-white/20 font-bold text-lg"
+                                        placeholder="••••••••"
                                         required
                                     />
                                 </div>
@@ -147,26 +124,24 @@ const Login = () => {
                         <button 
                             type="submit" 
                             disabled={isLoading}
-                            className="w-full bg-slate-900 hover:bg-teal-700 text-white font-bold py-5 rounded-[1.5rem] shadow-2xl shadow-teal-900/20 hover:-translate-y-1 transition-all flex items-center justify-center space-x-4 group disabled:bg-slate-700"
+                            className="w-full bg-teal-500 hover:bg-teal-400 text-slate-950 font-black py-5 rounded-2xl transition-all shadow-lg shadow-teal-500/20 active:scale-[0.98] disabled:opacity-50"
                         >
-                            {isLoading ? (
-                                <Loader2 className="animate-spin" size={20} />
-                            ) : (
-                                <>
-                                    <span className="uppercase tracking-[0.15em] text-sm">Verify Credentials</span>
-                                    <ArrowRight size={18} className="group-hover:translate-x-2 transition-transform" />
-                                </>
-                            )}
+                            <div className="flex items-center justify-center space-x-3">
+                                {isLoading ? (
+                                    <Loader2 className="animate-spin" size={24} />
+                                ) : (
+                                    <>
+                                        <span className="uppercase tracking-widest text-sm">Login</span>
+                                        <ArrowRight size={20} />
+                                    </>
+                                )}
+                            </div>
                         </button>
                     </form>
 
-                    <div className="mt-12 text-center">
-                        <p className="text-[10px] text-slate-400 uppercase tracking-[0.2em] font-medium leading-relaxed">
-                            <span className="flex items-center justify-center space-x-2 mb-1 text-slate-300">
-                                <Lock size={12} strokeWidth={2} />
-                                <span>Secured by Salama Network Encryption</span>
-                            </span>
-                        </p>
+                    <div className="mt-12 pt-6 border-t border-white/10 flex items-center justify-center space-x-3 text-white/30 font-bold uppercase tracking-widest text-[10px]">
+                        <Lock size={14} />
+                        <span>Authorized Personnel Only</span>
                     </div>
                 </div>
             </div>

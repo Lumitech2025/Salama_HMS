@@ -48,7 +48,7 @@ const BillingOfficerDashboard = () => {
         {/* Top Navigation Bar */}
         <div className="flex justify-between items-center mb-10">
           <div className="bg-white px-6 py-2.5 rounded-full border border-slate-100 shadow-sm">
-            <span className="text-xs font-black text-slate-400 uppercase tracking-widest mr-2">System Status:</span>
+            <span className="text-xs font-black text-slate-400 uppercase tracking-widest mr-2"></span>
             <span className="text-xs font-bold text-emerald-500 uppercase tracking-tighter">Bank Gateways Online</span>
           </div>
           
