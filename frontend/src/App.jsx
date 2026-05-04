@@ -2,9 +2,9 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import AdminDashboard from './components/dashboards/admin/AdminDashboard'; // Import the new Brain
 import ProtectedRoute from './components/ProtectedRoute';
 
-// Styled Unauthorized Page to match Salama HMS Aesthetic
 const Unauthorized = () => (
   <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white p-6 font-['Inter']">
     <div className="bg-white/5 border border-white/10 p-12 rounded-[3rem] backdrop-blur-xl text-center">
@@ -21,40 +21,42 @@ const Unauthorized = () => (
 );
 
 function App() {
-  // Master list of clinical and administrative roles for Salama HMS
-  const ALL_STAFF = [
-    'ADMIN', 
-    'HMS ADMIN', 
-    'ONCOLOGIST', 
-    'NURSE', 
-    'RECEPTIONIST', 
-    'PHARMACIST', 
-    'BILLING_OFFICER', 
-    'STAFF',
-    'LAB_TECH',
-    'RADIOLOGIST',
-    'PATIENT',
-    'CLIENT',
-     
+  // Roles allowed to access the standard Clinical Dashboard
+  const CLINICAL_STAFF = [
+    'ONCOLOGIST', 'NURSE', 'RECEPTIONIST', 'PHARMACIST', 
+    'BILLING_OFFICER', 'STAFF', 'LAB_TECH', 'RADIOLOGIST', 'PATIENT', 'CLIENT'
   ];
+
+  // Roles allowed to access the High-Level Admin Command Center
+  const ADMIN_ROLES = ['ADMIN', 'HMS ADMIN'];
 
   return (
     <Routes>
-      {/* 1. Main Entry Point: ProtectedRoute evaluates role and renders Dashboard */}
+      {/* 1. Admin Command Center: Specialized layout for system management */}
+      <Route 
+        path="/admin-dashboard" 
+        element={
+          <ProtectedRoute allowedRoles={ADMIN_ROLES}>
+            <AdminDashboard />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* 2. Clinical Dashboard: The main hub for medical staff */}
       <Route 
         path="/" 
         element={
-          <ProtectedRoute allowedRoles={ALL_STAFF}>
+          <ProtectedRoute allowedRoles={[...CLINICAL_STAFF, ...ADMIN_ROLES]}>
             <Dashboard />
           </ProtectedRoute>
         } 
       />
 
-      {/* 2. Authentication & Security Routes */}
+      {/* 3. Authentication & Security Routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/unauthorized" element={<Unauthorized />} />
 
-      {/* 3. Global Fallback: Resolves weird URLs by bouncing to the Gatekeeper (/) */}
+      {/* 4. Global Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
