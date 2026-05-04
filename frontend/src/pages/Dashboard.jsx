@@ -24,7 +24,6 @@ const Dashboard = () => {
                 return <NurseDashboard />;
 
             case 'LAB_TECH':
-            case 'LABORATORY':
                 return <LabTechDashboard />;
             
             case 'ADMIN':
