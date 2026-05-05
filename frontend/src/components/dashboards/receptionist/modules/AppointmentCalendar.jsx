@@ -1,143 +1,269 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  Calendar as CalendarIcon, 
-  ChevronLeft, 
-  ChevronRight, 
-  Clock, 
-  UserCheck, 
-  MapPin,
-  Filter
+  Calendar as CalendarIcon, Clock, UserCheck, 
+  PlusCircle, Search, ClipboardList, Loader2 
 } from 'lucide-react';
+
+// Dynamically use the Vite environment variable
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api';
 
 const AppointmentCalendar = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [visitType, setVisitType] = useState('New');
+  const [appointments, setAppointments] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Sample Data - This will eventually be fetched from your Django API
-  const appointments = [
-    { id: 1, patient: 'Alice Njeri', time: '09:00 AM', dept: 'Oncology', type: 'Chemotherapy', status: 'Confirmed' },
-    { id: 2, patient: 'Kevin Mutua', time: '10:30 AM', dept: 'Radiology', type: 'CT Scan', status: 'Checked-in' },
-    { id: 3, patient: 'Sarah Chen', time: '11:15 AM', dept: 'General', type: 'Consultation', status: 'Pending' },
-  ];
+  const [formData, setFormData] = useState({ 
+    patientName: '', 
+    practitioner: '', 
+    time: '', 
+    reason: '',
+    patientId: '' 
+  });
+
+  // Fetch appointments on mount
+  useEffect(() => {
+    fetchAppointments();
+  }, []);
+
+  const fetchAppointments = async () => {
+    setIsLoading(true);
+    try {
+      // Ensure the trailing slash is present for Django
+      const response = await fetch(`${API_BASE_URL}/appointments/`);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const data = await response.json();
+      setAppointments(data);
+    } catch (error) {
+      console.error("Fetch failure:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleConfirmBooking = async () => {
+    if (!formData.patientName || !formData.time) {
+      alert("Please fill in required fields (Patient Name and Time)");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/appointments/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Use snake_case for the backend keys
+        body: JSON.stringify({ 
+          patient_name: formData.patientName, 
+          patient_id: formData.patientId,
+          practitioner: formData.practitioner, 
+          appointment_time: formData.time, 
+          reason: formData.reason,
+          visit_type: visitType,
+          appointment_date: currentDate.toISOString().split('T')[0]
+        }),
+      });
+
+      if (response.ok) {
+        await fetchAppointments();
+        setFormData({ patientName: '', practitioner: '', time: '', reason: '', patientId: '' });
+        alert("Booking Confirmed!");
+      } else {
+        const errorData = await response.json();
+        alert(`Server Error: ${JSON.stringify(errorData)}`);
+      }
+    } catch (error) {
+      console.error("Booking failed:", error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-700">
+    <div className="max-w-[1400px] mx-auto space-y-8 animate-in fade-in duration-700 pb-12 font-['Plus_Jakarta_Sans']">
       
-      {/* Calendar Header Controls */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
-        <div className="flex items-center space-x-4">
-          <div className="bg-slate-900 text-white p-3 rounded-2xl">
-            <CalendarIcon size={24} />
-          </div>
-          <div>
-            <h2 className="text-xl font-black text-slate-900 tracking-tight">
-              {currentDate.toLocaleDateString('en-KE', { month: 'long', year: 'numeric' })}
-            </h2>
-            <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest">Appointment Scheduler</p>
-          </div>
+      {/* SECTION 1: THE BOOKING ENGINE */}
+      <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-xl overflow-hidden">
+        <div className="bg-[#020617] p-8 flex justify-between items-center">
+            <div className="flex items-center gap-4">
+                <div className="bg-teal-500 p-3 rounded-2xl text-white shadow-lg shadow-teal-500/20">
+                    <PlusCircle size={24} />
+                </div>
+                <div>
+                    <h2 className="text-xl font-extrabold text-white tracking-tight">NEW BOOKING</h2>
+                    <p className="text-teal-400 text-[10px] font-bold uppercase tracking-[0.2em]">Schedule Patient Consultation</p>
+                </div>
+            </div>
+            
+            <div className="flex bg-slate-800/50 p-1.5 rounded-xl border border-white/5">
+                <button 
+                    onClick={() => setVisitType('New')}
+                    className={`px-6 py-2 rounded-lg text-[10px] font-extrabold uppercase transition-all ${visitType === 'New' ? 'bg-teal-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}
+                >New Visit</button>
+                <button 
+                    onClick={() => setVisitType('Subsequent')}
+                    className={`px-6 py-2 rounded-lg text-[10px] font-extrabold uppercase transition-all ${visitType === 'Subsequent' ? 'bg-teal-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200'}`}
+                >Subsequent</button>
+            </div>
         </div>
 
-        <div className="flex items-center space-x-2 bg-slate-50 p-2 rounded-2xl border border-slate-100">
-          <button className="p-2 hover:bg-white hover:shadow-sm rounded-xl transition-all text-slate-600"><ChevronLeft size={20} /></button>
-          <button className="px-6 py-2 bg-white shadow-sm rounded-xl text-xs font-black text-slate-900 uppercase tracking-widest">Today</button>
-          <button className="p-2 hover:bg-white hover:shadow-sm rounded-xl transition-all text-slate-600"><ChevronRight size={20} /></button>
-        </div>
+        <div className="p-10 grid grid-cols-1 md:grid-cols-4 gap-8">
+            {visitType === 'Subsequent' && (
+                <div className="space-y-2 col-span-1">
+                    <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-1">Patient Unique ID</label>
+                    <div className="relative">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <input 
+                          name="patientId"
+                          value={formData.patientId}
+                          onChange={handleInputChange}
+                          type="text" 
+                          placeholder="e.g. SAL-101" 
+                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all" 
+                        />
+                    </div>
+                </div>
+            )}
 
-        <button className="flex items-center space-x-2 bg-teal-50 text-teal-700 px-5 py-3 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-teal-100 transition-all">
-          <Filter size={16} />
-          <span>Filter by Dept</span>
-        </button>
+            <div className={`space-y-2 ${visitType === 'New' ? 'col-span-2' : 'col-span-1'}`}>
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-1">Patient Full Name</label>
+                <input 
+                  name="patientName"
+                  value={formData.patientName}
+                  onChange={handleInputChange}
+                  type="text" 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-6 text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none transition-all" 
+                  placeholder="Enter full name" 
+                />
+            </div>
+
+            <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-1">Practitioner</label>
+                <select 
+                  name="practitioner"
+                  value={formData.practitioner}
+                  onChange={handleInputChange}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-6 text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none appearance-none cursor-pointer"
+                >
+                    <option value="">Select Specialist</option>
+                    <option value="Oncologist">Oncologist</option>
+                    <option value="Surgeon">Surgeon</option>
+                    <option value="Hematologist">Hematologist</option>
+                    <option value="Psychologist">Psychologist</option>
+                </select>
+            </div>
+
+            <div className="space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-1">Time Slot</label>
+                <div className="relative">
+                    <Clock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input 
+                      name="time"
+                      value={formData.time}
+                      onChange={handleInputChange}
+                      type="time" 
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-sm font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all" 
+                    />
+                </div>
+            </div>
+
+            <div className="col-span-1 md:col-span-3 space-y-2">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest px-1">Reason for Visit</label>
+                <input 
+                  name="reason"
+                  value={formData.reason}
+                  onChange={handleInputChange}
+                  type="text" 
+                  placeholder="e.g. Initial consultation..." 
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-6 text-sm font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all" 
+                />
+            </div>
+
+            <div className="flex items-end">
+                <button 
+                  disabled={isSubmitting}
+                  onClick={handleConfirmBooking}
+                  className="w-full bg-teal-600 text-white py-4 rounded-2xl font-extrabold text-xs uppercase tracking-[0.1em] hover:bg-[#020617] transition-all shadow-lg shadow-teal-600/20 active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                    {isSubmitting && <Loader2 size={16} className="animate-spin" />}
+                    Confirm Booking
+                </button>
+            </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
-        {/* Left Side: Date Picker / Stats (4/12) */}
-        <div className="lg:col-span-4 space-y-6">
-          <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white shadow-xl">
-            <h3 className="text-xs font-black text-teal-400 uppercase tracking-[0.2em] mb-6">Today's Summary</h3>
-            <div className="space-y-6">
-              <div className="flex justify-between items-center border-b border-white/10 pb-4">
-                <span className="text-slate-400 font-bold text-sm">Total Booked</span>
-                <span className="text-2xl font-black">24</span>
-              </div>
-              <div className="flex justify-between items-center border-b border-white/10 pb-4">
-                <span className="text-slate-400 font-bold text-sm">Arrived</span>
-                <span className="text-2xl font-black text-teal-400">08</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400 font-bold text-sm">No-shows</span>
-                <span className="text-2xl font-black text-red-400">02</span>
-              </div>
+      {/* SECTION 2: THE DAILY SCHEDULE TABLE */}
+      <div className="bg-white rounded-[3rem] border border-slate-200 shadow-sm overflow-hidden min-h-[400px]">
+        <div className="p-8 bg-slate-50/50 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div className="flex items-center gap-4">
+                <div className="bg-white p-3 rounded-2xl shadow-sm border border-slate-100 text-teal-600">
+                    <ClipboardList size={20} />
+                </div>
+                <div>
+                    <h3 className="font-extrabold text-slate-900 tracking-tight text-lg">Active Schedule</h3>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{currentDate.toDateString()}</p>
+                </div>
             </div>
-          </div>
-
-          <div className="bg-white rounded-[2.5rem] border border-slate-200 p-8">
-             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Quick Legend</h4>
-             <div className="space-y-3">
-                <div className="flex items-center space-x-3 text-xs font-bold text-slate-600">
-                  <div className="w-3 h-3 bg-teal-500 rounded-full"></div>
-                  <span>Confirmed</span>
-                </div>
-                <div className="flex items-center space-x-3 text-xs font-bold text-slate-600">
-                  <div className="w-3 h-3 bg-amber-500 rounded-full"></div>
-                  <span>Pending Payment</span>
-                </div>
-             </div>
-          </div>
+            {isLoading && <Loader2 size={24} className="animate-spin text-teal-600" />}
         </div>
 
-        {/* Right Side: Appointment List (8/12) */}
-        <div className="lg:col-span-8 bg-white rounded-[3rem] border border-slate-200 shadow-sm overflow-hidden">
-          <div className="p-8 border-b border-slate-50 flex justify-between items-center">
-             <h3 className="font-black text-slate-900 tracking-tight">Active Schedule</h3>
-             <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-3 py-1 rounded-full uppercase tracking-widest">
-               {currentDate.toDateString()}
-             </span>
-          </div>
-
-          <div className="divide-y divide-slate-50">
-            {appointments.map((appt) => (
-              <div key={appt.id} className="p-6 hover:bg-slate-50 transition-colors flex flex-col md:flex-row md:items-center justify-between group">
-                <div className="flex items-center space-x-6">
-                  <div className="text-center min-w-[60px]">
-                    <p className="text-sm font-black text-slate-900">{appt.time.split(' ')[0]}</p>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase">{appt.time.split(' ')[1]}</p>
-                  </div>
-                  
-                  <div className="h-10 w-px bg-slate-100 hidden md:block"></div>
-
-                  <div>
-                    <p className="font-black text-slate-800 text-lg group-hover:text-teal-600 transition-colors">{appt.patient}</p>
-                    <div className="flex items-center space-x-3 mt-1">
-                      <span className="flex items-center text-[10px] font-black text-slate-400 uppercase tracking-tighter">
-                        <MapPin size={12} className="mr-1" /> {appt.dept}
-                      </span>
-                      <span className="text-slate-200">•</span>
-                      <span className="text-[10px] font-bold text-slate-500 italic">{appt.type}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 md:mt-0 flex items-center space-x-4">
-                  <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
-                    appt.status === 'Checked-in' ? 'bg-teal-100 text-teal-700' : 'bg-slate-100 text-slate-500'
-                  }`}>
-                    {appt.status}
-                  </span>
-                  <button className="p-3 bg-slate-900 text-white rounded-2xl hover:bg-teal-600 transition-all shadow-lg shadow-slate-900/10">
-                    <UserCheck size={18} />
-                  </button>
-                </div>
+        <div className="overflow-x-auto">
+            <table className="w-full text-left">
+                <thead>
+                    <tr className="border-b border-slate-50">
+                        <th className="px-10 py-6 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Time</th>
+                        <th className="px-10 py-6 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Patient Details</th>
+                        <th className="px-10 py-6 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest text-center">Specialist</th>
+                        <th className="px-10 py-6 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">Reason</th>
+                        <th className="px-10 py-6 text-[10px] font-extrabold text-slate-400 uppercase tracking-widest text-right">Action</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                    {!isLoading && appointments.map((appt) => (
+                        <tr key={appt.id || appt.patient_name} className="group hover:bg-teal-50/30 transition-all cursor-default">
+                            <td className="px-10 py-6">
+                                <div className="flex items-center gap-3">
+                                    <Clock size={14} className="text-teal-500" />
+                                    <span className="font-bold text-slate-900 text-sm">{appt.appointment_time || appt.time}</span>
+                                </div>
+                            </td>
+                            <td className="px-10 py-6">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 font-bold group-hover:bg-white group-hover:shadow-sm transition-all">
+                                        {(appt.patient_name || appt.patientName)?.charAt(0) || 'P'}
+                                    </div>
+                                    <span className="font-bold text-slate-900">{appt.patient_name || appt.patientName}</span>
+                                </div>
+                            </td>
+                            <td className="px-10 py-6 text-center">
+                                <span className="bg-slate-100 text-slate-500 px-3 py-1.5 rounded-lg text-[9px] font-extrabold uppercase tracking-widest group-hover:bg-teal-100 group-hover:text-teal-700 transition-colors">
+                                    {appt.practitioner}
+                                </span>
+                            </td>
+                            <td className="px-10 py-6">
+                                <span className="text-sm text-slate-500 font-semibold">{appt.reason}</span>
+                            </td>
+                            <td className="px-10 py-6 text-right">
+                                <button className="bg-[#020617] text-white p-3 rounded-xl hover:bg-teal-600 transition-all shadow-lg shadow-slate-900/10 active:scale-90">
+                                    <UserCheck size={16} />
+                                </button>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+            {!isLoading && appointments.length === 0 && (
+              <div className="p-20 text-center text-slate-400 font-bold uppercase tracking-widest text-xs">
+                No appointments found for today
               </div>
-            ))}
-          </div>
-          
-          <div className="p-8 bg-slate-50/50 text-center">
-            <button className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] hover:text-slate-600 transition-colors">
-              Load more appointments
-            </button>
-          </div>
+            )}
         </div>
-
       </div>
     </div>
   );

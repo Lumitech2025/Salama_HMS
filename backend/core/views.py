@@ -1,40 +1,81 @@
 from rest_framework import viewsets, filters, permissions, status
 from rest_framework.response import Response
+from rest_framework.decorators import action
+from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 # Import local models and serializers
-from .models import Patient, Protocol, Treatment, ChemoSession, Drug, LabResult, Bill
+from .models import (
+    Patient, Protocol, Treatment, ChemoSession, Drug, 
+    LabResult, Bill, Appointment, VitalSign
+)
 from .serializers import (
     PatientSerializer, ProtocolSerializer, TreatmentSerializer, 
     ChemoSessionSerializer, DrugSerializer, LabResultSerializer, 
-    BillSerializer, SalamaTokenObtainPairSerializer
+    BillSerializer, SalamaTokenObtainPairSerializer,
+    AppointmentSerializer, VitalSignSerializer
 )
 
 # --- 1. ROBUST PERMISSION LOGIC ---
+
+class IsReceptionStaff(permissions.BasePermission):
+    """Allows Front Desk to manage appointments and registration."""
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        user_role = getattr(request.user, 'role', '')
+        return user_role in ['RECEPTIONIST', 'ADMIN']
 
 class IsClinicalStaff(permissions.BasePermission):
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
-        user_role = getattr(request.user, 'role', getattr(request.user, 'designation', ''))
-        return user_role in ['ONCOLOGIST', 'NURSE', 'LAB_TECH', 'ADMIN']
+        user_role = getattr(request.user, 'role', '')
+        return user_role in ['ONCOLOGIST', 'NURSE', 'LAB_TECH', 'HEMATOLOGIST', 'SURGEON', 'ADMIN']
 
 class IsFinancialStaff(permissions.BasePermission):
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
             return False
-        user_role = getattr(request.user, 'role', getattr(request.user, 'designation', ''))
+        user_role = getattr(request.user, 'role', '')
         return user_role in ['BILLING', 'ADMIN']
-
 
 # --- 2. THE API GATEWAY ---
 class SalamaTokenObtainPairView(TokenObtainPairView):
-    """Checkpoint for the React app using employeeID -> username mapping."""
     serializer_class = SalamaTokenObtainPairSerializer
 
+# --- 3. FRONT DESK & SCHEDULING ---
 
-# --- 3. CLINICAL VIEWSETS (API) ---
+class AppointmentViewSet(viewsets.ModelViewSet):
+    """
+    Powers the AppointmentCalendar.jsx. 
+    Handles booking logic and the transition to Triage.
+    """
+    queryset = Appointment.objects.all().order_by('appointment_date', 'appointment_time')
+    serializer_class = AppointmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['appointment_date', 'status', 'visit_type', 'practitioner']
+    search_fields = ['patient__name', 'manual_patient_name']
+
+    @action(detail=True, methods=['post'])
+    def check_in(self, request, pk=None):
+        """
+        TRIGGERED BY FRONTEND: UserCheck Icon in Appointment Table.
+        Moves patient from 'Confirmed' to 'Checked-in'.
+        """
+        appointment = self.get_object()
+        appointment.status = 'CHECKED_IN'
+        appointment.save()
+        
+        # Expert Tip: In a real HMS, this would trigger a notification 
+        # on the Nurse's Triage dashboard.
+        return Response({
+            'status': 'Checked-in Success',
+            'patient': appointment.patient.name if appointment.patient else appointment.manual_patient_name,
+            'timestamp': timezone.now()
+        }, status=status.HTTP_200_OK)
 
 class PatientViewSet(viewsets.ModelViewSet):
     """Registry with optimized search for the PatientDirectory UI."""
@@ -42,21 +83,73 @@ class PatientViewSet(viewsets.ModelViewSet):
     serializer_class = PatientSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    # search_fields must match the 'searchTerm' logic in your React directory[cite: 3]
     search_fields = ['name', 'registry_no', 'cancer_type', 'phone']
 
+    @action(detail=True, methods=['post'])
+    def verify_insurance(self, request, pk=None):
+        patient = self.get_object()
+        patient.insurance_verified = True
+        patient.last_verification_date = timezone.now()
+        patient.insurance_no = request.data.get('insurance_no', patient.insurance_no)
+        patient.insurance_type = request.data.get('insurance_type', patient.insurance_type)
+        patient.benefit_balance = request.data.get('balance', patient.benefit_balance)
+        
+        patient.save()
+        return Response({
+            'status': 'Verification Success',
+            'verified_at': patient.last_verification_date
+        }, status=status.HTTP_200_OK)
+
+# --- 4. CLINICAL & TRIAGE ---
+
+class VitalSignViewSet(viewsets.ModelViewSet):
+    """
+    Captured during Triage. 
+    Vital for dose calculation in Oncology.
+    """
+    queryset = VitalSign.objects.all().order_by('-created_at')
+    serializer_class = VitalSignSerializer
+    permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
+    filterset_fields = ['patient']
+
+    def perform_create(self, serializer):
+        # Automatically tag the nurse/doctor who took the vitals
+        serializer.save(recorded_by=self.request.user)
+
 class TreatmentViewSet(viewsets.ModelViewSet):
-    """Manages plans. Restricted to clinical personnel."""
     serializer_class = TreatmentSerializer
     permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
     filterset_fields = ['patient', 'status']
 
     def get_queryset(self):
-        # select_related avoids the N+1 problem by joining tables in one query
         return Treatment.objects.select_related('patient', 'protocol', 'oncologist').all()
 
+class ChemoSessionViewSet(viewsets.ModelViewSet):
+    queryset = ChemoSession.objects.all()
+    serializer_class = ChemoSessionSerializer
+    permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
+    filterset_fields = ['treatment']
+    
+    def perform_create(self, serializer):
+        serializer.save(administered_by=self.request.user)
+
+# --- 5. ADMINISTRATIVE & INVENTORY ---
+
+class BillViewSet(viewsets.ModelViewSet):
+    queryset = Bill.objects.all()
+    serializer_class = BillSerializer
+    permission_classes = [permissions.IsAuthenticated, IsFinancialStaff]
+    filterset_fields = ['patient', 'is_paid']
+
+    @action(detail=True, methods=['post'])
+    def mark_as_paid(self, request, pk=None):
+        bill = self.get_object()
+        bill.is_paid = True
+        bill.billing_officer = request.user
+        bill.save()
+        return Response({'status': 'Payment Confirmed'})
+
 class LabResultViewSet(viewsets.ModelViewSet):
-    """Diagnostic data. Critical results prioritized."""
     serializer_class = LabResultSerializer
     permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
     filterset_fields = ['patient', 'is_critical']
@@ -64,32 +157,11 @@ class LabResultViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return LabResult.objects.order_by('-is_critical', '-test_date')
 
-class ChemoSessionViewSet(viewsets.ModelViewSet):
-    """Tracks drug administrations and audits the provider[cite: 2]."""
-    queryset = ChemoSession.objects.all()
-    serializer_class = ChemoSessionSerializer
-    permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
-    filterset_fields = ['treatment']
-    
-    def perform_create(self, serializer):
-        # Automatically logs which staff member administered the session
-        serializer.save(administered_by=self.request.user)
-
-
-# --- 4. ADMINISTRATIVE & INVENTORY ---
-
 class DrugViewSet(viewsets.ModelViewSet):
     queryset = Drug.objects.all()
     serializer_class = DrugSerializer
     permission_classes = [permissions.IsAuthenticated]
     search_fields = ['name', 'batch_no']
-
-class BillViewSet(viewsets.ModelViewSet):
-    """Restricted to Billing/Admin for patient privacy[cite: 2]."""
-    queryset = Bill.objects.all()
-    serializer_class = BillSerializer
-    permission_classes = [permissions.IsAuthenticated, IsFinancialStaff]
-    filterset_fields = ['patient', 'is_paid']
 
 class ProtocolViewSet(viewsets.ModelViewSet):
     queryset = Protocol.objects.all()

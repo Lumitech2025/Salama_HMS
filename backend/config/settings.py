@@ -135,7 +135,12 @@ CORS_ALLOWED_ORIGINS = [
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-    )
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        # For now, allow any request so you can see your data. 
+        # We will change this to IsAuthenticated once login is ready.
+        'rest_framework.permissions.AllowAny', 
+    ),
 }
 
 JAZZMIN_SETTINGS = {

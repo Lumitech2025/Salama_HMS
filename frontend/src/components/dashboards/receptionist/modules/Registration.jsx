@@ -121,7 +121,7 @@ const Registration = () => {
             Salama <span className="text-teal-600">Registration</span>
           </h1>
           <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mt-1">
-            New Electronic Health Record (EHR) Creation
+            Electronic Health Record (EHR) Creation
           </p>
         </div>
         

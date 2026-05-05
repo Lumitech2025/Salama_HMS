@@ -9,19 +9,22 @@ import {
     ListOrdered,
     LogOut,
     UserCircle,
-    Settings
+    Settings,
+    Stethoscope // Added for Triage
 } from 'lucide-react';
 
 const ReceptionistSidebar = ({ activeTab, setActiveTab }) => {
     const navigate = useNavigate();
 
+    // Reordered to match the clinical linear workflow
     const menuItems = [
-        { id: 'overview', label: 'Dashboard Home', icon: <LayoutDashboard size={20} /> },
-        { id: 'registration', label: 'Patient Registration', icon: <UserPlus size={20} /> },
-        { id: 'insurance', label: 'SHA/Insurance Verify', icon: <ShieldCheck size={20} /> },
+        { id: 'overview', label: 'Home', icon: <LayoutDashboard size={20} /> },
         { id: 'appointments', label: 'Appointments', icon: <CalendarClock size={20} /> },
+        { id: 'registration', label: 'Registration Desk', icon: <UserPlus size={20} /> },
+        { id: 'triage', label: 'Triage', icon: <Stethoscope size={20} /> },
+        { id: 'insurance', label: 'Insurance', icon: <ShieldCheck size={20} /> },
         { id: 'billing', label: 'Billing & Payments', icon: <WalletCards size={20} /> },
-        { id: 'queue', label: 'Live Queue Status', icon: <ListOrdered size={20} /> },
+        { id: 'queue', label: 'Queue Status', icon: <ListOrdered size={20} /> },
     ];
 
     const handleLogout = () => {
@@ -40,15 +43,17 @@ const ReceptionistSidebar = ({ activeTab, setActiveTab }) => {
                     <h1 className="text-2xl font-black text-white tracking-tighter uppercase italic">
                         SALAMA <span className="text-teal-500 not-italic font-light">HMS</span>
                     </h1>
-                    <p className="text-[10px] text-teal-500/80 font-black uppercase tracking-[0.3em] mt-1">
+                    <p className="text-[8px] text-teal-500/80 font-black uppercase tracking-[0.3em] mt-1">
                         Front Desk Operations
                     </p>
                 </div>
             </div>
 
-            {/* Workflow Navigation */}
+            {/* Workflow Navigation - Now clearly labeled as a Main Workflow */}
             <nav className="flex-1 space-y-2 overflow-y-auto no-scrollbar pr-2">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 px-6">Main Workflow</p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6 px-6">
+                    Main Workflow
+                </p>
                 {menuItems.map((item) => (
                     <button
                         key={item.id}
