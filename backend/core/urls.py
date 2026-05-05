@@ -11,19 +11,33 @@ from .views import (
 )
 
 # --- 1. ROUTER CONFIGURATION ---
-# We keep this as the central nervous system for clinical data.
+# The DefaultRouter automatically generates URL patterns for our viewsets.
+# For example: 'api/patients/' (GET all, POST new) and 'api/patients/1/' (GET one, PUT, DELETE).
 router = DefaultRouter()
+
+# Maps to Registration.jsx and PatientDirectory.jsx
 router.register(r'patients', PatientViewSet)
+
+# Maps to Oncology Protocol Management
 router.register(r'protocols', ProtocolViewSet)
+
+# Maps to the Treatment Timeline in the UI
 router.register(r'treatments', TreatmentViewSet, basename='treatment')
+
+# Maps to Nurse/Triage administration logs
 router.register(r'chemo-sessions', ChemoSessionViewSet)
+
+# Maps to Pharmacy/Inventory tracking
 router.register(r'drugs', DrugViewSet)
+
+# Maps to Diagnostic/Lab workflows
 router.register(r'lab-results', LabResultViewSet, basename='lab-result')
+
+# Maps to Billing and Insurance processing
 router.register(r'bills', BillViewSet, basename='bill')
 
 urlpatterns = [
     # --- 2. CLINICAL DATA ENDPOINTS ---
-    # Since config/urls.py already uses path('api/', include('core.urls')),
-    # these will be accessible at http://127.0.0.1:8000/api/patients/, etc.
+    # These routes are hooked into the 'api/' prefix defined in your main config/urls.py.
     path('', include(router.urls)),
 ]

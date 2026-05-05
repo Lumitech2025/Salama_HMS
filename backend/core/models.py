@@ -9,18 +9,27 @@ class Patient(models.Model):
     GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
     BLOOD_GROUPS = [('A+', 'A+'), ('A-', 'A-'), ('B+', 'B+'), ('B-', 'B-'), ('O+', 'O+'), ('O-', 'O-'), ('AB+', 'AB+'), ('AB-', 'AB-')]
     
-    name = models.CharField(max_length=255)
-    registry_no = models.CharField(max_length=50, unique=True)
+    # Core Identity
+    name = models.CharField(max_length=255) # Concatenated firstName + lastName
+    registry_no = models.CharField(max_length=50, unique=True) # National ID/Passport
     dob = models.DateField(verbose_name="Date of Birth")
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
     blood_group = models.CharField(max_length=3, choices=BLOOD_GROUPS, blank=True)
+    phone = models.CharField(max_length=20, blank=True)
     
     # Oncology Specifics
     cancer_type = models.CharField(max_length=255)
     staging = models.CharField(max_length=50, blank=True)
+    # Vital for the PatientSerializer and oncology triage
+    ecog_status = models.IntegerField(default=0, help_text="0-5 Performance Status") 
     biomarkers = models.TextField(blank=True, help_text="Relevant genetic or protein markers")
     
-    emergency_contact = models.CharField(max_length=255, blank=True)
+    # Billing & Insurance
+    insurance_type = models.CharField(max_length=50, default="CASH")
+    insurance_no = models.CharField(max_length=100, blank=True)
+    
+    # Emergency Contact
+    emergency_contact = models.CharField(max_length=255, blank=True) 
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

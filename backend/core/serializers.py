@@ -9,47 +9,36 @@ User = get_user_model()
 class SalamaTokenObtainPairSerializer(TokenObtainPairSerializer):
     """
     Custom JWT Serializer for Salama HMS.
-    Maps frontend fields to Django's internal auth fields.
+    Maps Vite/React fields (employeeID) to Django's internal username.
     """
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
-
-        # "Stamp" user data into the encrypted token payload
-        # Using getattr to support both 'role' and 'designation' fields safely
+        # Use getattr to safely handle custom user roles or designations
         token['role'] = getattr(user, 'role', getattr(user, 'designation', 'STAFF'))
         token['username'] = user.username
         return token
 
     def validate(self, attrs):
-        # --- FIELD MAPPING FOR REACT FRONTEND ---
-        # Intercept the 'employeeID' and 'securityCode' from Vite
+        # FIELD MAPPING: Intercept 'employeeID' from the React login form
         data_input = self.context['request'].data
-        
-        # Inject them into the expected Django 'username' and 'password' keys
-        # This solves the "No active account found" error
         attrs['username'] = data_input.get('employeeID', attrs.get('username'))
         attrs['password'] = data_input.get('securityCode', attrs.get('password'))
 
-        # Now run the standard validation
         data = super().validate(attrs)
         
-        # Return plain-text info to the frontend for UI routing
         user_role = getattr(self.user, 'role', getattr(self.user, 'designation', 'STAFF'))
-        
-        # If it's a superuser, default to ADMIN if no role is set
         if self.user.is_superuser and user_role == 'STAFF':
             user_role = 'ADMIN'
 
         data['role'] = user_role
         data['username'] = self.user.username
         data['name'] = self.user.get_full_name() or self.user.username
-        
         return data
 
 # --- 2. USER SERIALIZER ---
 class UserSerializer(serializers.ModelSerializer):
-    """Clean representation of hospital staff."""
+    """Representation of hospital staff for assignments."""
     full_name = serializers.SerializerMethodField()
     role_display = serializers.SerializerMethodField()
 
@@ -70,7 +59,6 @@ class ProtocolSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ChemoSessionSerializer(serializers.ModelSerializer):
-    # Relational details for the UI
     administered_by_details = UserSerializer(source='administered_by', read_only=True)
     
     class Meta:
@@ -79,8 +67,7 @@ class ChemoSessionSerializer(serializers.ModelSerializer):
 
 class TreatmentSerializer(serializers.ModelSerializer):
     protocol_details = ProtocolSerializer(source='protocol', read_only=True)
-    # Nested sessions for the timeline view
-    sessions = ChemoSessionSerializer(many=True, read_only=True, source='chemosession_set')
+    sessions = ChemoSessionSerializer(many=True, read_only=True, source='sessions') # Corrected source name
     oncologist_name = serializers.CharField(source='oncologist.get_full_name', read_only=True)
 
     class Meta:
@@ -88,15 +75,18 @@ class TreatmentSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class PatientSerializer(serializers.ModelSerializer):
-    # Full clinical history nested within the patient profile
+    """
+    Enhanced Patient Serializer including the new Insurance and Phone fields.
+    """
     treatments = TreatmentSerializer(many=True, read_only=True)
     
     class Meta:
         model = Patient
         fields = [
-            'id', 'name', 'registry_no', 'dob', 'gender', 
-            'cancer_type', 'staging', 'biomarkers', 'ecog_status', 
-            'treatments', 'created_at'
+            'id', 'name', 'registry_no', 'dob', 'gender', 'phone', # Added phone
+            'blood_group', 'cancer_type', 'staging', 'ecog_status', 
+            'biomarkers', 'insurance_type', 'insurance_no', # Added billing
+            'emergency_contact', 'treatments', 'created_at'
         ]
 
 # --- 4. SUPPORT SERVICES ---
