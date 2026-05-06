@@ -1,5 +1,7 @@
 from django.db import models
 from django.conf import settings
+from datetime import date
+import math
 
 # --- Clinical Models ---
 
@@ -7,16 +9,16 @@ class Patient(models.Model):
     GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
     BLOOD_GROUPS = [('A+', 'A+'), ('A-', 'A-'), ('B+', 'B+'), ('B-', 'B-'), ('O+', 'O+'), ('O-', 'O-'), ('AB+', 'AB+'), ('AB-', 'AB-')]
     
-    # Core Identity
     name = models.CharField(max_length=255) 
     registry_no = models.CharField(max_length=50, unique=True) 
-    dob = models.DateField(verbose_name="Date of Birth")
+    dob = models.DateField(verbose_name="Date of Birth", null=True, blank=True)
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
     blood_group = models.CharField(max_length=3, choices=BLOOD_GROUPS, blank=True)
     phone = models.CharField(max_length=20, blank=True)
+    email = models.EmailField(blank=True, null=True)
     
     # Oncology Specifics
-    cancer_type = models.CharField(max_length=255)
+    cancer_type = models.CharField(max_length=255, default="General")
     staging = models.CharField(max_length=50, blank=True)
     ecog_status = models.IntegerField(default=0, help_text="0-5 Performance Status") 
     biomarkers = models.TextField(blank=True, help_text="Relevant genetic or protein markers")
@@ -31,10 +33,17 @@ class Patient(models.Model):
     emergency_contact = models.CharField(max_length=255, blank=True) 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    @property
+    def current_age(self):
+        if self.dob:
+            today = date.today()
+            return today.year - self.dob.year - ((today.month, today.day) < (self.dob.month, self.dob.day))
+        return None
+
     def __str__(self):
         return f"{self.name} ({self.registry_no})"
 
-# --- NEW: Appointment & Triage Workflow ---
+# --- Appointment & Triage Workflow ---
 
 class Appointment(models.Model):
     VISIT_TYPE_CHOICES = [('NEW', 'New Visit'), ('SUBSEQUENT', 'Subsequent Visit')]
@@ -46,9 +55,8 @@ class Appointment(models.Model):
         ('COMPLETED', 'Completed'),
     ]
 
-    # Link to patient (Optional if it's a first-time phone booking)
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, null=True, blank=True, related_name='appointments')
-    manual_patient_name = models.CharField(max_length=255, blank=True, help_text="Used for New visits before registration")
+    manual_patient_name = models.CharField(max_length=255, blank=True, help_text="For new registrations")
     
     practitioner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -66,25 +74,41 @@ class Appointment(models.Model):
 
     def __str__(self):
         name = self.patient.name if self.patient else self.manual_patient_name
-        return f"{name} - {self.appointment_date} @ {self.appointment_time}"
+        return f"{name} - {self.appointment_date}"
 
 class VitalSign(models.Model):
-    """Captured during Triage"""
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='vitals')
     appointment = models.OneToOneField(Appointment, on_delete=models.CASCADE, null=True, blank=True)
+    
     temperature = models.DecimalField(max_digits=4, decimal_places=1, help_text="°C")
-    blood_pressure = models.CharField(max_length=10, help_text="e.g., 120/80")
+    systolic_bp = models.PositiveIntegerField(help_text="mmHg")
+    diastolic_bp = models.PositiveIntegerField(help_text="mmHg")
     heart_rate = models.PositiveIntegerField(help_text="bpm")
     respiratory_rate = models.PositiveIntegerField(blank=True, null=True)
     weight = models.DecimalField(max_digits=5, decimal_places=2, help_text="kg")
+    height = models.DecimalField(max_digits=5, decimal_places=2, help_text="cm")
     spo2 = models.PositiveIntegerField(verbose_name="Oxygen Saturation %", blank=True, null=True)
+    
     recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    def __str__(self):
-        return f"Vitals for {self.patient.name} on {self.created_at.date()}"
+    @property
+    def bmi(self):
+        if self.weight and self.height:
+            height_m = self.height / 100
+            return round(float(self.weight) / (float(height_m) ** 2), 2)
+        return None
 
-# --- Existing Models Continued ---
+    @property
+    def bsa(self):
+        """Calculates Body Surface Area using the Mosteller Formula (Essential for Chemo)"""
+        # Formula: BSA (m²) = SQRT( [Height(cm) x Weight(kg) ] / 3600 )
+        if self.weight and self.height:
+            bsa_value = math.sqrt((float(self.height) * float(self.weight)) / 3600)
+            return round(bsa_value, 2)
+        return None
+
+# --- Treatment & Protocol ---
 
 class Protocol(models.Model):
     name = models.CharField(max_length=255)
@@ -102,25 +126,26 @@ class Treatment(models.Model):
     start_date = models.DateField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='ACTIVE')
 
-    def __str__(self):
-        return f"{self.protocol.name if self.protocol else 'Custom'} for {self.patient.name}"
-
 class ChemoSession(models.Model):
     treatment = models.ForeignKey(Treatment, on_delete=models.CASCADE, related_name='sessions')
     date = models.DateTimeField(auto_now_add=True)
     cycle_no = models.IntegerField()
     administered_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, limit_choices_to={'role': 'NURSE'})
-    pre_auth_code = models.CharField(max_length=100, blank=True)
+    pre_auth_code = models.CharField(max_length=100, blank=True, help_text="Insurance pre-authorization")
     notes = models.TextField(blank=True)
 
-    def __str__(self):
-        return f"Cycle {self.cycle_no} - {self.treatment.patient.name}"
+# --- Inventory & Billing ---
 
 class Drug(models.Model):
     name = models.CharField(max_length=255)
     batch_no = models.CharField(max_length=100)
     stock_quantity = models.PositiveIntegerField()
     expiry_date = models.DateField(null=True) 
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+
+    @property
+    def is_expired(self):
+        return date.today() >= self.expiry_date if self.expiry_date else False
 
 class LabResult(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
@@ -132,7 +157,8 @@ class LabResult(models.Model):
 
 class Bill(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    appointment = models.ForeignKey(Appointment, on_delete=models.SET_NULL, null=True, blank=True)
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     is_paid = models.BooleanField(default=False)
     payment_method = models.CharField(max_length=50, default="CASH") 
     billing_officer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, limit_choices_to={'role': 'BILLING'})

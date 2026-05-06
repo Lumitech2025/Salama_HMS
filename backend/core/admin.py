@@ -15,7 +15,7 @@ admin.site.site_header = "Salama HMS Administration"
 admin.site.site_title = "Salama HMS Portal"
 admin.site.index_title = "Hospital Management & Clinical Audit"
 
-# --- 1. Scheduling & Triage: The Front-Line Audit ---
+# --- 1. SCHEDULING & TRIAGE ---
 
 class VitalSignInline(admin.StackedInline):
     model = VitalSign
@@ -25,12 +25,9 @@ class VitalSignInline(admin.StackedInline):
 
 @admin.register(Appointment)
 class AppointmentAdmin(admin.ModelAdmin):
-    # FIX: We added 'status' to list_display so that list_editable can find it.
     list_display = ('appointment_date', 'appointment_time', 'get_patient_name', 'practitioner', 'visit_type', 'status', 'status_tag')
     list_filter = ('status', 'visit_type', 'appointment_date', 'practitioner')
     search_fields = ('patient__name', 'manual_patient_name', 'patient__registry_no')
-    
-    # This now works because 'status' is in the list_display above
     list_editable = ('status',) 
 
     def get_patient_name(self, obj):
@@ -48,7 +45,7 @@ class AppointmentAdmin(admin.ModelAdmin):
             'CANCELLED': '#dc3545', 
         }
         return format_html(
-            '<span style="background: {}; color: white; padding: 3px 8px; border-radius: 10px; font-size: 10px;">{}</span>',
+            '<span style="background: {}; color: white; padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: bold;">{}</span>',
             colors.get(obj.status, '#6c757d'),
             obj.status
         )
@@ -57,45 +54,56 @@ class AppointmentAdmin(admin.ModelAdmin):
 @admin.register(VitalSign)
 class VitalSignAdmin(admin.ModelAdmin):
     list_display = ('patient', 'triage_summary', 'recorded_by', 'created_at')
-    readonly_fields = ('created_at', 'recorded_by')
+    readonly_fields = ('created_at', 'recorded_by', 'bmi', 'bsa')
     
     def triage_summary(self, obj):
-        """Visual cues for high-risk vitals"""
         bg_color = "white"
         text_color = "black"
         
-        # Expert Insight: In oncology, weight loss or fever is a major red flag
-        if obj.temperature >= 38.0 or obj.spo2 < 92:
+        # Clinical red flags: Fever or low oxygen saturation
+        if (obj.temperature and obj.temperature >= 38.0) or (obj.spo2 and obj.spo2 < 92):
             bg_color = "#ffebee"
             text_color = "#c62828"
             
         return format_html(
-            '<div style="background: {}; color: {}; padding: 5px; border-radius: 4px;">'
-            'BP: {} | Temp: {}°C | Weight: {}kg | SpO2: {}%'
+            '<div style="background: {}; color: {}; padding: 5px; border-radius: 4px; font-family: monospace;">'
+            'BP: {}/{} | Temp: {}°C | SpO2: {}% | BSA: {} m²'
             '</div>',
-            bg_color, text_color, obj.blood_pressure, obj.temperature, obj.weight, obj.spo2
+            bg_color, text_color, 
+            obj.systolic_bp or '--', 
+            obj.diastolic_bp or '--', 
+            obj.temperature or '--', 
+            obj.spo2 or '--', 
+            obj.bsa or '--'
         )
-    triage_summary.short_description = "Triage Results"
+    triage_summary.short_description = "Triage Overview"
 
-# --- 2. Patient Admin: The Verification Watchtower ---
+# --- 2. PATIENT ADMIN ---
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
-    list_display = ('registry_no', 'name', 'cancer_type', 'verification_status', 'view_history_link', 'created_at')
+    # FIXED: Using 'name', 'registry_no', and 'phone' to match your model exactly
+    list_display = [
+        'name', 
+        'registry_no', 
+        'phone', 
+        'verification_status', 
+        'view_history_link'    
+    ]
     search_fields = ('name', 'registry_no', 'cancer_type', 'phone', 'insurance_no')
     list_filter = ('insurance_verified', 'cancer_type', 'staging', 'gender')
     readonly_fields = ('insurance_verified', 'last_verification_date', 'benefit_balance', 'created_at')
-    inlines = [VitalSignInline] # See triage history directly in patient file
+    inlines = [VitalSignInline] 
     
     fieldsets = (
         ('Core Identity', {
-            'fields': ('name', 'registry_no', 'dob', 'gender', 'phone', 'blood_group')
+            'fields': ('name', 'registry_no', 'dob', 'gender', 'phone', 'email', 'blood_group')
         }),
         ('Oncology & Performance', {
             'fields': ('cancer_type', 'staging', 'ecog_status', 'biomarkers')
         }),
-        ('Insurance Audit (Frontend Filled)', {
-            'description': "Updated via the React Insurance Gateway",
+        ('Insurance Audit', {
+            'description': "Data synchronized via the Salama Insurance Gateway",
             'fields': ('insurance_type', 'insurance_no', 'insurance_verified', 'last_verification_date', 'benefit_balance')
         }),
         ('Emergency & Metadata', {
@@ -105,25 +113,20 @@ class PatientAdmin(admin.ModelAdmin):
     )
 
     def verification_status(self, obj):
-        """Fixed format_html by passing the text as an argument"""
         if obj.insurance_verified:
-            # Use {} as a placeholder and pass the string as the second argument
-            return format_html('<b style="color: green;">{}</b>', "✔ VERIFIED")
-        return format_html('<b style="color: red;">{}</b>', "✘ PENDING")
-    verification_status.short_description = 'Ins. Status'
+            return format_html('<span style="color: green; font-weight: bold;">Verified</span>')
+        return format_html('<span style="color: red;">{}</span>', "Pending")
 
     def view_history_link(self, obj):
         url = reverse('admin:core_treatment_changelist') + f'?patient__id__exact={obj.id}'
-        return format_html('<a href="{}" style="text-decoration: underline;">Treatments</a>', url)
-    view_history_link.short_description = "Clinical History"
+        return format_html('<a href="{}" class="button" style="padding: 2px 5px; background: #6c757d; color: white; border-radius: 3px; text-decoration: none; font-size: 10px;">View History</a>', url)
 
-# --- 3. Treatment & Cycles: The Clinical Audit ---
+# --- 3. TREATMENT & CYCLES ---
 
 class ChemoSessionInline(admin.TabularInline):
     model = ChemoSession
     extra = 0 
     readonly_fields = ('date', 'administered_by')
-    fields = ('date', 'cycle_no', 'administered_by', 'pre_auth_code', 'notes')
 
 @admin.register(Treatment)
 class TreatmentAdmin(admin.ModelAdmin):
@@ -132,18 +135,18 @@ class TreatmentAdmin(admin.ModelAdmin):
     search_fields = ('patient__name', 'patient__registry_no')
     inlines = [ChemoSessionInline]
 
-# --- 4. Diagnostics & Finance ---
+# --- 4. DIAGNOSTICS & FINANCE ---
 
 @admin.register(LabResult)
 class LabResultAdmin(admin.ModelAdmin):
-    list_display = ('patient', 'test_name', 'critical_flag', 'test_date', 'recorded_by')
+    list_display = ('patient', 'test_name', 'critical_flag', 'test_date')
     list_filter = ('is_critical', 'test_date')
     readonly_fields = ('test_date', 'recorded_by')
 
     def critical_flag(self, obj):
         if obj.is_critical:
             return format_html(
-                '<span style="background: red; color: white; padding: 2px 5px; border-radius: 3px;">CRITICAL: {}</span>', 
+                '<span style="background: #dc3545; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold;">CRITICAL: {}</span>', 
                 obj.result_value
             )
         return obj.result_value
@@ -151,36 +154,32 @@ class LabResultAdmin(admin.ModelAdmin):
 
 @admin.register(Bill)
 class BillAdmin(admin.ModelAdmin):
-    list_display = ('patient', 'amount', 'payment_status_tag', 'payment_method', 'billing_officer', 'created_at')
+    list_display = ('patient', 'total_amount', 'payment_status_tag', 'payment_method', 'created_at')
     list_filter = ('is_paid', 'payment_method', 'created_at')
     readonly_fields = ('created_at', 'billing_officer')
     actions = ['mark_as_paid']
 
     def payment_status_tag(self, obj):
-        color = "green" if obj.is_paid else "red"
+        color = "#28a745" if obj.is_paid else "#dc3545"
         status = "PAID" if obj.is_paid else "UNPAID"
         return format_html('<b style="color: {};">{}</b>', color, status)
     payment_status_tag.short_description = "Status"
 
-    @admin.action(description="Manual override: Mark as paid")
+    @admin.action(description="Confirm Payment")
     def mark_as_paid(self, request, queryset):
-        updated = queryset.filter(is_paid=False).update(is_paid=True, billing_officer=request.user)
-        self.message_user(request, f"Updated {updated} bills as paid.")
+        queryset.filter(is_paid=False).update(is_paid=True, billing_officer=request.user)
 
-# --- 5. Supporting Registry ---
+# --- 5. SUPPORTING REGISTRY ---
 
 @admin.register(Drug)
 class DrugAdmin(admin.ModelAdmin):
-    list_display = ('name', 'batch_no', 'stock_status', 'expiry_status')
+    list_display = ('name', 'batch_no', 'stock_quantity', 'expiry_status')
     list_filter = ('expiry_date',)
-    
-    def stock_status(self, obj):
-        color = "green" if obj.stock_quantity > 10 else "orange"
-        return format_html('<b style="color: {};">{} units</b>', color, obj.stock_quantity)
+    search_fields = ('name', 'batch_no')
 
     def expiry_status(self, obj):
-        if obj.expiry_date <= timezone.now().date():
-            return format_html('<b style="color: red;">EXPIRED</b>')
+        if obj.expiry_date and obj.expiry_date <= timezone.now().date():
+            return format_html('<b style="color: #dc3545;">EXPIRED</b>')
         return obj.expiry_date
 
 admin.site.register(Protocol)
