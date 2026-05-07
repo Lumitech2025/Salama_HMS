@@ -94,23 +94,30 @@ const Registration = () => {
     setIsSubmitting(true);
     setErrorMessage('');
     
-    // Mapping frontend fields to Django Patient Model
+    // Safety Check: Ensure age is realistic for Oncology staging
+    const birthDate = new Date(formData.dob);
+    const today = new Date();
+    if (birthDate > today) {
+      setErrorMessage("Date of Birth cannot be in the future.");
+      setIsSubmitting(false);
+      return;
+    }
+
     const payload = {
       name: `${formData.firstName} ${formData.lastName}`,
-      registry_no: formData.idNumber,
-      dob: formData.dob || null, // Ensure date is null if empty
+      registry_no: formData.idNumber, // Correctly mapped to National ID
+      dob: formData.dob || null,
       gender: formData.gender === 'male' ? 'M' : 'F',
       phone: formData.phone,
       email: formData.email,
       insurance_type: formData.insuranceType,
       insurance_no: formData.insuranceNumber,
-      emergency_contact: `${formData.nokName} | ${formData.nokRelation} | ${formData.nokPhone}`,
-      cancer_type: "Unassigned", // Default for registry until clinical staging
+      emergency_contact: `${formData.nokName} (${formData.nokRelation}) - ${formData.nokPhone}`,
+      cancer_type: "Unassigned",
       staging: "N/A"
     };
 
     try {
-      // Note the trailing slash: Django DefaultRouter requires it
       const response = await fetch(`${API_BASE_URL}/patients/`, {
         method: 'POST',
         headers: { 
@@ -125,10 +132,14 @@ const Registration = () => {
       if (response.ok) {
         setRegisteredPatientId(result.id);
         setRegStatus('success');
+        // VETERAN TIP: Auto-scroll to top so they see the "Proceed" button
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       } else {
-        // Log the specific 400 error from DRF (e.g., 'registry_no already exists')
-        const errorMsg = Object.values(result).flat().join(', ');
-        throw new Error(errorMsg || "Failed to save record");
+        // Handle Django's nested error objects (e.g. { "registry_no": ["Patient already exists"] })
+        const errorData = typeof result === 'object' 
+          ? Object.entries(result).map(([key, val]) => `${key}: ${val}`).join(', ')
+          : "Server Error";
+        throw new Error(errorData);
       }
     } catch (error) {
       setRegStatus('error');

@@ -5,7 +5,7 @@ import InsuranceVerification from './modules/InsuranceVerification';
 import AppointmentCalendar from './modules/AppointmentCalendar';
 import PaymentPortal from './modules/PaymentPortal';
 import QueueStatus from './modules/QueueStatus';
-import Triage from './modules/triage';
+import TriagePortal from './modules/TriagePortal'
 
 const ReceptionistDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -18,7 +18,7 @@ const ReceptionistDashboard = () => {
       case 'insurance':
         return <InsuranceVerification />;
       case 'triage':
-        return <Triage />;
+        return <TriagePortal />;
       case 'appointments':
         return <AppointmentCalendar />;
       case 'billing':

@@ -12,36 +12,37 @@ from .views import (
     BillViewSet,
     AppointmentViewSet,
     VitalSignViewSet,
-    SalamaTokenObtainPairView  # Custom JWT view for employeeID/securityCode
+    QueueViewSet,              # Added for Live Monitor
+    SalamaTokenObtainPairView   # Custom JWT view
 )
 
 # Using DefaultRouter for automatic URL conf and a clean API root
 router = DefaultRouter()
 
 # --- 1. Front Desk & Patient Registry ---
-# Handles scheduling and the 'Salama Registry' UI
 router.register(r'appointments', AppointmentViewSet, basename='appointment')
 router.register(r'patients', PatientViewSet, basename='patient')
 
-# --- 2. Triage & Clinical Care ---
-# Processes vitals captured at the clinic and treatment plans
+# --- 2. NEW: Queue & Orchestration ---
+# This powers your 3-tier Live Monitor in React
+router.register(r'queue', QueueViewSet, basename='queue')
+
+# --- 3. Triage & Clinical Care ---
 router.register(r'vitals', VitalSignViewSet, basename='vital')
 router.register(r'protocols', ProtocolViewSet, basename='protocol')
 router.register(r'treatments', TreatmentViewSet, basename='treatment')
 
-# --- 3. Execution (Chemotherapy) & Pharmacy ---
-# Tracks the actual administration of drugs and inventory levels
+# --- 4. Execution (Chemotherapy) & Pharmacy ---
 router.register(r'chemo-sessions', ChemoSessionViewSet, basename='chemo-session')
 router.register(r'drugs', DrugViewSet, basename='drug')
 
-# --- 4. Diagnostics & Revenue Cycle ---
-# Handles lab integrations and billing/insurance verification
+# --- 5. Diagnostics & Revenue Cycle ---
 router.register(r'lab-results', LabResultViewSet, basename='lab-result')
 router.register(r'bills', BillViewSet, basename='bill')
 
 urlpatterns = [
-    # API Router Endpoints - Ensure this is precisely matched
-    path('', include(router.urls)), # Move the 'api/' prefix into the include if preferred, or keep it clean here
+    # API endpoints wrapped in 'api/' to match frontend axios calls
+    path('api/', include(router.urls)), 
 
     # Authentication Endpoints
     path('api/token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),

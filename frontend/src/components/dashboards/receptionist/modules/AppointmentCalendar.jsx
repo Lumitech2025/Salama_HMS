@@ -170,8 +170,11 @@ const AppointmentCalendar = () => {
                 >
                     <option value="">Select Specialist</option>
                     {/* Synchronized with image_b102a7.png */}
-                    <option value="3">Edwin Mwiti (Oncologist)</option>
-                    <option value="1">Andrew (Admin/Clinical)</option>
+                    <option value="2">Edwin Mwiti (Oncologist)</option>
+                    <option value="4">Tamara Makena (Nurse)</option>
+                    <option value="3">Andrew MWITI (Lab Technician)</option>
+                    <option value="5">Moses Muriungi (Radiologist)</option>
+                    
                 </select>
             </div>
 
