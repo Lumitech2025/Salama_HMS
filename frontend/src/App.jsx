@@ -2,8 +2,9 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import AdminDashboard from './components/dashboards/admin/AdminDashboard'; // Import the new Brain
+import AdminDashboard from './components/dashboards/admin/AdminDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
+import TriagePortal from "./components/dashboards/receptionist/modules/TriagePortal";
 
 const Unauthorized = () => (
   <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white p-6 font-['Inter']">
@@ -21,7 +22,7 @@ const Unauthorized = () => (
 );
 
 function App() {
-  // Roles allowed to access the standard Clinical Dashboard
+  // Roles allowed to access clinical areas
   const CLINICAL_STAFF = [
     'ONCOLOGIST', 'NURSE', 'RECEPTIONIST', 'PHARMACIST', 
     'BILLING_OFFICER', 'STAFF', 'LAB_TECH', 'RADIOLOGIST', 'PATIENT', 'CLIENT'
@@ -32,7 +33,7 @@ function App() {
 
   return (
     <Routes>
-      {/* 1. Admin Command Center: Specialized layout for system management */}
+      {/* 1. Admin Command Center */}
       <Route 
         path="/admin-dashboard" 
         element={
@@ -42,7 +43,7 @@ function App() {
         } 
       />
 
-      {/* 2. Clinical Dashboard: The main hub for medical staff */}
+      {/* 2. Clinical Dashboard (Main Hub) */}
       <Route 
         path="/" 
         element={
@@ -52,11 +53,30 @@ function App() {
         } 
       />
 
-      {/* 3. Authentication & Security Routes */}
+      {/* 3. Triage Portal (Now PROTECTED) */}
+      {/* Ensure only Nurses and Oncologists (and Admins) can access Triage */}
+      <Route 
+        path="/triage" 
+        element={
+          <ProtectedRoute allowedRoles={['NURSE', 'ONCOLOGIST', ...ADMIN_ROLES]}>
+            <TriagePortal />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/triage/:patientId" 
+        element={
+          <ProtectedRoute allowedRoles={['NURSE', 'ONCOLOGIST', ...ADMIN_ROLES]}>
+            <TriagePortal />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* 4. Authentication & Security */}
       <Route path="/login" element={<Login />} />
       <Route path="/unauthorized" element={<Unauthorized />} />
 
-      {/* 4. Global Fallback */}
+      {/* 5. Global Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

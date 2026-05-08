@@ -1,18 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { 
-  Users, 
-  ArrowRightCircle, 
-  Clock, 
-  Timer, 
-  Search,
-  LayoutGrid,
-  Activity,
-  ChevronDown,
-  UserCheck,
-  Stethoscope,
-  RefreshCcw,
-  AlertTriangle
+  Users, ArrowRightCircle, Clock, Timer, Search, LayoutGrid,
+  Activity, ChevronDown, UserCheck, Stethoscope, RefreshCcw, AlertTriangle, Loader2
 } from 'lucide-react';
 
 const QueueStatus = () => {
@@ -22,6 +12,7 @@ const QueueStatus = () => {
   const [analytics, setAnalytics] = useState({ today_total: 0, station_queue: 0, avg_wait_time: '0m' });
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [actionLoading, setActionLoading] = useState(null);
 
   const stations = [
     { id: 'ALL', label: 'All Stations' },
@@ -30,20 +21,21 @@ const QueueStatus = () => {
     { id: 'DOCTOR', label: 'Consultation' },
     { id: 'LAB', label: 'Laboratory' },
     { id: 'RADIOLOGY', label: 'Radiology' },
-    { id: 'PSYCHOLOGY', label: 'Psychology' }
+    { id: 'PSYCHOLOGY', label: 'Psychology' },
+    { id: 'PHARMACY', label: 'Pharmacy' },
+    { id: 'BILLING', label: 'Billing/Discharge' }
   ];
 
-  // 1. Fetch Queue Data (Table)
+  // 1. Fetch Queue Data
   const fetchQueueData = useCallback(async () => {
     setIsRefreshing(true);
     try {
       let url = '/api/queue/';
-      const params = [];
-      if (activeStation !== 'ALL') params.push(`current_station=${activeStation}`);
-      if (searchTerm) params.push(`search=${searchTerm}`);
-      if (params.length > 0) url += `?${params.join('&')}`;
-
-      const response = await axios.get(url);
+      const params = new URLSearchParams();
+      if (activeStation !== 'ALL') params.append('current_station', activeStation);
+      if (searchTerm) params.append('search', searchTerm);
+      
+      const response = await axios.get(`${url}?${params.toString()}`);
       setQueue(Array.isArray(response.data) ? response.data : (response.data.results || []));
     } catch (err) {
       console.error("Queue Sync Error:", err);
@@ -53,26 +45,41 @@ const QueueStatus = () => {
     }
   }, [activeStation, searchTerm]);
 
-  // 2. Fetch Analytics Data (KPIs)
+  // 2. Fetch Analytics (Using your custom analytics action)
   const fetchAnalytics = useCallback(async () => {
     try {
-      const response = await axios.get(`/api/queue/analytics/?station=${activeStation}`);
+      // Assuming your ViewSet has a @action(detail=False) called 'analytics'
+      const response = await axios.get(`/api/queue/analytics/`, {
+          params: { station: activeStation }
+      });
       setAnalytics(response.data);
     } catch (err) {
       console.error("Analytics Sync Error:", err);
     }
   }, [activeStation]);
 
+  // 3. Move Patient to Next Station (Action Logic)
+  const handleAdvance = async (queueId) => {
+    setActionLoading(queueId);
+    try {
+        // Calls a custom move_next action on the backend
+        await axios.post(`/api/queue/${queueId}/move_next/`);
+        fetchQueueData();
+        fetchAnalytics();
+    } catch (err) {
+        alert("Flow Control Error: Patient cannot be advanced manually.");
+    } finally {
+        setActionLoading(null);
+    }
+  };
+
   useEffect(() => {
     fetchQueueData();
     fetchAnalytics();
-    
-    // Auto-refresh every 30 seconds for live orchestration
     const interval = setInterval(() => {
       fetchQueueData();
       fetchAnalytics();
-    }, 30000);
-
+    }, 15000); // Faster polling for "Live" feel
     return () => clearInterval(interval);
   }, [fetchQueueData, fetchAnalytics]);
 
@@ -97,9 +104,9 @@ const QueueStatus = () => {
         
         <button 
           onClick={fetchQueueData}
-          className={`relative z-10 p-4 bg-white/5 hover:bg-white/10 rounded-2xl transition-all ${isRefreshing ? 'animate-spin' : ''}`}
+          className={`relative z-10 p-4 bg-white/5 hover:bg-white/10 rounded-2xl transition-all ${isRefreshing ? 'opacity-50' : ''}`}
         >
-          <RefreshCcw size={20} className="text-teal-400" />
+          <RefreshCcw size={20} className={`text-teal-400 ${isRefreshing ? 'animate-spin' : ''}`} />
         </button>
 
         <Activity className="absolute -right-10 -top-10 text-white/5 w-64 h-64 rotate-12" />
@@ -107,16 +114,18 @@ const QueueStatus = () => {
 
       {/* TIER 2: KPI METRICS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 px-2">
-        <div className="bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-sm flex items-center gap-5">
+        <div className="bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-sm flex items-center gap-5 transition-all hover:shadow-md">
             <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl"><UserCheck size={24} /></div>
             <div>
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Today's Registered</p>
-                <p className="text-2xl font-black text-slate-900 leading-none">{analytics.today_total}</p>
+                <p className="text-2xl font-black text-slate-900 leading-none">{analytics.today_total || 0}</p>
             </div>
         </div>
 
-        <div className="bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-sm relative">
-            <div className="absolute left-6 top-1/2 -translate-y-1/2 p-4 bg-slate-900 text-white rounded-2xl z-10"><Stethoscope size={24} /></div>
+        <div className="bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-sm relative group transition-all hover:shadow-md">
+            <div className="absolute left-6 top-1/2 -translate-y-1/2 p-4 bg-slate-900 text-white rounded-2xl z-10 group-hover:bg-teal-500 transition-colors">
+                <Stethoscope size={24} />
+            </div>
             <select 
               value={activeStation}
               onChange={(e) => setActiveStation(e.target.value)}
@@ -127,19 +136,19 @@ const QueueStatus = () => {
             <ChevronDown size={16} className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400" />
         </div>
 
-        <div className="bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-sm flex items-center gap-5">
+        <div className="bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-sm flex items-center gap-5 transition-all hover:shadow-md">
             <div className="p-4 bg-teal-50 text-teal-600 rounded-2xl"><Users size={24} /></div>
             <div>
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">In Station Queue</p>
-                <p className="text-2xl font-black text-slate-900 leading-none">{analytics.station_queue}</p>
+                <p className="text-2xl font-black text-slate-900 leading-none">{analytics.station_queue || 0}</p>
             </div>
         </div>
 
-        <div className="bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-sm flex items-center gap-5">
+        <div className="bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-sm flex items-center gap-5 transition-all hover:shadow-md">
             <div className="p-4 bg-amber-50 text-amber-600 rounded-2xl"><Timer size={24} /></div>
             <div>
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Avg. Wait</p>
-                <p className="text-2xl font-black text-slate-900 leading-none">{analytics.avg_wait_time}</p>
+                <p className="text-2xl font-black text-slate-900 leading-none">{analytics.avg_wait_time || '0m'}</p>
             </div>
         </div>
       </div>
@@ -158,12 +167,12 @@ const QueueStatus = () => {
             />
           </div>
           
-          <div className="flex gap-2">
-            {['ALL', 'TRIAGE', 'DOCTOR', 'LAB'].map((sid) => (
+          <div className="flex gap-2 overflow-x-auto max-w-full pb-2 md:pb-0">
+            {['ALL', 'TRIAGE', 'DOCTOR', 'LAB', 'PHARMACY'].map((sid) => (
               <button 
                 key={sid}
                 onClick={() => setActiveStation(sid)}
-                className={`px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all border ${
+                className={`px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all border shrink-0 ${
                   activeStation === sid ? 'bg-slate-900 text-white border-slate-900 shadow-xl' : 'bg-white text-slate-400 border-slate-100 hover:border-slate-300'
                 }`}
               >
@@ -182,45 +191,58 @@ const QueueStatus = () => {
                 <th className="px-12 py-6 text-[10px] font-black text-slate-400 uppercase">Current Station</th>
                 <th className="px-12 py-6 text-[10px] font-black text-slate-400 uppercase">Live Status</th>
                 <th className="px-12 py-6 text-[10px] font-black text-slate-400 uppercase">Wait Time</th>
-                <th className="px-12 py-6 text-[10px] font-black text-slate-400 uppercase text-right">Action</th>
+                <th className="px-12 py-6 text-[10px] font-black text-slate-400 uppercase text-right">Flow Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {!loading && queue.map((item) => (
-                <tr key={item.id} className="group hover:bg-teal-50/20 transition-all">
+                <tr key={item.id} className="group hover:bg-teal-50/20 transition-all animate-in slide-in-from-left-2">
                   <td className="px-12 py-8 font-black text-teal-600 text-sm italic underline decoration-teal-100 decoration-4 underline-offset-4">
                     {item.token_id}
                   </td>
                   <td className="px-12 py-8">
                     <p className="font-black text-slate-900 text-base uppercase mb-1">{item.patient_name}</p>
                     <span className={`text-[8px] font-black px-2 py-1 rounded-md uppercase ${
-                      item.priority === 'HIGH' || item.priority === 'EMERGENCY' ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-100 text-slate-500'
+                      item.priority === 'EMERGENCY' ? 'bg-red-600 text-white animate-pulse' : 
+                      item.priority === 'HIGH' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'
                     }`}>
                       {item.priority} Priority
                     </span>
                   </td>
                   <td className="px-12 py-8">
                     <div className="flex items-center gap-3">
-                      <div className="w-2.5 h-2.5 rounded-full bg-teal-500"></div>
+                      <div className={`w-2.5 h-2.5 rounded-full ${item.status === 'COMPLETED' ? 'bg-emerald-500' : 'bg-teal-500 animate-pulse'}`}></div>
                       <span className="font-black text-[11px] text-slate-700 uppercase tracking-widest">{item.station_display}</span>
                     </div>
                   </td>
                   <td className="px-12 py-8">
                     <span className={`px-5 py-2 rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] shadow-sm border-2 ${
-                      item.status === 'WAITING' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-indigo-50 text-indigo-600 border-indigo-100'
+                      item.status === 'WAITING' ? 'bg-amber-50 text-amber-600 border-amber-100' : 
+                      item.status === 'IN_PROGRESS' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' :
+                      'bg-emerald-50 text-emerald-600 border-emerald-100'
                     }`}>
                       {item.status_display}
                     </span>
                   </td>
                   <td className="px-12 py-8 font-bold text-slate-400 text-sm">
                     <div className="flex items-center gap-3">
-                       <Clock size={16} className="text-slate-300" /> 
-                       <span>{item.wait_time} <small className="text-[10px] text-slate-300 uppercase">Min</small></span>
+                       <Clock size={16} className={item.wait_time > 30 ? 'text-red-400' : 'text-slate-300'} /> 
+                       <span className={item.wait_time > 30 ? 'text-red-500' : ''}>
+                           {item.wait_time} <small className="text-[10px] opacity-60 uppercase">Min</small>
+                       </span>
                     </div>
                   </td>
                   <td className="px-12 py-8 text-right">
-                    <button className="p-4 bg-white border-2 border-slate-100 text-slate-900 rounded-[1.2rem] hover:bg-slate-900 hover:text-white transition-all shadow-sm group">
-                      <ArrowRightCircle size={22} className="group-hover:translate-x-1 transition-transform" />
+                    <button 
+                        onClick={() => handleAdvance(item.id)}
+                        disabled={actionLoading === item.id}
+                        className="p-4 bg-white border-2 border-slate-100 text-slate-900 rounded-[1.2rem] hover:bg-slate-900 hover:text-white transition-all shadow-sm group disabled:opacity-50"
+                    >
+                      {actionLoading === item.id ? (
+                          <Loader2 size={22} className="animate-spin" />
+                      ) : (
+                          <ArrowRightCircle size={22} className="group-hover:translate-x-1 transition-transform" />
+                      )}
                     </button>
                   </td>
                 </tr>
@@ -231,7 +253,7 @@ const QueueStatus = () => {
           {(loading || queue.length === 0) && (
             <div className="p-32 text-center flex flex-col items-center">
               {loading ? (
-                <RefreshCcw className="text-teal-500 animate-spin mb-4" size={48} />
+                <Loader2 className="text-teal-500 animate-spin mb-4" size={48} />
               ) : (
                 <div className="bg-slate-50 p-8 rounded-full mb-4">
                   <AlertTriangle className="text-slate-200" size={48} />

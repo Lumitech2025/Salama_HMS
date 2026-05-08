@@ -2,10 +2,10 @@ from rest_framework import viewsets, filters, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.utils import timezone
-from django.db.models import Avg, Count
+from django.db.models import Avg, Count, F
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework_simplejwt.views import TokenObtainPairView
-from datetime import date
+from datetime import date, timedelta
 
 # Import local models and serializers
 from .models import (
@@ -42,8 +42,7 @@ class SalamaTokenObtainPairView(TokenObtainPairView):
 
 class QueueViewSet(viewsets.ModelViewSet):
     """
-    Powers the Live Queue Monitor.
-    Provides station-based filtering and real-time wait-time analytics.
+    Powers the Salama Monitor.
     """
     queryset = Queue.objects.all().order_by('priority', 'entered_at')
     serializer_class = QueueSerializer
@@ -52,29 +51,56 @@ class QueueViewSet(viewsets.ModelViewSet):
     filterset_fields = ['current_station', 'status', 'priority']
     search_fields = ['patient__name', 'token_id', 'patient__registry_no']
 
+    @action(detail=True, methods=['post'])
+    def move_next(self, request, pk=None):
+        """
+        Logic for the 'Arrow' button on the Queue Status Monitor.
+        Advances the patient to the next logical clinical station.
+        """
+        queue_item = self.get_object()
+        flow = {
+            'REGISTRATION': 'TRIAGE',
+            'TRIAGE': 'DOCTOR',
+            'DOCTOR': 'LAB', # Or PHARMACY depending on clinical outcome
+            'LAB': 'DOCTOR',
+            'RADIOLOGY': 'DOCTOR',
+            'PHARMACY': 'BILLING',
+            'BILLING': 'COMPLETED'
+        }
+        
+        current = queue_item.current_station
+        next_station = flow.get(current, 'COMPLETED')
+        
+        if next_station == 'COMPLETED':
+            queue_item.status = 'COMPLETED'
+        else:
+            queue_item.current_station = next_station
+            queue_item.status = 'WAITING'
+            
+        queue_item.save()
+        return Response({'status': f'Patient moved to {next_station}'})
+
     @action(detail=False, methods=['get'])
     def analytics(self, request):
-        """Returns KPIs for the Dashboard Tier 2 cards."""
+        """Returns KPIs for the Dashboard Monitor cards."""
         station = request.query_params.get('station', 'ALL')
-        queryset = self.get_queryset()
+        today = date.today()
         
+        # Today's Total Registrations
+        total_registered = Patient.objects.filter(created_at__date=today).count()
+        
+        # Station Queue Count
+        station_qs = Queue.objects.filter(status='WAITING')
         if station != 'ALL':
-            queryset = queryset.filter(current_station=station)
-
-        # Calculate station stats
-        total_registered = Patient.objects.filter(created_at__date=date.today()).count()
-        in_queue = queryset.filter(status='WAITING').count()
+            station_qs = station_qs.filter(current_station=station)
         
-        # Expert Tip: Wait time is calculated in the model property, 
-        # but for bulk analytics, we use DB aggregation here.
-        avg_wait = 0
-        if in_queue > 0:
-            # Placeholder for complex duration aggregation if needed
-            avg_wait = 15 # Default/Estimated if DB doesn't support direct duration avg
+        # Avg Wait Time (Mock logic based on entered_at)
+        # In a production DB like PostgreSQL, use ExpressionWrapper for real duration avg
+        avg_wait = 12 # Default baseline in minutes
             
         return Response({
             'today_total': total_registered,
-            'station_queue': in_queue,
+            'station_queue': station_qs.count(),
             'avg_wait_time': f"{avg_wait}m"
         })
 
@@ -90,45 +116,36 @@ class AppointmentViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def check_in(self, request, pk=None):
-        """
-        Moves patient to WAITING_TRIAGE and creates a Queue Token.
-        """
         appointment = self.get_object()
-        appointment.status = 'WAITING_TRIAGE'
+        appointment.status = 'CHECKED_IN'
         appointment.save()
         
-        # Automated Queue Entry creation
         if appointment.patient:
             queue_entry, created = Queue.objects.get_or_create(
                 patient=appointment.patient,
                 appointment=appointment,
-                status='WAITING',
-                current_station='TRIAGE'
+                defaults={'current_station': 'TRIAGE', 'status': 'WAITING'}
             )
-            
-            return Response({
-                'status': 'Checked-in Success',
-                'token': queue_entry.token_id,
-                'patient': appointment.patient.name,
-                'station': 'TRIAGE'
-            }, status=status.HTTP_200_OK)
+            return Response({'token': queue_entry.token_id, 'station': 'TRIAGE'})
         
-        return Response({'error': 'Patient record required for queue token.'}, status=400)
+        return Response({'error': 'No patient linked'}, status=400)
 
 class PatientViewSet(viewsets.ModelViewSet):
     queryset = Patient.objects.all().order_by('-created_at')
     serializer_class = PatientSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'registry_no', 'phone']
+    ordering_fields = ['created_at', 'name']
 
     def perform_create(self, serializer):
-        age = self.request.data.get('age')
-        if age and not self.request.data.get('dob'):
-            birth_year = date.today().year - int(age)
-            serializer.save(dob=date(birth_year, 1, 1))
-        else:
-            serializer.save()
+        patient = serializer.save()
+        # VETERAN HMS LOGIC: Automatically add newly registered patients to Triage Queue
+        Queue.objects.create(
+            patient=patient,
+            current_station='TRIAGE',
+            status='WAITING'
+        )
 
 # --- 5. CLINICAL & TRIAGE ---
 
@@ -141,17 +158,16 @@ class VitalSignViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         vital = serializer.save(recorded_by=self.request.user)
         
-        # Automatically advance the Queue when Triage is done
-        if vital.appointment:
-            apt = vital.appointment
-            apt.status = 'TRIAGED'
-            apt.save()
-            
-            # Update Queue station to DOCTOR
-            Queue.objects.filter(appointment=apt).update(
-                current_station='DOCTOR',
-                status='WAITING'
-            )
+        # ADVANCE QUEUE LOGIC:
+        # If this patient is currently in the Queue at TRIAGE, 
+        # move them to DOCTOR automatically upon saving vitals.
+        Queue.objects.filter(
+            patient=vital.patient, 
+            current_station='TRIAGE'
+        ).update(
+            current_station='DOCTOR',
+            status='WAITING'
+        )
 
 # --- 6. REMAINING VIEWSETS ---
 

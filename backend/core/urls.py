@@ -41,10 +41,9 @@ router.register(r'lab-results', LabResultViewSet, basename='lab-result')
 router.register(r'bills', BillViewSet, basename='bill')
 
 urlpatterns = [
-    # API endpoints wrapped in 'api/' to match frontend axios calls
-    path('api/', include(router.urls)), 
+    path('', include(router.urls)), 
 
-    # Authentication Endpoints
+
     path('api/token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 ]

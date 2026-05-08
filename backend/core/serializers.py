@@ -40,13 +40,9 @@ class UserSerializer(serializers.ModelSerializer):
 # --- 3. QUEUE & FLOW SERIALIZERS ---
 
 class QueueSerializer(serializers.ModelSerializer):
-    """
-    Powers the Tier 3 Live Queue Monitor Table.
-    Includes live-calculated wait_time from the model property.
-    """
     patient_name = serializers.ReadOnlyField(source='patient.name')
     patient_id_no = serializers.ReadOnlyField(source='patient.registry_no')
-    wait_time = serializers.ReadOnlyField() # Calls the @property in models.py
+    wait_time = serializers.ReadOnlyField() 
     station_display = serializers.CharField(source='get_current_station_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
 
@@ -93,36 +89,17 @@ class AppointmentSerializer(serializers.ModelSerializer):
             return obj.patient.name
         return obj.manual_patient_name
 
-# --- 4. ONCOLOGY SPECIFIC SERIALIZERS ---
-
-class ProtocolSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Protocol
-        fields = '__all__'
-
-class ChemoSessionSerializer(serializers.ModelSerializer):
-    administered_by_details = UserSerializer(source='administered_by', read_only=True)
-    class Meta:
-        model = ChemoSession
-        fields = '__all__'
-
-class TreatmentSerializer(serializers.ModelSerializer):
-    protocol_details = ProtocolSerializer(source='protocol', read_only=True)
-    sessions = ChemoSessionSerializer(many=True, read_only=True)
-    oncologist_name = serializers.CharField(source='oncologist.get_full_name', read_only=True)
-    class Meta:
-        model = Treatment
-        fields = '__all__'
+# --- 4. PATIENT REGISTRY ---
 
 class PatientSerializer(serializers.ModelSerializer):
-    treatments = TreatmentSerializer(many=True, read_only=True)
+    treatments = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
     recent_vitals = serializers.SerializerMethodField()
     age = serializers.IntegerField(source='current_age', read_only=True)
     
-    # Virtual fields for the Registration Desk
-    first_name = serializers.CharField(write_only=True, required=False)
-    last_name = serializers.CharField(write_only=True, required=False)
-    id_number = serializers.CharField(write_only=True, required=False)
+    # Virtual fields to handle input from Registration.jsx
+    first_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    last_name = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    id_number = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = Patient
@@ -134,28 +111,63 @@ class PatientSerializer(serializers.ModelSerializer):
             'benefit_balance', 'emergency_contact', 'treatments', 
             'recent_vitals', 'created_at'
         ]
-        read_only_fields = ['created_at', 'age', 'registry_no']
+        read_only_fields = ['created_at', 'age']
+        
+        # CRITICAL FIX: Make 'name' and 'registry_no' optional during validation
+        # because we populate them manually in the create() method.
+        extra_kwargs = {
+            'name': {'required': False},
+            'registry_no': {'required': False}
+        }
 
-    def validate_id_number(self, value):
-        if value and Patient.objects.filter(registry_no=value.strip()).exists():
-            raise serializers.ValidationError("National ID already registered in Salama HMS.")
-        return value
+    def validate(self, data):
+        """Cross-field validation for ID duplicates."""
+        id_val = data.get('id_number') or data.get('registry_no')
+        if id_val:
+            clean_id = str(id_val).strip()
+            if not self.instance and Patient.objects.filter(registry_no=clean_id).exists():
+                raise serializers.ValidationError({
+                    "id_number": "This National ID is already registered to another patient."
+                })
+        return data
 
     def get_recent_vitals(self, obj):
         latest = obj.vitals.order_by('-created_at').first()
         return VitalSignSerializer(latest).data if latest else None
 
     def create(self, validated_data):
+        # Extract virtual fields
         first = validated_data.pop('first_name', '').strip()
         last = validated_data.pop('last_name', '').strip()
         id_val = validated_data.pop('id_number', '').strip()
+        
+        # 1. Build full name manually
         if not validated_data.get('name'):
             validated_data['name'] = f"{first} {last}".strip()
+        
+        # 2. Map virtual ID to model field
         if id_val:
             validated_data['registry_no'] = id_val
+            
         return super().create(validated_data)
 
 # --- 5. SUPPORT SERVICES ---
+
+class ProtocolSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Protocol
+        fields = '__all__'
+
+class ChemoSessionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ChemoSession
+        fields = '__all__'
+
+class TreatmentSerializer(serializers.ModelSerializer):
+    oncologist_name = serializers.CharField(source='oncologist.get_full_name', read_only=True)
+    class Meta:
+        model = Treatment
+        fields = '__all__'
 
 class DrugSerializer(serializers.ModelSerializer):
     is_expired = serializers.ReadOnlyField()
