@@ -82,24 +82,33 @@ class QueueViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def analytics(self, request):
-        """Returns KPIs for the Dashboard Monitor cards."""
+        """
+        Returns real-time KPIs for the Front Desk Home Dashboard.
+        """
         station = request.query_params.get('station', 'ALL')
         today = date.today()
         
-        # Today's Total Registrations
-        total_registered = Patient.objects.filter(created_at__date=today).count()
+        # 1. KPI: Total patients registered today
+        today_total_registered = Patient.objects.filter(created_at__date=today).count()
         
-        # Station Queue Count
+        # 2. KPI: Total overall appointments in the system
+        total_appointments_overall = Appointment.objects.count()
+
+        # 3. KPI: Total appointments scheduled for today specifically
+        today_scheduled_appointments = Appointment.objects.filter(appointment_date=today).count()
+
+        # 4. Table Helper: Count for currently waiting in a specific station
         station_qs = Queue.objects.filter(status='WAITING')
         if station != 'ALL':
             station_qs = station_qs.filter(current_station=station)
         
-        # Avg Wait Time (Mock logic based on entered_at)
-        # In a production DB like PostgreSQL, use ExpressionWrapper for real duration avg
-        avg_wait = 12 # Default baseline in minutes
-            
+        # Calculate Avg Wait (Simulated for now, or use real DB duration)
+        avg_wait = 12 
+
         return Response({
-            'today_total': total_registered,
+            'today_total': today_total_registered,          # For "Today's Registered" Card
+            'total_appointments': total_appointments_overall, # For "Total Appointments" Card
+            'today_appointments': today_scheduled_appointments, # For "Today's Schedule" Card
             'station_queue': station_qs.count(),
             'avg_wait_time': f"{avg_wait}m"
         })

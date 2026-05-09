@@ -18,8 +18,8 @@ class Patient(models.Model):
     registry_no = models.CharField(
         max_length=50, 
         unique=True, 
-        verbose_name="ID/Passport Number",
-        help_text="Primary unique identifier (National ID or Passport)"
+        verbose_name="ID Number",
+        help_text="National ID or Passport Number"
     ) 
     dob = models.DateField(verbose_name="Date of Birth", null=True, blank=True)
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
