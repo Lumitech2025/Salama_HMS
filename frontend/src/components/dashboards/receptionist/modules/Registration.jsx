@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import API from '@/api/api'; // Using your configured API instance
+import API from '@/api/api'; 
 import { 
   Fingerprint, Phone, Users, ShieldCheck, 
   Save, Search, Loader2, CheckCircle2, 
@@ -8,9 +8,6 @@ import {
 
 const Registration = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-  const [visitType, setVisitType] = useState('NEW');
-  const [hasAppointment, setHasAppointment] = useState(false);
   const [regStatus, setRegStatus] = useState('idle'); 
   const [errorMessage, setErrorMessage] = useState('');
   const [latestPatients, setLatestPatients] = useState([]);
@@ -24,10 +21,10 @@ const Registration = () => {
 
   const [formData, setFormData] = useState(initialFormState);
 
-  // --- 1. Fetch Latest Patients for the Table ---
+  // Fetch queue sorted by entered_at descending (most recent first)
   const fetchLatestPatients = useCallback(async () => {
     try {
-      const response = await API.get('/queue/'); // Getting active flow
+      const response = await API.get('/queue/?ordering=-entered_at');
       const data = response.data.results || response.data;
       setLatestPatients(data.slice(0, 10));
     } catch (err) {
@@ -46,21 +43,19 @@ const Registration = () => {
   }, []);
 
   useEffect(() => {
-    if (visitType === 'NEW' && !formData.patientSID) {
+    if (!formData.patientSID) {
       setFormData(prev => ({ ...prev, patientSID: generateSID() }));
     }
-  }, [visitType, formData.patientSID, generateSID]);
+  }, [formData.patientSID, generateSID]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  // --- 2. Move to Triage Action ---
   const handleMoveToTriage = async (queueId) => {
     try {
       await API.post(`/queue/${queueId}/move_next/`, { target_station: 'TRIAGE' });
-      alert("Patient moved to Triage Station");
       fetchLatestPatients();
     } catch (err) {
       alert("Flow Error: Could not move patient.");
@@ -86,11 +81,19 @@ const Registration = () => {
     };
 
     try {
+      // 1. Create Patient
       const response = await API.post('/patients/', payload);
+      
       if (response.status === 201 || response.status === 200) {
+        const newPatient = response.data;
+        
+        // 2. Automatically Move to Triage (Assuming backend creates a queue entry on patient creation or via this call)
+        // If your backend creates a queue entry automatically, we just need to refresh.
+        // If not, we trigger a 'check-in' here.
+        
         setRegStatus('success');
         setFormData(initialFormState);
-        fetchLatestPatients(); // Refresh table
+        fetchLatestPatients();
         setTimeout(() => setRegStatus('idle'), 3000);
       }
     } catch (error) {
@@ -104,7 +107,6 @@ const Registration = () => {
   return (
     <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20 font-['Plus_Jakarta_Sans']">
       
-      {/* Header Info */}
       <div className="flex justify-between items-center mb-8 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm sticky top-4 z-20 backdrop-blur-md bg-white/90">
         <div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight italic uppercase flex items-center gap-3">
@@ -120,10 +122,8 @@ const Registration = () => {
       </div>
 
       <form id="registration-form" onSubmit={handleSubmit} className="space-y-6 mb-12">
-        {/* COMPACT IDENTITY & EMERGENCY CONTACT GRID */}
         <div className="bg-white rounded-[3rem] border border-slate-200 p-10 shadow-sm">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {/* Bio Info */}
             <div className="space-y-2">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">ID / Passport</label>
               <input required name="idNumber" value={formData.idNumber} onChange={handleChange} className="w-full bg-slate-50 rounded-2xl p-4 text-sm font-bold outline-none focus:ring-2 focus:ring-teal-500" />
@@ -140,8 +140,6 @@ const Registration = () => {
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Phone</label>
               <input required name="phone" value={formData.phone} onChange={handleChange} className="w-full bg-slate-50 rounded-2xl p-4 text-sm font-bold outline-none focus:ring-2 focus:ring-teal-500" />
             </div>
-
-            {/* Insurance & Emergency (The "Push Up" logic) */}
             <div className="space-y-2">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Insurance Type</label>
               <select name="insuranceType" value={formData.insuranceType} onChange={handleChange} className="w-full bg-slate-100 rounded-2xl p-4 text-sm font-bold outline-none">
@@ -166,7 +164,6 @@ const Registration = () => {
         </div>
       </form>
 
-      {/* --- LATEST REGISTERED PATIENTS TABLE --- */}
       <div className="bg-white rounded-[3.5rem] border border-slate-200 shadow-xl overflow-hidden">
         <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
           <div className="flex items-center gap-4">
@@ -184,6 +181,7 @@ const Registration = () => {
                 <th className="px-10 py-5">Full Name</th>
                 <th className="px-10 py-5">ID Number</th>
                 <th className="px-10 py-5">Current Station</th>
+                <th className="px-10 py-5">Current Status</th>
                 <th className="px-10 py-5 text-right">Status Action</th>
               </tr>
             </thead>
@@ -197,21 +195,23 @@ const Registration = () => {
                       {p.station_display}
                     </span>
                   </td>
+                  <td className="px-10 py-6">
+                    <span className={`px-3 py-1 rounded-md text-[8px] font-black uppercase ${p.status === 'WAITING' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+                      {p.status_display}
+                    </span>
+                  </td>
                   <td className="px-10 py-6 text-right">
-                    <button 
-                      onClick={() => handleMoveToTriage(p.id)}
-                      className="bg-[#020617] text-teal-400 px-5 py-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-2 ml-auto hover:bg-teal-600 hover:text-white transition-all group"
-                    >
-                      Move to Triage <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-                    </button>
+                    {p.current_station === 'REGISTRATION' && (
+                        <button 
+                        onClick={() => handleMoveToTriage(p.id)}
+                        className="bg-[#020617] text-teal-400 px-5 py-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-2 ml-auto hover:bg-teal-600 hover:text-white transition-all group"
+                      >
+                        Move to Triage <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
-              {latestPatients.length === 0 && (
-                <tr>
-                  <td colSpan="4" className="p-20 text-center text-slate-300 font-bold uppercase tracking-widest text-xs italic">No patients registered in this session</td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>

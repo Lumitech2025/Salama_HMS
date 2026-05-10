@@ -26,8 +26,14 @@ class IsReceptionStaff(permissions.BasePermission):
         return request.user.is_authenticated and getattr(request.user, 'role', '') in ['RECEPTIONIST', 'ADMIN']
 
 class IsClinicalStaff(permissions.BasePermission):
+    """
+    Updated to include RECEPTIONIST because they handle Triage in this workflow.
+    """
     def has_permission(self, request, view):
-        clinical_roles = ['ONCOLOGIST', 'NURSE', 'LAB_TECH', 'HEMATOLOGIST', 'SURGEON', 'ADMIN', 'RADIOLOGIST']
+        clinical_roles = [
+            'ONCOLOGIST', 'NURSE', 'LAB_TECH', 'HEMATOLOGIST', 
+            'SURGEON', 'ADMIN', 'RADIOLOGIST', 'RECEPTIONIST' # 👈 Added RECEPTIONIST
+        ]
         return request.user.is_authenticated and getattr(request.user, 'role', '') in clinical_roles
 
 class IsFinancialStaff(permissions.BasePermission):
@@ -61,7 +67,7 @@ class QueueViewSet(viewsets.ModelViewSet):
         flow = {
             'REGISTRATION': 'TRIAGE',
             'TRIAGE': 'DOCTOR',
-            'DOCTOR': 'LAB', # Or PHARMACY depending on clinical outcome
+            'DOCTOR': 'LAB', 
             'LAB': 'DOCTOR',
             'RADIOLOGY': 'DOCTOR',
             'PHARMACY': 'BILLING',
@@ -82,33 +88,24 @@ class QueueViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def analytics(self, request):
-        """
-        Returns real-time KPIs for the Front Desk Home Dashboard.
-        """
         station = request.query_params.get('station', 'ALL')
         today = timezone.now().date()
         start_of_day = timezone.make_aware(datetime.combine(today, time.min))
         
-        # 1. KPI: Total patients registered today
         today_total = Patient.objects.filter(created_at__gte=start_of_day).count()
-        
-        # 2. KPI: Total overall appointments in the system
         today_appts = Appointment.objects.filter(appointment_date=today).count()
-        total_appts = Appointment.objects.count()  # For "Today's Schedule" Card
+        total_appts = Appointment.objects.count()
 
-
-        # 4. Table Helper: Count for currently waiting in a specific station
         station_qs = Queue.objects.filter(status='WAITING')
         if station != 'ALL':
             station_qs = station_qs.filter(current_station=station)
         
-        # Calculate Avg Wait (Simulated for now, or use real DB duration)
         avg_wait = 12 
 
         return Response({
-            'today_total': today_total,           # New Admissions
-            'today_appointments': today_appts,    # Confirmed Today
-            'total_appointments': total_appts, # For "Today's Schedule" Card
+            'today_total': today_total,
+            'today_appointments': today_appts,
+            'total_appointments': total_appts,
             'station_queue': station_qs.count(),
             'avg_wait_time': f"{avg_wait}m"
         })
@@ -149,7 +146,6 @@ class PatientViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         patient = serializer.save()
-        # VETERAN HMS LOGIC: Automatically add newly registered patients to Triage Queue
         Queue.objects.create(
             patient=patient,
             current_station='TRIAGE',
@@ -161,15 +157,14 @@ class PatientViewSet(viewsets.ModelViewSet):
 class VitalSignViewSet(viewsets.ModelViewSet):
     queryset = VitalSign.objects.all().order_by('-created_at')
     serializer_class = VitalSignSerializer
+    # 🚨 Combined permission ensures Receptionists are allowed
     permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
     filterset_fields = ['patient']
 
     def perform_create(self, serializer):
         vital = serializer.save(recorded_by=self.request.user)
         
-        # ADVANCE QUEUE LOGIC:
-        # If this patient is currently in the Queue at TRIAGE, 
-        # move them to DOCTOR automatically upon saving vitals.
+        # Advance Queue automatically to the DOCTOR station
         Queue.objects.filter(
             patient=vital.patient, 
             current_station='TRIAGE'

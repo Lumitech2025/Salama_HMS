@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import API from '@/api/api'; // Use your custom API instance
+import API from '@/api/api';
 import { 
   Users, ArrowRightCircle, Clock, Timer, Search, LayoutGrid,
-  Activity, ChevronDown, UserCheck, Stethoscope, RefreshCcw, AlertTriangle, Loader2
+  Activity, ChevronDown, UserCheck, Stethoscope, RefreshCcw, 
+  AlertTriangle, Loader2, ArrowRight, UserPlus // 👈 Fixed: Added UserPlus and ArrowRight here
 } from 'lucide-react';
 
 const QueueStatus = () => {
@@ -20,13 +21,10 @@ const QueueStatus = () => {
     { id: 'TRIAGE', label: 'Triage Station' },
     { id: 'DOCTOR', label: 'Consultation' },
     { id: 'LAB', label: 'Laboratory' },
-    { id: 'RADIOLOGY', label: 'Radiology' },
-    { id: 'PSYCHOLOGY', label: 'Psychology' },
     { id: 'PHARMACY', label: 'Pharmacy' },
     { id: 'BILLING', label: 'Billing/Discharge' }
   ];
 
-  // 1. Fetch Queue Data
   const fetchQueueData = useCallback(async () => {
     setIsRefreshing(true);
     try {
@@ -35,7 +33,6 @@ const QueueStatus = () => {
       if (searchTerm) params.search = searchTerm;
       
       const response = await API.get('/queue/', { params });
-      // Handle both DRF paginated and non-paginated responses
       const data = response.data.results || response.data;
       setQueue(Array.isArray(data) ? data : []);
     } catch (err) {
@@ -46,7 +43,6 @@ const QueueStatus = () => {
     }
   }, [activeStation, searchTerm]);
 
-  // 2. Fetch Analytics
   const fetchAnalytics = useCallback(async () => {
     try {
       const response = await API.get(`/queue/analytics/`, {
@@ -58,17 +54,24 @@ const QueueStatus = () => {
     }
   }, [activeStation]);
 
-  // 3. Move Patient to Next Station
-  const handleAdvance = async (queueId) => {
-    if (!window.confirm("Advance patient to the next clinical station?")) return;
+  const handleAdvance = async (item) => {
+    const nextStationMap = {
+        'REGISTRATION': 'TRIAGE',
+        'TRIAGE': 'DOCTOR',
+        'DOCTOR': 'LAB/PHARMACY',
+        'PHARMACY': 'BILLING',
+        'BILLING': 'COMPLETED'
+    };
+
+    const next = nextStationMap[item.current_station] || 'Next Station';
+    if (!window.confirm(`Advance ${item.patient_name} to ${next}?`)) return;
     
-    setActionLoading(queueId);
+    setActionLoading(item.id);
     try {
-        // This triggers the flow logic on your backend
-        await API.post(`/queue/${queueId}/move_next/`);
+        await API.post(`/queue/${item.id}/move_next/`);
         await Promise.all([fetchQueueData(), fetchAnalytics()]);
     } catch (err) {
-        alert("Flow Control Error: Ensure patient has completed current station requirements.");
+        alert("Flow Control Error: Patient must complete current assessment first.");
     } finally {
         setActionLoading(null);
     }
@@ -77,20 +80,17 @@ const QueueStatus = () => {
   useEffect(() => {
     fetchQueueData();
     fetchAnalytics();
-    
-    // Live Polling
     const interval = setInterval(() => {
       fetchQueueData();
       fetchAnalytics();
     }, 15000); 
-    
     return () => clearInterval(interval);
   }, [fetchQueueData, fetchAnalytics]);
 
   return (
     <div className="max-w-[1500px] mx-auto space-y-6 pb-20 font-['Plus_Jakarta_Sans'] animate-in fade-in duration-700">
       
-      {/* TIER 1: THE TITLE HEADER */}
+      {/* HEADER */}
       <div className="bg-[#020617] p-10 rounded-[3rem] shadow-2xl flex flex-col md:flex-row justify-between items-center border border-white/5 relative overflow-hidden">
         <div className="relative z-10 flex items-center gap-6">
           <div className="bg-teal-500 p-4 rounded-[1.5rem] text-white shadow-lg">
@@ -116,10 +116,10 @@ const QueueStatus = () => {
         <Activity className="absolute -right-10 -top-10 text-white/5 w-64 h-64 rotate-12" />
       </div>
 
-      {/* TIER 2: KPI METRICS */}
+      {/* KPI METRICS */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 px-2">
         <div className="bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-sm flex items-center gap-5 transition-all hover:shadow-md">
-            <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl"><UserCheck size={24} /></div>
+            <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl"><UserPlus size={24} /></div>
             <div>
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Today's Registered</p>
                 <p className="text-2xl font-black text-slate-900 leading-none">{analytics.today_total || 0}</p>
@@ -157,7 +157,7 @@ const QueueStatus = () => {
         </div>
       </div>
 
-      {/* TIER 3: THE DATA TABLE */}
+      {/* DATA TABLE */}
       <div className="bg-white rounded-[3.5rem] border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-10 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center gap-6 bg-slate-50/30">
           <div className="relative w-full md:w-[450px]">
@@ -199,7 +199,7 @@ const QueueStatus = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {!loading && queue.map((item) => (
+              {Array.isArray(queue) && queue.map((item) => (
                 <tr key={item.id} className="group hover:bg-teal-50/20 transition-all animate-in slide-in-from-left-2">
                   <td className="px-12 py-8 font-black text-teal-600 text-sm italic underline decoration-teal-100 decoration-4 underline-offset-4">
                     #{item.token_id}
@@ -215,8 +215,13 @@ const QueueStatus = () => {
                   </td>
                   <td className="px-12 py-8">
                     <div className="flex items-center gap-3">
-                      <div className={`w-2.5 h-2.5 rounded-full ${item.status === 'COMPLETED' ? 'bg-emerald-500' : 'bg-teal-500 animate-pulse'}`}></div>
-                      <span className="font-black text-[11px] text-slate-700 uppercase tracking-widest">{item.station_display}</span>
+                      <span className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border ${
+                          item.current_station === 'TRIAGE' ? 'bg-purple-50 text-purple-600 border-purple-100' :
+                          item.current_station === 'DOCTOR' ? 'bg-blue-50 text-blue-600 border-blue-100' :
+                          'bg-teal-50 text-teal-600 border-teal-100'
+                      }`}>
+                        {item.station_display}
+                      </span>
                     </div>
                   </td>
                   <td className="px-12 py-8">
@@ -231,16 +236,15 @@ const QueueStatus = () => {
                   <td className="px-12 py-8 font-bold text-slate-400 text-sm">
                     <div className="flex items-center gap-3">
                        <Clock size={16} className={item.wait_time > 30 ? 'text-red-400' : 'text-slate-300'} /> 
-                       <span className={item.wait_time > 30 ? 'text-red-500' : ''}>
+                       <span className={item.wait_time > 30 ? 'text-red-500 font-black' : 'font-black'}>
                            {item.wait_time} <small className="text-[10px] opacity-60 uppercase">Min</small>
                        </span>
                     </div>
                   </td>
                   <td className="px-12 py-8 text-right">
                     <button 
-                        onClick={() => handleAdvance(item.id)}
+                        onClick={() => handleAdvance(item)}
                         disabled={actionLoading === item.id}
-                        title="Advance to next station"
                         className="p-4 bg-white border-2 border-slate-100 text-slate-900 rounded-[1.2rem] hover:bg-slate-900 hover:text-white transition-all shadow-sm group disabled:opacity-50"
                     >
                       {actionLoading === item.id ? (

@@ -22,7 +22,6 @@ const ReceptionistSidebar = ({ activeTab, setActiveTab }) => {
         { id: 'appointments', label: 'Appointments', icon: <CalendarClock size={20} /> },
         { id: 'registration', label: 'Registration Desk', icon: <UserPlus size={20} /> },
         { id: 'triage', label: 'Triage', icon: <Stethoscope size={20} /> },
-        { id: 'insurance', label: 'Insurance', icon: <ShieldCheck size={20} /> },
         { id: 'billing', label: 'Billing & Payments', icon: <WalletCards size={20} /> },
         { id: 'queue', label: 'Queue Status', icon: <ListOrdered size={20} /> },
     ];

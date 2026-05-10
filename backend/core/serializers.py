@@ -90,7 +90,6 @@ class AppointmentSerializer(serializers.ModelSerializer):
 class PatientSerializer(serializers.ModelSerializer):
     age = serializers.IntegerField(source='current_age', read_only=True)
     
-    # Virtual write-only fields to match Registration.jsx state
     first_name = serializers.CharField(write_only=True, required=False)
     last_name = serializers.CharField(write_only=True, required=False)
     id_number = serializers.CharField(write_only=True, required=False)
@@ -110,23 +109,42 @@ class PatientSerializer(serializers.ModelSerializer):
         }
 
     def create(self, validated_data):
-        # Bridge the gap between Frontend 'id_number' and Backend 'registry_no'
+        # 1. Extract virtual fields
         first = validated_data.pop('first_name', '')
         last = validated_data.pop('last_name', '')
         id_val = validated_data.pop('id_number', '')
         
+        # 2. Map names and registry number
         if not validated_data.get('name'):
             validated_data['name'] = f"{first} {last}".strip()
         if id_val:
             validated_data['registry_no'] = id_val
             
-        return super().create(validated_data)
+        # 3. Create the actual patient record
+        patient = super().create(validated_data)
 
+        # 4. 🚀 AUTO-QUEUE LOGIC
+        # Ensure the Queue entry is linked to the new patient
+        Queue.objects.create(
+            patient=patient,
+            current_station='TRIAGE',
+            status='WAITING',
+            priority='NORMAL'
+        )
+        
+        return patient
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. CLINICAL & ANCILLARY SERIALIZERS
 # ─────────────────────────────────────────────────────────────────────────────
 class VitalSignSerializer(serializers.ModelSerializer):
     recorded_by_name = serializers.CharField(source='recorded_by.get_full_name', read_only=True)
+    
+    appointment = serializers.PrimaryKeyRelatedField(
+        queryset=Appointment.objects.all(), 
+        required=False, 
+        allow_null=True
+    )
+
     class Meta:
         model = VitalSign
         fields = '__all__'
