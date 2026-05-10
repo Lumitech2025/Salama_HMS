@@ -1,80 +1,77 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom'; // 1. Import useNavigate
 import { 
-  Beaker, 
-  ClipboardList, 
+  LayoutGrid, 
+  FlaskConical, 
   History, 
-  FileText, 
-  LogOut,
-  Microscope,
-  LayoutDashboard
+  BookOpen, 
+  PackageSearch, 
+  LogOut, 
+  FlaskRound
 } from 'lucide-react';
 
 const LabSidebar = ({ activeTab, setActiveTab }) => {
-  const navigate = useNavigate(); // 2. Initialize the hook
-
-  // 3. The Sign Out Logic
-  const handleSignOut = () => {
-    // Clear all session data
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('user_role');
-    localStorage.removeItem('designation');
-    
-    // Optional: Clear everything if you aren't storing persistent UI settings
-    // localStorage.clear(); 
-
-    // 4. Redirect to Login
-    navigate('/login', { replace: true });
-  };
-
   const menuItems = [
-    { id: 'overview', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
-    { id: 'worklist', label: 'Diagnostic Worklist', icon: <ClipboardList size={20} /> },
-    { id: 'entry', label: 'Result Entry', icon: <Microscope size={20} /> },
-    { id: 'history', label: 'Patient History', icon: <History size={20} /> },
-    { id: 'reporting', label: 'Reports & Sharing', icon: <FileText size={20} /> },
+    { id: 'overview', label: 'Home', icon: LayoutGrid },
+    { id: 'diagnostics', label: 'Diagnostics', icon: FlaskConical },
+    { id: 'history', label: 'Patient History', icon: History },
+    { id: 'reference', label: 'Reference Desk', icon: BookOpen },
+    { id: 'inventory', label: 'Inventory', icon: PackageSearch },
   ];
 
   return (
-    <div className="w-72 bg-slate-950 min-h-screen p-6 flex flex-col border-r border-white/5">
-      {/* Brand Logo */}
-      <div className="flex items-center space-x-3 mb-12 px-2">
-        <div className="bg-teal-500 p-2 rounded-2xl shadow-lg shadow-teal-500/20 text-white">
-          <Beaker size={24} />
+    <div className="w-72 bg-slate-950 border-r border-white/5 flex flex-col h-screen sticky top-0">
+      {/* BRANDING */}
+      <div className="p-8 mb-4">
+        <div className="flex items-center gap-3">
+          <div className="bg-teal-500 p-2.5 rounded-xl shadow-lg shadow-teal-500/20">
+            <FlaskRound size={22} className="text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-black text-white tracking-tighter uppercase italic">
+              Salama <span className="text-teal-500 text-sm">LAB</span>
+            </h1>
+            <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.3em]">Precision Diagnostics</p>
+          </div>
         </div>
-        <h2 className="text-xl font-bold text-white tracking-tight">
-          Salama <span className="text-teal-400 font-light">LAB</span>
-        </h2>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 space-y-2">
-        {menuItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setActiveTab(item.id)}
-            className={`w-full flex items-center space-x-4 px-4 py-3.5 rounded-2xl transition-all duration-300 group ${
-              activeTab === item.id 
-              ? 'bg-teal-600 text-white shadow-xl shadow-teal-900/40' 
-              : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'
-            }`}
-          >
-            <span className={`${activeTab === item.id ? 'text-white' : 'text-slate-500 group-hover:text-teal-400'}`}>
-              {item.icon}
-            </span>
-            <span className="font-bold text-sm tracking-wide">{item.label}</span>
-          </button>
-        ))}
+      {/* NAVIGATION */}
+      <nav className="flex-1 px-4 space-y-2">
+        {menuItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.id;
+          
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all duration-300 group relative ${
+                isActive 
+                  ? 'bg-teal-500 text-white shadow-xl shadow-teal-500/10' 
+                  : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'
+              }`}
+            >
+              <Icon size={20} className={isActive ? 'animate-pulse' : 'group-hover:scale-110 transition-transform'} />
+              <span className="text-xs font-black uppercase tracking-widest leading-none">
+                {item.label}
+              </span>
+              
+              {isActive && (
+                <div className="absolute right-4 w-1.5 h-1.5 bg-white rounded-full" />
+              )}
+            </button>
+          );
+        })}
       </nav>
 
-      {/* Logout Section */}
-      <div className="pt-6 border-t border-white/5">
-         <button 
-          onClick={handleSignOut} // 5. Attach the function
-          className="w-full flex items-center space-x-4 px-4 py-3.5 rounded-2xl text-slate-500 hover:bg-red-500/10 hover:text-red-400 transition-all duration-300 group"
-         >
+      {/* FOOTER ACTION */}
+      <div className="p-6 border-t border-white/5">
+        <button 
+          onClick={() => window.location.href = '/login'}
+          className="w-full flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-500 hover:bg-red-500/10 hover:text-red-400 transition-all duration-300 group"
+        >
           <LogOut size={20} className="group-hover:-translate-x-1 transition-transform" />
-          <span className="font-bold text-sm">Sign Out</span>
+          <span className="text-xs font-black uppercase tracking-widest">Sign Out</span>
         </button>
       </div>
     </div>

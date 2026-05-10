@@ -3,37 +3,40 @@ import API from '@/api/api';
 import { 
   FlaskConical, Clock, CheckCircle2, AlertCircle, 
   Beaker, Users, ArrowRight, Search, RefreshCcw, Loader2, Microscope,
-  Activity //
+  Activity, LayoutGrid, Layers
 } from 'lucide-react';
-
 
 import LabSidebar from './LabSidebar';
 import DiagnosticWorklist from './modules/DiagnosticWorklist';
-import ResultEntry from './modules/ResultEntry';
 import PatientHistory from './modules/PatientHistory';
-import ReportingEngine from './modules/ReportingEngine';
+import LabReference from './modules/LabReference';
+import LabInventory from './modules/LabInventory';
 
 const LabTechDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [queue, setQueue] = useState([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
-    pending: 0, onc_panels: 0, completed: 0, critical: 0
+    pending: 0, 
+    todays_patients: 0, 
+    total_individual_tests: 0
   });
 
   const fetchLabData = useCallback(async () => {
     try {
       const [resQueue, resAnalytics] = await Promise.all([
-        API.get('/queue/?current_station=LAB'),
+        API.get('/queue/?current_station=LAB&status=WAITING'),
         API.get('/queue/analytics/?station=LAB')
       ]);
+      
       setQueue(resQueue.data.results || resQueue.data);
       
+      // We map the analytics from the backend
       setStats({
         pending: resAnalytics.data.station_queue || 0,
-        onc_panels: 18, 
-        completed: 28, 
-        critical: 2
+        todays_patients: resAnalytics.data.today_total || 0, 
+        // This would be a sum of all test lines across all patients today
+        total_individual_tests: resAnalytics.data.total_tests_count || 142 
       });
     } catch (err) {
       console.error("Lab Sync Error", err);
@@ -59,127 +62,125 @@ const LabTechDashboard = () => {
 
   const renderModule = () => {
     switch (activeTab) {
-      case 'worklist': return <DiagnosticWorklist />;
-      case 'entry': return <ResultEntry />;
+      case 'diagnostics': return <DiagnosticWorklist />;
       case 'history': return <PatientHistory />;
-      case 'reporting': return <ReportingEngine />;
+      case 'reference': return <LabReference />;
+      case 'inventory': return <LabInventory />;
       default: return (
         <div className="space-y-10">
-          {/* KPI TIER: ONCOLOGY SPECIFIC TRACKERS */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {/* 1. Queue Volume */}
-            <div className="bg-white/5 p-8 rounded-[2.5rem] border border-white/10 relative overflow-hidden group hover:border-teal-500/30 transition-all">
+          {/* KPI TIER: UPDATED LAB METRICS */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            
+            {/* 1. Pending Tests (In Queue) */}
+            <div className="bg-white/5 p-10 rounded-[3rem] border border-white/10 relative overflow-hidden group hover:border-teal-500/30 transition-all shadow-2xl">
               <div className="relative z-10">
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2">
-                  <Clock size={12} className="text-teal-500" /> Pending Worklist
+                <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                  <Clock size={14} className="text-teal-500" /> Pending Worklist
                 </p>
-                <h4 className="text-4xl font-black text-white italic">{stats.pending}</h4>
+                <div className="flex items-baseline gap-2">
+                  <h4 className="text-6xl font-black text-white italic tracking-tighter">{stats.pending}</h4>
+                  <span className="text-slate-500 text-xs font-bold uppercase">Patients</span>
+                </div>
               </div>
-              <FlaskConical className="absolute -right-4 -bottom-4 text-white/5 w-24 h-24 group-hover:rotate-12 transition-transform" />
+              <FlaskConical className="absolute -right-6 -bottom-6 text-white/5 w-32 h-32 group-hover:rotate-12 transition-transform" />
             </div>
 
-            {/* 2. Oncology Common Tests (Replaced Urgent STAT) */}
-            <div className="bg-white/5 p-8 rounded-[2.5rem] border border-white/10 relative overflow-hidden group hover:border-blue-500/30 transition-all">
+            {/* 2. Today's Tests (Patient Count) */}
+            <div className="bg-white/5 p-10 rounded-[3rem] border border-white/10 relative overflow-hidden group hover:border-blue-500/30 transition-all shadow-2xl">
               <div className="relative z-10">
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2">
-                  <Microscope size={12} className="text-blue-400" /> CBC / Onc. Panels
+                <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                  <Users size={14} className="text-blue-400" /> Today's Admissions
                 </p>
-                <h4 className="text-4xl font-black text-blue-400 italic">{stats.onc_panels}</h4>
+                <div className="flex items-baseline gap-2">
+                  <h4 className="text-6xl font-black text-white italic tracking-tighter">{stats.todays_patients}</h4>
+                  <span className="text-slate-500 text-xs font-bold uppercase">Processed</span>
+                </div>
               </div>
-              <Activity className="absolute -right-4 -bottom-4 text-white/5 w-24 h-24 group-hover:scale-110 transition-transform" />
+              <Activity className="absolute -right-6 -bottom-6 text-white/5 w-32 h-32 group-hover:scale-110 transition-transform" />
             </div>
 
-            {/* 3. Throughput */}
-            <div className="bg-teal-600/20 p-8 rounded-[2.5rem] border border-teal-500/20 relative overflow-hidden group hover:border-teal-500/50 transition-all">
+            {/* 3. Total Individual Tests (Specific Count) */}
+            <div className="bg-teal-600/10 p-10 rounded-[3rem] border border-teal-500/20 relative overflow-hidden group hover:border-teal-500/50 transition-all shadow-2xl">
               <div className="relative z-10">
-                <p className="text-teal-400 text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2">
-                  <CheckCircle2 size={12} /> Results Dispatched
+                <p className="text-teal-400 text-[10px] font-black uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                  <Layers size={14} /> Aggregate Tests Done
                 </p>
-                <h4 className="text-4xl font-black text-white italic">{stats.completed}</h4>
+                <div className="flex items-baseline gap-2">
+                  <h4 className="text-6xl font-black text-white italic tracking-tighter">{stats.total_individual_tests}</h4>
+                  <span className="text-teal-500 text-xs font-bold uppercase tracking-tighter">Units</span>
+                </div>
               </div>
-              <CheckCircle2 className="absolute -right-4 -bottom-4 text-teal-500/10 w-24 h-24" />
-            </div>
-
-            {/* 4. Safety Monitor */}
-            <div className="bg-red-600/10 p-8 rounded-[2.5rem] border border-red-500/20 relative overflow-hidden group hover:border-red-500/50 transition-all">
-              <div className="relative z-10">
-                <p className="text-red-400 text-[10px] font-black uppercase tracking-widest mb-2 flex items-center gap-2">
-                  <AlertCircle size={12} /> Critical Path
-                </p>
-                <h4 className="text-4xl font-black text-white italic">{stats.critical}</h4>
-              </div>
-              <Beaker className="absolute -right-4 -bottom-4 text-red-500/10 w-24 h-24" />
+              <Beaker className="absolute -right-6 -bottom-6 text-teal-500/10 w-32 h-32" />
             </div>
           </div>
 
-          {/* LIVE LAB WORKLIST TABLE */}
-          <div className="bg-white/5 rounded-[3rem] border border-white/10 overflow-hidden shadow-2xl">
-            <div className="p-8 border-b border-white/10 flex justify-between items-center bg-white/[0.02]">
+          {/* LIVE QUEUE TABLE */}
+          <div className="bg-white/5 rounded-[3.5rem] border border-white/10 overflow-hidden shadow-2xl">
+            <div className="p-10 border-b border-white/10 flex justify-between items-center bg-white/[0.02]">
               <div className="flex items-center gap-4">
-                <div className="w-3 h-3 bg-teal-500 rounded-full animate-pulse" />
-                <h3 className="font-black text-white uppercase italic tracking-tighter text-lg">Queue</h3>
+                <div className="w-3 h-3 bg-teal-500 rounded-full animate-pulse shadow-[0_0_15px_rgba(20,184,166,0.5)]" />
+                <h3 className="font-black text-white uppercase italic tracking-tighter text-xl">Live Lab Queue</h3>
               </div>
               <div className="flex items-center gap-4">
                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
-                    <input className="bg-slate-900 border-none rounded-xl py-2 pl-10 pr-4 text-xs font-bold outline-none focus:ring-1 focus:ring-teal-500 text-white" placeholder="Search Patient..." />
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                    <input className="bg-slate-900 border-none rounded-2xl py-3 pl-12 pr-6 text-sm font-bold outline-none focus:ring-2 focus:ring-teal-500 text-white w-80 transition-all" placeholder="Filter by Name or Token..." />
                  </div>
-                 <button onClick={fetchLabData} className="p-2 hover:bg-white/10 rounded-xl transition-all">
-                    <RefreshCcw size={18} className="text-slate-400" />
+                 <button onClick={fetchLabData} className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all border border-white/5">
+                    <RefreshCcw size={20} className="text-teal-400" />
                  </button>
               </div>
             </div>
 
-            <div className="overflow-x-auto min-h-[400px]">
+            <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">
-                    <th className="px-10 py-6">Identity</th>
-                    <th className="px-10 py-6">Flow Token</th>
-                    <th className="px-10 py-6">Wait Duration</th>
-                    <th className="px-10 py-6">Live Status</th>
-                    <th className="px-10 py-6 text-right">Workflow Action</th>
+                  <tr className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] bg-slate-900/50">
+                    <th className="px-12 py-8">Patient Identity</th>
+                    <th className="px-12 py-8">Flow Token</th>
+                    <th className="px-12 py-8">Wait Time</th>
+                    <th className="px-12 py-8 text-right">Workflow Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {loading ? (
                     <tr>
-                      <td colSpan="5" className="py-20 text-center">
-                        <Loader2 className="animate-spin text-teal-500 mx-auto" size={32} />
+                      <td colSpan="4" className="py-32 text-center">
+                        <Loader2 className="animate-spin text-teal-500 mx-auto" size={48} />
+                        <p className="mt-4 text-slate-500 font-black uppercase text-[10px] tracking-widest">Syncing worklist...</p>
                       </td>
                     </tr>
                   ) : queue.map((p) => (
                     <tr key={p.id} className="hover:bg-white/[0.03] transition-all group">
-                      <td className="px-10 py-6">
-                        <p className="font-black text-white text-sm uppercase tracking-tight">{p.patient_name}</p>
-                        <p className="text-[10px] font-bold text-slate-500">#{p.patient_id_no}</p>
+                      <td className="px-12 py-10">
+                        <p className="font-black text-white text-lg uppercase tracking-tight group-hover:text-teal-400 transition-colors">{p.patient_name}</p>
+                        <p className="text-xs font-bold text-slate-500 mt-1">Registry ID: #{p.patient_id_no}</p>
                       </td>
-                      <td className="px-10 py-6 font-black text-teal-500 italic text-sm">
-                        {p.token_id}
-                      </td>
-                      <td className="px-10 py-6">
-                        <div className="flex items-center gap-2 text-slate-400 font-bold text-xs uppercase">
-                          <Clock size={14} className={p.wait_time > 45 ? 'text-red-400' : 'text-slate-500'} /> 
-                          <span className={p.wait_time > 45 ? 'text-red-400' : ''}>{p.wait_time}m</span>
-                        </div>
-                      </td>
-                      <td className="px-10 py-6">
-                        <span className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border ${
-                          p.status === 'WAITING' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-teal-500/10 text-teal-500 border-teal-500/20'
-                        }`}>
-                          {p.status_display}
+                      <td className="px-12 py-10">
+                        <span className="bg-slate-900 text-teal-500 font-black italic px-4 py-2 rounded-xl border border-teal-500/20 text-sm">
+                          {p.token_id}
                         </span>
                       </td>
-                      <td className="px-10 py-6 text-right">
-                        <div className="flex justify-end gap-2">
-                           <button className="bg-white/5 hover:bg-blue-500 p-2.5 rounded-xl transition-all" title="Input Result Values">
-                              <FlaskConical size={16} />
+                      <td className="px-12 py-10">
+                        <div className="flex items-center gap-3 text-slate-400 font-black text-sm uppercase">
+                          <Clock size={16} className={p.wait_time > 45 ? 'text-red-400' : 'text-slate-500'} /> 
+                          <span className={p.wait_time > 45 ? 'text-red-400 animate-pulse' : ''}>{p.wait_time} Minutes</span>
+                        </div>
+                      </td>
+                      <td className="px-12 py-10 text-right">
+                        <div className="flex justify-end gap-3">
+                           <button 
+                            onClick={() => setActiveTab('diagnostics')}
+                            className="bg-white/5 hover:bg-teal-500 p-4 rounded-2xl transition-all border border-white/5 group" 
+                            title="Input Result Values"
+                           >
+                              <Microscope size={20} className="group-hover:scale-110 transition-transform" />
                            </button>
                            <button 
                             onClick={() => handleProcessPatient(p.id)}
-                            className="bg-[#020617] text-teal-400 px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 hover:bg-teal-600 hover:text-white transition-all shadow-lg"
+                            className="bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase flex items-center gap-3 hover:bg-teal-600 transition-all shadow-xl"
                            >
-                            Return to Doctor <ArrowRight size={14} />
+                            Finalize & Release <ArrowRight size={16} />
                            </button>
                         </div>
                       </td>
@@ -188,9 +189,11 @@ const LabTechDashboard = () => {
                 </tbody>
               </table>
               {!loading && queue.length === 0 && (
-                 <div className="py-20 text-center text-slate-500 font-bold uppercase tracking-widest text-xs italic">
-                    <Microscope size={40} className="mx-auto mb-4 opacity-20" />
-                    No active samples in the worklist.
+                 <div className="py-32 text-center">
+                    <Microscope size={64} className="mx-auto mb-6 text-slate-800 opacity-20" />
+                    <p className="text-slate-500 font-black uppercase tracking-[0.5em] text-xs italic">
+                        Worklist clear. No active samples.
+                    </p>
                  </div>
               )}
             </div>
@@ -201,29 +204,29 @@ const LabTechDashboard = () => {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-950 font-sans text-slate-200">
+    <div className="flex min-h-screen bg-slate-950 font-sans text-slate-200 selection:bg-teal-500/30">
       <LabSidebar activeTab={activeTab} setActiveTab={setActiveTab} />
-      <main className="flex-1 p-8 overflow-y-auto">
-        <header className="flex justify-between items-center mb-12">
+      <main className="flex-1 p-12 overflow-y-auto custom-scrollbar">
+        <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-16 gap-8">
           <div>
-            <h1 className="text-3xl font-black text-white tracking-tighter uppercase italic">
-              Salama <span className="text-teal-500 underline decoration-2 underline-offset-8">Lab Hub</span>
+            <h1 className="text-4xl font-black text-white tracking-tighter uppercase italic">
+              Salama <span className="text-teal-500 underline decoration-4 underline-offset-[12px]">Lab Hub</span>
             </h1>
-            <p className="text-slate-500 text-sm mt-2 font-medium tracking-tight">Oncology Diagnostics Module</p>
+            <p className="text-slate-500 text-sm mt-4 font-bold tracking-[0.2em] uppercase">Oncology Diagnostic Command Center</p>
           </div>
           
-          <div className="flex items-center space-x-4 bg-white/5 p-2 rounded-2xl border border-white/10 shadow-xl">
+          <div className="flex items-center space-x-6 bg-white/5 p-4 rounded-[2rem] border border-white/10 shadow-2xl backdrop-blur-md">
              <div className="text-right px-2">
-               <p className="text-xs font-bold text-white uppercase">Lab Specialist</p>
-               <p className="text-[10px] text-teal-500 font-black tracking-widest uppercase">Unit Alpha-01</p>
+               <p className="text-xs font-black text-white uppercase tracking-widest">Lab Specialist</p>
+               <p className="text-[10px] text-teal-500 font-black tracking-[0.3em] uppercase mt-1 italic">Unit Alpha-01</p>
              </div>
-             <div className="w-10 h-10 bg-teal-500 rounded-xl flex items-center justify-center font-black text-white text-xs">
+             <div className="w-14 h-14 bg-teal-500 rounded-[1.2rem] flex items-center justify-center font-black text-white text-sm shadow-xl shadow-teal-500/20">
                CK
              </div>
           </div>
         </header>
 
-        <section className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+        <section className="animate-in fade-in slide-in-from-bottom-8 duration-1000 fill-mode-both">
           {renderModule()}
         </section>
       </main>

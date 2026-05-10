@@ -195,10 +195,19 @@ class BillViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsFinancialStaff]
     filterset_fields = ['patient', 'is_paid']
 
+# --- 6. REMAINING VIEWSETS ---
+
 class LabResultViewSet(viewsets.ModelViewSet):
+    queryset = LabResult.objects.all().order_by('-test_date') 
+    
     serializer_class = LabResultSerializer
     permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
     filterset_fields = ['patient', 'is_critical']
+    
+    def perform_create(self, serializer):
+        serializer.save(recorded_by=self.request.user)
+
+
 
 class DrugViewSet(viewsets.ModelViewSet):
     queryset = Drug.objects.all()

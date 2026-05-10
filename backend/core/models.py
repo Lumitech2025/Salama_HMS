@@ -109,6 +109,7 @@ class Queue(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='queue_entries')
     appointment = models.ForeignKey(Appointment, on_delete=models.SET_NULL, null=True, blank=True)
     
+    
     current_station = models.CharField(max_length=20, choices=STATION_CHOICES, default='TRIAGE')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='WAITING')
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='NORMAL')
@@ -232,3 +233,34 @@ class Bill(models.Model):
 
     def __str__(self):
         return f"{self.bill_no} - {self.patient.name}"
+    
+
+
+class LabInventoryItem(models.Model):
+    CATEGORY_CHOICES = [
+        ('Chemicals', 'Chemicals'),
+        ('Consumables', 'Consumables'),
+        ('Reagents', 'Reagents'),
+        ('Microscopy', 'Microscopy'),
+    ]
+
+    name = models.CharField(max_length=200)
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES)
+    stock = models.IntegerField(default=0)
+    min_stock = models.IntegerField(default=10) # Threshold for "Low Stock" alert
+    unit = models.CharField(max_length=50, default='Units')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.stock} {self.unit})"
+
+class StockAdjustment(models.Model):
+    item = models.ForeignKey(LabInventoryItem, on_delete=models.CASCADE, related_name='adjustments')
+    technician = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    quantity_used = models.IntegerField()
+    remaining_stock = models.IntegerField()
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.item.name} - {self.quantity_used} used"
