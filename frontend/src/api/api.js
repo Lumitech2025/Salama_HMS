@@ -1,10 +1,11 @@
+// api.js
 import axios from 'axios';
 
 const API = axios.create({
-    baseURL: 'http://localhost:8000', 
+    // Use '/api' so it hits the Vite proxy we set up earlier
+    baseURL: '/api', 
 });
 
-// This interceptor grabs the token from localStorage before every request
 API.interceptors.request.use((config) => {
     const token = localStorage.getItem('access_token');
     if (token) {

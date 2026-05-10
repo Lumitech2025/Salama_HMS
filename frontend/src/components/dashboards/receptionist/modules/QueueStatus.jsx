@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import API from '@/api/api'; // Use your custom API instance
 import { 
   Users, ArrowRightCircle, Clock, Timer, Search, LayoutGrid,
   Activity, ChevronDown, UserCheck, Stethoscope, RefreshCcw, AlertTriangle, Loader2
@@ -30,13 +30,14 @@ const QueueStatus = () => {
   const fetchQueueData = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      let url = '/api/queue/';
-      const params = new URLSearchParams();
-      if (activeStation !== 'ALL') params.append('current_station', activeStation);
-      if (searchTerm) params.append('search', searchTerm);
+      const params = {};
+      if (activeStation !== 'ALL') params.current_station = activeStation;
+      if (searchTerm) params.search = searchTerm;
       
-      const response = await axios.get(`${url}?${params.toString()}`);
-      setQueue(Array.isArray(response.data) ? response.data : (response.data.results || []));
+      const response = await API.get('/queue/', { params });
+      // Handle both DRF paginated and non-paginated responses
+      const data = response.data.results || response.data;
+      setQueue(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("Queue Sync Error:", err);
     } finally {
@@ -45,11 +46,10 @@ const QueueStatus = () => {
     }
   }, [activeStation, searchTerm]);
 
-  // 2. Fetch Analytics (Using your custom analytics action)
+  // 2. Fetch Analytics
   const fetchAnalytics = useCallback(async () => {
     try {
-      // Assuming your ViewSet has a @action(detail=False) called 'analytics'
-      const response = await axios.get(`/api/queue/analytics/`, {
+      const response = await API.get(`/queue/analytics/`, {
           params: { station: activeStation }
       });
       setAnalytics(response.data);
@@ -58,16 +58,17 @@ const QueueStatus = () => {
     }
   }, [activeStation]);
 
-  // 3. Move Patient to Next Station (Action Logic)
+  // 3. Move Patient to Next Station
   const handleAdvance = async (queueId) => {
+    if (!window.confirm("Advance patient to the next clinical station?")) return;
+    
     setActionLoading(queueId);
     try {
-        // Calls a custom move_next action on the backend
-        await axios.post(`/api/queue/${queueId}/move_next/`);
-        fetchQueueData();
-        fetchAnalytics();
+        // This triggers the flow logic on your backend
+        await API.post(`/queue/${queueId}/move_next/`);
+        await Promise.all([fetchQueueData(), fetchAnalytics()]);
     } catch (err) {
-        alert("Flow Control Error: Patient cannot be advanced manually.");
+        alert("Flow Control Error: Ensure patient has completed current station requirements.");
     } finally {
         setActionLoading(null);
     }
@@ -76,10 +77,13 @@ const QueueStatus = () => {
   useEffect(() => {
     fetchQueueData();
     fetchAnalytics();
+    
+    // Live Polling
     const interval = setInterval(() => {
       fetchQueueData();
       fetchAnalytics();
-    }, 15000); // Faster polling for "Live" feel
+    }, 15000); 
+    
     return () => clearInterval(interval);
   }, [fetchQueueData, fetchAnalytics]);
 
@@ -103,7 +107,7 @@ const QueueStatus = () => {
         </div>
         
         <button 
-          onClick={fetchQueueData}
+          onClick={() => { setLoading(true); fetchQueueData(); }}
           className={`relative z-10 p-4 bg-white/5 hover:bg-white/10 rounded-2xl transition-all ${isRefreshing ? 'opacity-50' : ''}`}
         >
           <RefreshCcw size={20} className={`text-teal-400 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -128,7 +132,7 @@ const QueueStatus = () => {
             </div>
             <select 
               value={activeStation}
-              onChange={(e) => setActiveStation(e.target.value)}
+              onChange={(e) => { setLoading(true); setActiveStation(e.target.value); }}
               className="w-full h-full pl-16 pr-4 bg-transparent font-black text-slate-900 text-sm uppercase tracking-wider outline-none appearance-none cursor-pointer"
             >
               {stations.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
@@ -171,7 +175,7 @@ const QueueStatus = () => {
             {['ALL', 'TRIAGE', 'DOCTOR', 'LAB', 'PHARMACY'].map((sid) => (
               <button 
                 key={sid}
-                onClick={() => setActiveStation(sid)}
+                onClick={() => { setLoading(true); setActiveStation(sid); }}
                 className={`px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all border shrink-0 ${
                   activeStation === sid ? 'bg-slate-900 text-white border-slate-900 shadow-xl' : 'bg-white text-slate-400 border-slate-100 hover:border-slate-300'
                 }`}
@@ -198,7 +202,7 @@ const QueueStatus = () => {
               {!loading && queue.map((item) => (
                 <tr key={item.id} className="group hover:bg-teal-50/20 transition-all animate-in slide-in-from-left-2">
                   <td className="px-12 py-8 font-black text-teal-600 text-sm italic underline decoration-teal-100 decoration-4 underline-offset-4">
-                    {item.token_id}
+                    #{item.token_id}
                   </td>
                   <td className="px-12 py-8">
                     <p className="font-black text-slate-900 text-base uppercase mb-1">{item.patient_name}</p>
@@ -236,6 +240,7 @@ const QueueStatus = () => {
                     <button 
                         onClick={() => handleAdvance(item.id)}
                         disabled={actionLoading === item.id}
+                        title="Advance to next station"
                         className="p-4 bg-white border-2 border-slate-100 text-slate-900 rounded-[1.2rem] hover:bg-slate-900 hover:text-white transition-all shadow-sm group disabled:opacity-50"
                     >
                       {actionLoading === item.id ? (

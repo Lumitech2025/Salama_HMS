@@ -10,4 +10,14 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  server: {
+    proxy: {
+      // This bridges the gap between Vite (5173) and Django (8000)
+      '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 })

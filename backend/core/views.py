@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.db.models import Avg, Count, F
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework_simplejwt.views import TokenObtainPairView
-from datetime import date, timedelta
+from datetime import datetime, time
 
 # Import local models and serializers
 from .models import (
@@ -86,16 +86,16 @@ class QueueViewSet(viewsets.ModelViewSet):
         Returns real-time KPIs for the Front Desk Home Dashboard.
         """
         station = request.query_params.get('station', 'ALL')
-        today = date.today()
+        today = timezone.now().date()
+        start_of_day = timezone.make_aware(datetime.combine(today, time.min))
         
         # 1. KPI: Total patients registered today
-        today_total_registered = Patient.objects.filter(created_at__date=today).count()
+        today_total = Patient.objects.filter(created_at__gte=start_of_day).count()
         
         # 2. KPI: Total overall appointments in the system
-        total_appointments_overall = Appointment.objects.count()
+        today_appts = Appointment.objects.filter(appointment_date=today).count()
+        total_appts = Appointment.objects.count()  # For "Today's Schedule" Card
 
-        # 3. KPI: Total appointments scheduled for today specifically
-        today_scheduled_appointments = Appointment.objects.filter(appointment_date=today).count()
 
         # 4. Table Helper: Count for currently waiting in a specific station
         station_qs = Queue.objects.filter(status='WAITING')
@@ -106,9 +106,9 @@ class QueueViewSet(viewsets.ModelViewSet):
         avg_wait = 12 
 
         return Response({
-            'today_total': today_total_registered,          # For "Today's Registered" Card
-            'total_appointments': total_appointments_overall, # For "Total Appointments" Card
-            'today_appointments': today_scheduled_appointments, # For "Today's Schedule" Card
+            'today_total': today_total,           # New Admissions
+            'today_appointments': today_appts,    # Confirmed Today
+            'total_appointments': total_appts, # For "Today's Schedule" Card
             'station_queue': station_qs.count(),
             'avg_wait_time': f"{avg_wait}m"
         })
@@ -116,7 +116,7 @@ class QueueViewSet(viewsets.ModelViewSet):
 # --- 4. FRONT DESK & SCHEDULING ---
 
 class AppointmentViewSet(viewsets.ModelViewSet):
-    queryset = Appointment.objects.all().order_by('appointment_date', 'appointment_time')
+    queryset = Appointment.objects.all().order_by('-appointment_date', '-appointment_time')
     serializer_class = AppointmentSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
