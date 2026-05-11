@@ -14,12 +14,12 @@ const PharmacistSidebar = ({ activeTab, setActiveTab }) => {
     const navigate = useNavigate();
 
     const menuItems = [
-        { id: 'overview', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
+        { id: 'overview', label: 'Home', icon: <LayoutDashboard size={20} /> },
         { id: 'prescriptions', label: 'Prescriptions', icon: <ClipboardList size={20} /> },
-        { id: 'dispensing', label: 'Dispensing', icon: <Pill size={20} /> },
-        { id: 'inventory', label: 'Inventory/Stock', icon: <Package size={20} /> },
-        { id: 'patients', label: 'Patient Registry', icon: <Users size={20} /> },
-        { id: 'billing', label: 'Billing & Requisitions', icon: <Receipt size={20} /> },
+        { id: 'dispensing', label: 'Patient History', icon: <Pill size={20} /> },
+        { id: 'inventory', label: 'Inventory', icon: <Package size={20} /> },
+        { id: 'patients', label: 'References', icon: <Users size={20} /> },
+        { id: 'billing', label: 'Billing', icon: <Receipt size={20} /> },
     ];
 
     const handleLogout = () => {
@@ -78,7 +78,7 @@ const PharmacistSidebar = ({ activeTab, setActiveTab }) => {
                 
                 <div className="mt-8 text-center">
                     <p className="text-[9px] text-slate-800 font-bold uppercase tracking-[0.3em]">
-                        Salama Digital — Meru, KE
+                        Salama Hms 001
                     </p>
                 </div>
             </div>

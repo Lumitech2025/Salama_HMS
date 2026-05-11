@@ -2,9 +2,10 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import (
-    Patient, Protocol, Treatment, ChemoSession, 
+    Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue
 )
+from .models import LabInventoryItem, StockAdjustment
 
 User = get_user_model()
 
@@ -185,4 +186,15 @@ class BillSerializer(serializers.ModelSerializer):
     bill_date = serializers.DateTimeField(source='created_at', read_only=True)
     class Meta:
         model = Bill
+        fields = '__all__'
+
+
+class LabInventorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LabInventoryItem
+        fields = '__all__'
+
+class StockAdjustmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StockAdjustment
         fields = '__all__'

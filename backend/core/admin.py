@@ -6,9 +6,10 @@ from django.urls import reverse
 from django.http import HttpResponse
 import csv
 from .models import (
-    Patient, Protocol, Treatment, ChemoSession, 
+    LabInventoryItem, Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue
 )
+
 
 User = get_user_model()
 
@@ -181,6 +182,20 @@ class DrugAdmin(admin.ModelAdmin):
         if obj.expiry_date and obj.expiry_date <= timezone.now().date():
             return format_html('<b style="color: #dc3545;">🚨 EXPIRED</b>')
         return obj.expiry_date
+    
+ 
+
+@admin.register(LabInventoryItem)
+class LabInventoryAdmin(admin.ModelAdmin):
+    list_display = ('name', 'category', 'stock', 'min_stock', 'unit', 'updated_at')
+    list_filter = ('category',)
+    search_fields = ('name',)
+    list_editable = ('stock', 'min_stock')
+
+@admin.register(StockAdjustment)
+class StockAdjustmentAdmin(admin.ModelAdmin):
+    list_display = ('item', 'quantity_used', 'remaining_stock', 'technician', 'created_at')
+    readonly_fields = ('created_at',)
 
 admin.site.register(Protocol)
 admin.site.register(LabResult)

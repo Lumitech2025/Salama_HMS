@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
+    LabInventoryViewSet,
     PatientViewSet, 
     ProtocolViewSet, 
     TreatmentViewSet, 
@@ -12,8 +13,8 @@ from .views import (
     BillViewSet,
     AppointmentViewSet,
     VitalSignViewSet,
-    QueueViewSet,              # Added for Live Monitor
-    SalamaTokenObtainPairView   # Custom JWT view
+    QueueViewSet,              
+    SalamaTokenObtainPairView  
 )
 
 # Using DefaultRouter for automatic URL conf and a clean API root
@@ -35,6 +36,8 @@ router.register(r'treatments', TreatmentViewSet, basename='treatment')
 # --- 4. Execution (Chemotherapy) & Pharmacy ---
 router.register(r'chemo-sessions', ChemoSessionViewSet, basename='chemo-session')
 router.register(r'drugs', DrugViewSet, basename='drug')
+
+router.register(r'inventory', LabInventoryViewSet)
 
 # --- 5. Diagnostics & Revenue Cycle ---
 router.register(r'lab-results', LabResultViewSet, basename='lab-result')

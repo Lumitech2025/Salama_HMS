@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import OncologistSidebar from './OncologistSidebar';
 
 // Clinical Modules
-import PatientRegistry from './modules/PatientRegistry';
+import DoctorHome from './modules/DoctorHome'; // The new Command Center
 import OncologyTreatment from './modules/OncologyTreatment'; 
 import ClinicalEMR from './modules/ClinicalEMR'; 
 import LaboratoryResults from './modules/LaboratoryResults';
@@ -11,24 +11,27 @@ import PalliativeCare from './modules/PalliativeCare';
 
 const OncologistDashboard = () => {
     const navigate = useNavigate();
-    const [activeModule, setActiveModule] = useState('registry');
     
-    // In a real HMS, this would be updated when you click a patient in the Registry
-    const [selectedPatient, setSelectedPatient] = useState({
-        name: "James Kimani",
-        ucrn: "UCRN-2026-102",
-        diagnosis: "C50.1 (Breast, Central)",
-        status: "In-Treatment"
-    });
+    // Initial state set to 'home' for the new analytics/queue view
+    const [activeModule, setActiveModule] = useState('home');
+    
+    // State to hold the patient currently being attended to
+    const [selectedPatient, setSelectedPatient] = useState(null);
 
     const handleLogout = () => {
         localStorage.clear();
         navigate('/login');
     };
 
+    // Centralized handler for attending to a patient from the Queue or Registry
+    const handleAttendPatient = (patient) => {
+        setSelectedPatient(patient);
+        setActiveModule('emr'); // Automatically jump to EMR when a patient is selected
+    };
+
     return (
         <div className="flex min-h-screen bg-slate-50 font-['Inter'] selection:bg-blue-100">
-            {/* Sidebar with Logout logic passed down */}
+            {/* Sidebar with dynamic state control */}
             <OncologistSidebar 
                 activeModule={activeModule} 
                 setActiveModule={setActiveModule} 
@@ -42,60 +45,109 @@ const OncologistDashboard = () => {
                     <div className="mb-6 flex justify-between items-center">
                         <div>
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">
-                                Salama HMS / {activeModule.replace('-', ' ')}
+                                Salama HMS / {activeModule === 'home' ? 'Command Center' : activeModule.replace('-', ' ')}
                             </p>
-                            <h1 className="text-3xl font-black text-slate-900 capitalize tracking-tighter">
-                                {activeModule === 'emr' ? 'Electronic Medical Record' : activeModule.replace('-', ' ')}
+                            <h1 className="text-4xl font-black text-slate-900 capitalize tracking-tighter">
+                                {activeModule === 'home' ? 'Dashboard' : 
+                                 activeModule === 'emr' ? 'Clinical EMR' : 
+                                 activeModule.replace('-', ' ')}
                             </h1>
                         </div>
                         
-                        {/* Quick Stats or Notifications could go here */}
                         <div className="flex gap-4">
-                             <div className="bg-white px-4 py-2 rounded-2xl border border-slate-200 shadow-sm text-right">
-                                <p className="text-[10px] font-bold text-slate-400 uppercase">Clinic Status</p>
-                                <p className="text-sm font-black text-green-600">Active Session</p>
+                             <div className="bg-white px-5 py-3 rounded-[1.5rem] border border-slate-200 shadow-sm flex items-center gap-3">
+                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                                <div className="text-right">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase leading-none">Clinic Status</p>
+                                    <p className="text-sm font-black text-slate-800">Active Session</p>
+                                </div>
                              </div>
                         </div>
                     </div>
 
-                    {/* Patient Context Bar - ONLY shows if a patient is selected and not in Registry */}
-                    {selectedPatient && activeModule !== 'registry' && (
-                        <div className="mb-8 p-6 bg-white rounded-3xl border-l-4 border-l-blue-600 border-y border-r border-blue-100 shadow-sm flex items-center justify-between animate-in fade-in slide-in-from-top-4 duration-500">
+                    {/* Patient Context Bar - Visible when a patient is loaded and doctor is NOT on the home screen */}
+                    {selectedPatient && activeModule !== 'home' && (
+                        <div className="mb-8 p-6 bg-white rounded-3xl border-l-4 border-l-teal-500 border-y border-r border-slate-200 shadow-sm flex items-center justify-between animate-in fade-in slide-in-from-top-4 duration-500">
                             <div className="flex items-center gap-6">
-                                <div className="h-14 w-14 bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl flex items-center justify-center text-white text-xl font-black shadow-lg shadow-blue-600/20">
+                                <div className="h-14 w-14 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl flex items-center justify-center text-white text-xl font-black shadow-lg">
                                     {selectedPatient.name.charAt(0)}
                                 </div>
                                 <div>
                                     <div className="flex items-center gap-2 mb-1">
-                                        <span className="px-2 py-0.5 bg-blue-50 text-[10px] font-black text-blue-600 uppercase rounded-md border border-blue-100">
+                                        <span className="px-2 py-0.5 bg-teal-50 text-[10px] font-black text-teal-600 uppercase rounded-md border border-teal-100">
                                             {selectedPatient.ucrn}
                                         </span>
-                                        <span className="px-2 py-0.5 bg-green-50 text-[10px] font-black text-green-600 uppercase rounded-md border border-green-100">
-                                            {selectedPatient.status}
+                                        <span className="px-2 py-0.5 bg-blue-50 text-[10px] font-black text-blue-600 uppercase rounded-md border border-blue-100">
+                                            {selectedPatient.status || 'Active'}
                                         </span>
                                     </div>
-                                    <h3 className="text-xl font-black text-slate-900 tracking-tight">{selectedPatient.name}</h3>
+                                    <h3 className="text-xl font-black text-slate-950 tracking-tight">{selectedPatient.name}</h3>
                                 </div>
                             </div>
                             <div className="text-right">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Primary Oncology Diagnosis</p>
-                                <p className="text-sm font-bold text-slate-700">{selectedPatient.diagnosis}</p>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Diagnosis</p>
+                                <p className="text-sm font-bold text-slate-700 italic">
+                                    {selectedPatient.diagnosis || 'General Consultation'}
+                                </p>
                             </div>
                         </div>
                     )}
                     
                     {/* Module Container */}
-                    <div className="bg-white rounded-[2rem] p-2 min-h-[70vh] shadow-xl shadow-slate-200/50 border border-slate-100">
-                        {activeModule === 'registry' && <PatientRegistry onSelectPatient={setSelectedPatient} />}
-                        {activeModule === 'treatment' && <OncologyTreatment patient={selectedPatient} />}
-                        {activeModule === 'emr' && <ClinicalEMR patient={selectedPatient} />}
-                        {activeModule === 'lab' && <LaboratoryResults patient={selectedPatient} />}
-                        {activeModule === 'palliative' && <PalliativeCare patient={selectedPatient} />}
+                    <div className="bg-white rounded-[3rem] p-4 min-h-[75vh] shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden">
+                        {/* 1. HOME MODULE: Analytics & Queue */}
+                        {activeModule === 'home' && (
+                            <DoctorHome onSelectPatient={handleAttendPatient} />
+                        )}
+
+                        {/* 2. CLINICAL MODULES: Content sensitive to selectedPatient */}
+                        {activeModule === 'emr' && (
+                            <ClinicalEMR patient={selectedPatient} />
+                        )}
+                        
+                        {activeModule === 'treatment' && (
+                            <OncologyTreatment patient={selectedPatient} />
+                        )}
+                        
+                        {activeModule === 'lab' && (
+                            <LaboratoryResults patient={selectedPatient} />
+                        )}
+                        
+                        {activeModule === 'palliative' && (
+                            <PalliativeCare patient={selectedPatient} />
+                        )}
+
+                        {/* Fallback for empty state */}
+                        {activeModule !== 'home' && !selectedPatient && (
+                            <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+                                <div className="bg-slate-50 p-8 rounded-full mb-6 text-slate-300">
+                                    <History size={48} />
+                                </div>
+                                <h3 className="text-xl font-black text-slate-900 uppercase">No Patient Selected</h3>
+                                <p className="text-slate-500 max-w-xs mt-2">Please return to the Dashboard Queue to select a patient for clinical review.</p>
+                                <button 
+                                    onClick={() => setActiveModule('home')}
+                                    className="mt-6 bg-slate-900 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-teal-600 transition-all"
+                                >
+                                    Return to Queue
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                    
+                    {/* Footer Sync Status */}
+                    <div className="mt-6 flex justify-center">
+                        <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.5em]">
+                            Salama Oncology Protocol v2.4 • Secure Data Link Active
+                        </p>
                     </div>
                 </div>
             </main>
         </div>
     );
 };
+
+// Simple Icon for fallback
+const History = ({ size }) => <span>⏳</span>;
 
 export default OncologistDashboard;

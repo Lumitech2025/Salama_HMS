@@ -7,15 +7,17 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework_simplejwt.views import TokenObtainPairView
 from datetime import datetime, time
 
+
+
 # Import local models and serializers
 from .models import (
-    Patient, Protocol, Treatment, ChemoSession, Drug, 
-    LabResult, Bill, Appointment, VitalSign, Queue
+    Patient, Protocol, StockAdjustment, Treatment, ChemoSession, Drug, 
+    LabResult, Bill, Appointment, VitalSign, Queue, LabInventoryItem, StockAdjustment
 )
 from .serializers import (
     PatientSerializer, ProtocolSerializer, TreatmentSerializer, 
     ChemoSessionSerializer, DrugSerializer, LabResultSerializer, 
-    BillSerializer, SalamaTokenObtainPairSerializer,
+    BillSerializer, SalamaTokenObtainPairSerializer, LabInventorySerializer, StockAdjustmentSerializer,
     AppointmentSerializer, VitalSignSerializer, QueueSerializer
 )
 
@@ -219,3 +221,26 @@ class ProtocolViewSet(viewsets.ModelViewSet):
     queryset = Protocol.objects.all()
     serializer_class = ProtocolSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+
+
+class LabInventoryViewSet(viewsets.ModelViewSet):
+    queryset = LabInventoryItem.objects.all().order_by('name')
+    serializer_class = LabInventorySerializer
+
+    @action(detail=True, methods=['post'])
+    def adjust_stock(self, request, pk=None):
+        item = self.get_object()
+        used = int(request.data.get('used', 0))
+        
+        item.stock -= used
+        item.save()
+        
+        StockAdjustment.objects.create(
+            item=item,
+            technician=request.user,
+            quantity_used=used,
+            remaining_stock=item.stock,
+            notes=request.data.get('notes', '')
+        )
+        return Response({'status': 'Stock adjusted', 'new_stock': item.stock}, status=status.HTTP_200_OK)
