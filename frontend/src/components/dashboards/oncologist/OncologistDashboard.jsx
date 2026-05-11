@@ -13,14 +13,24 @@ const OncologistDashboard = () => {
     const navigate = useNavigate();
     const [activeModule, setActiveModule] = useState('home');
     const [selectedPatient, setSelectedPatient] = useState(null);
+    
+    // 🟢 SESSION COUNTER: Tracks how many patients have been attended in this session
+    const [attendedCount, setAttendedCount] = useState(0);
 
     const handleLogout = () => {
         localStorage.clear();
         navigate('/login');
     };
 
+    // 🎯 Triggered when "Attend Patient" is clicked in DoctorHome
     const handleAttendPatient = (patient) => {
+        // 1. Increment the persistent session counter
+        setAttendedCount(prev => prev + 1);
+        
+        // 2. Set the global patient context
         setSelectedPatient(patient);
+        
+        // 3. Switch view to Vitals module
         setActiveModule('vitals'); 
     };
 
@@ -55,7 +65,7 @@ const OncologistDashboard = () => {
                         </div>
                     </div>
 
-                    {/* Patient Context Bar - Only shows if a patient is actively loaded */}
+                    {/* Patient Context Bar */}
                     {selectedPatient && activeModule !== 'home' && (
                         <div className="mb-8 p-6 bg-white rounded-3xl border-l-4 border-l-blue-600 shadow-sm flex items-center justify-between animate-in fade-in slide-in-from-top-4 duration-500">
                             <div className="flex items-center gap-6">
@@ -74,7 +84,7 @@ const OncologistDashboard = () => {
                                 </div>
                             </div>
                             <div className="text-right">
-                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Selected Station</p>
+                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Selected Station</p>
                                 <p className="text-sm font-bold text-slate-700 italic">Oncology Review</p>
                             </div>
                         </div>
@@ -82,27 +92,47 @@ const OncologistDashboard = () => {
                     
                     {/* Content Area */}
                     <div className="bg-white rounded-[3rem] p-4 min-h-[75vh] shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden">
+                        {/* 1. Dashboard Landing Page - Passing the counter props */}
                         {activeModule === 'home' && (
-                            <DoctorHome onSelectPatient={handleAttendPatient} />
-                        )}
-
-                        {activeModule === 'vitals' && (
-                            <OncologyVitals 
-                                selectedPatientFromParent={selectedPatient} 
-                                onTabSwitch={setActiveModule} 
+                            <DoctorHome 
+                                onSelectPatient={handleAttendPatient} 
+                                attendedSessionCount={attendedCount} 
                             />
                         )}
 
-                        {activeModule === 'lab' && (
-                            <LaboratoryResults patient={selectedPatient} onTabSwitch={setActiveModule} />
-                        )}
-
-                        {activeModule === 'history' && (
-                            <ClinicalEMR patient={selectedPatient} />
-                        )}
-
-                        {activeModule === 'prescriptions' && (
-                            <OncologyPrescription patient={selectedPatient} />
+                        {/* 2. Clinical Modules */}
+                        {selectedPatient ? (
+                            <>
+                                {activeModule === 'vitals' && (
+                                    <OncologyVitals 
+                                        selectedPatientFromParent={selectedPatient} 
+                                        onTabSwitch={setActiveModule} 
+                                    />
+                                )}
+                                {activeModule === 'lab' && (
+                                    <LaboratoryResults patient={selectedPatient} onTabSwitch={setActiveModule} />
+                                )}
+                                {activeModule === 'history' && (
+                                    <ClinicalEMR patient={selectedPatient} />
+                                )}
+                                {activeModule === 'prescriptions' && (
+                                    <OncologyPrescription patient={selectedPatient} onTabSwitch={setActiveModule} />
+                                )}
+                            </>
+                        ) : (
+                            activeModule !== 'home' && (
+                                <div className="flex flex-col items-center justify-center h-[60vh] text-center">
+                                    <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mb-6 text-slate-300 text-2xl font-serif italic">!</div>
+                                    <h3 className="text-xl font-black text-slate-900 uppercase italic">Patient Selection Required</h3>
+                                    <p className="text-slate-500 max-w-xs mt-2 text-sm italic">Please go to the Command Center and select a patient from the queue to view clinical details.</p>
+                                    <button 
+                                        onClick={() => setActiveModule('home')}
+                                        className="mt-6 bg-slate-900 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-blue-600 transition-all shadow-lg"
+                                    >
+                                        Return to Command Center
+                                    </button>
+                                </div>
+                            )
                         )}
                     </div>
                 </div>

@@ -2,27 +2,27 @@ import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api';
 import { 
   Pill, Plus, Trash2, Send, Calculator, 
-  User, ChevronDown, Save, Loader2, RefreshCcw, Activity
+  User, ChevronDown, Save, Loader2, RefreshCcw, Activity, Clock
 } from 'lucide-react';
 
 const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     const [queue, setQueue] = useState([]);
     const [selectedPatient, setSelectedPatient] = useState(selectedPatientFromParent || null);
     const [prescriptions, setPrescriptions] = useState([]);
-    const [loading, setLoading] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Presets for Oncology Workflow
-    const commonMeds = ["Doxorubicin", "Cisplatin", "Paclitaxel", "5-Fluorouracil", "Cyclophosphamide", "Ondansetron", "Dexamethasone"];
-    const frequencies = ["Once", "Daily", "Twice Daily", "Weekly", "Every 21 Days", "Every 14 Days"];
+    // Oncology Presets to reduce typing
+    const commonMeds = ["Doxorubicin", "Cisplatin", "Paclitaxel", "5-Fluorouracil", "Cyclophosphamide", "Ondansetron", "Dexamethasone", "Methotrexate"];
+    const frequencies = ["Once", "Daily", "Twice Daily", "Three Times Daily", "Weekly", "Every 21 Days"];
+    const durations = ["1 Day", "3 Days", "5 Days", "7 Days", "14 Days", "1 Cycle"];
 
     const [formData, setNewDrug] = useState({
-        drug_name: '',
+        medication_name: '',
         dosage: '',
         route: 'IV Infusion',
         frequency: 'Once',
         duration: '1 Day',
-        notes: ''
+        instructions: ''
     });
 
     const fetchQueue = useCallback(async () => {
@@ -39,36 +39,51 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     }, [selectedPatientFromParent]);
 
     const addDrugToList = () => {
-        if (!formData.drug_name || !formData.dosage) return;
+        if (!formData.medication_name || !formData.dosage) return;
         setPrescriptions([...prescriptions, { ...formData, id: Date.now() }]);
-        setNewDrug({ drug_name: '', dosage: '', route: 'IV Infusion', frequency: 'Once', duration: '1 Day', notes: '' });
+        setNewDrug({ medication_name: '', dosage: '', route: 'IV Infusion', frequency: 'Once', duration: '1 Day', instructions: '' });
     };
 
     const removeDrug = (id) => setPrescriptions(prescriptions.filter(p => p.id !== id));
 
     const handleSendToPharmacy = async () => {
         if (prescriptions.length === 0) return alert("Please add at least one medication.");
+        if (!selectedPatient) return alert("No patient selected.");
+
         setIsSubmitting(true);
         try {
+            // Extract the integer ID correctly
             const patientId = selectedPatient.patient || selectedPatient.id;
             
-            // 1. Submit the Prescription details
-            await API.post('/prescriptions/', {
+            // Format the payload to match your backend Serializer exactly
+            const payload = {
                 patient: patientId,
-                items: prescriptions,
-                status: 'PENDING'
-            });
+                status: 'PENDING',
+                // Adjusting keys to match standard Salama HMS backend fields
+                items: prescriptions.map(({ medication_name, dosage, frequency, duration, route, instructions }) => ({
+                    medication_name,
+                    dosage,
+                    frequency,
+                    duration,
+                    route,
+                    instructions
+                }))
+            };
 
-            // 2. Push patient to PHARMACY queue
+            // 1. POST the prescription
+            await API.post('/prescriptions/', payload);
+
+            // 2. Automatically update queue station to PHARMACY
             await API.patch(`/queue/${selectedPatient.id}/`, { 
                 current_station: 'PHARMACY',
                 status: 'AWAITING_MEDICATION' 
             });
 
-            alert("Success: Order transmitted and patient moved to Pharmacy queue.");
+            alert("Success: Order transmitted and patient moved to Pharmacy.");
             onTabSwitch('home'); 
         } catch (err) {
-            alert("Error in transmission.");
+            console.error("Transmission Error:", err.response?.data);
+            alert("Transmission failed: " + (err.response?.data?.detail || "Check required fields."));
         } finally {
             setIsSubmitting(false);
         }
@@ -77,7 +92,7 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     return (
         <div className="space-y-8 animate-in fade-in duration-700 font-['Inter'] pb-20">
             
-            {/* 1. SELECTION HUB */}
+            {/* PATIENT SELECTION HUB */}
             <div className="bg-[#020617] border border-white/5 rounded-[2.5rem] p-8 shadow-2xl">
                 <div className="flex flex-col md:flex-row items-center gap-6">
                     <div className="flex items-center gap-4 flex-1 w-full">
@@ -85,7 +100,7 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                         <div className="flex-1 relative">
                             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 ml-1">Regimen Recipient</p>
                             <select 
-                                className="w-full bg-slate-900 border-none rounded-2xl p-4 font-black text-white text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                                className="w-full bg-slate-900 border-none rounded-2xl p-4 font-black text-white text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none"
                                 onChange={(e) => {
                                     const p = queue.find(item => item.id === parseInt(e.target.value));
                                     setSelectedPatient(p);
@@ -105,19 +120,19 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
             </div>
 
             {selectedPatient ? (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
                     
-                    {/* INPUT SIDE */}
-                    <div className="lg:col-span-5 space-y-6">
+                    {/* BUILDER FORM */}
+                    <div className="xl:col-span-5 space-y-6">
                         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm space-y-5">
-                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Medication Selection</h3>
+                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4">Medication Builder</h3>
                             
                             <div className="space-y-2">
-                                <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Drug Name</label>
+                                <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Drug</label>
                                 <select 
                                     className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
-                                    value={formData.drug_name}
-                                    onChange={(e) => setNewDrug({...formData, drug_name: e.target.value})}
+                                    value={formData.medication_name}
+                                    onChange={(e) => setNewDrug({...formData, medication_name: e.target.value})}
                                 >
                                     <option value="">Select Medication...</option>
                                     {commonMeds.map(m => <option key={m} value={m}>{m}</option>)}
@@ -126,11 +141,10 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Dosage (mg)</label>
+                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Dosage</label>
                                     <input 
                                         className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold text-slate-900 outline-none"
-                                        placeholder="e.g. 100"
-                                        type="text"
+                                        placeholder="e.g. 50mg"
                                         value={formData.dosage}
                                         onChange={(e) => setNewDrug({...formData, dosage: e.target.value})}
                                     />
@@ -147,14 +161,39 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                                 </div>
                             </div>
 
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Duration</label>
+                                    <select 
+                                        className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold text-slate-900 outline-none"
+                                        value={formData.duration}
+                                        onChange={(e) => setNewDrug({...formData, duration: e.target.value})}
+                                    >
+                                        {durations.map(d => <option key={d} value={d}>{d}</option>)}
+                                    </select>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Route</label>
+                                    <select 
+                                        className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold text-slate-900 outline-none"
+                                        value={formData.route}
+                                        onChange={(e) => setNewDrug({...formData, route: e.target.value})}
+                                    >
+                                        <option>IV Infusion</option>
+                                        <option>Oral</option>
+                                        <option>SC Injection</option>
+                                    </select>
+                                </div>
+                            </div>
+
                             <div className="space-y-2">
-                                <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Route & Notes</label>
+                                <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Instructions</label>
                                 <textarea 
                                     className="w-full bg-slate-50 border-none rounded-2xl p-4 font-medium text-slate-700 text-sm outline-none"
                                     rows="2"
-                                    placeholder="e.g. Infuse over 60 mins..."
-                                    value={formData.notes}
-                                    onChange={(e) => setNewDrug({...formData, notes: e.target.value})}
+                                    placeholder="Instructions for pharmacy..."
+                                    value={formData.instructions}
+                                    onChange={(e) => setNewDrug({...formData, instructions: e.target.value})}
                                 />
                             </div>
 
@@ -167,29 +206,29 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                         </div>
                     </div>
 
-                    {/* SUMMARY & SUBMISSION SIDE */}
-                    <div className="lg:col-span-7 space-y-6">
-                        <div className="bg-[#020617] rounded-[3rem] p-10 shadow-2xl relative overflow-hidden min-h-[450px]">
+                    {/* ORDER SUMMARY */}
+                    <div className="xl:col-span-7 space-y-6">
+                        <div className="bg-[#020617] rounded-[3rem] p-10 shadow-2xl relative overflow-hidden min-h-[500px] border border-white/5">
                             <div className="flex justify-between items-center mb-10 relative z-10">
-                                <h3 className="text-xs font-black text-blue-400 uppercase tracking-[0.3em]">Pending Regimen Order</h3>
-                                <div className="bg-white/5 px-4 py-2 rounded-xl text-[10px] font-bold text-slate-400 uppercase">
-                                    Recipient: {selectedPatient.patient_name}
+                                <div>
+                                    <h3 className="text-xs font-black text-blue-400 uppercase tracking-[0.3em] mb-1">Clinical Order Summary</h3>
+                                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-tight italic">Drafting for {selectedPatient.patient_name}</p>
                                 </div>
                             </div>
 
                             {prescriptions.length === 0 ? (
-                                <div className="text-center py-24 opacity-20">
+                                <div className="text-center py-24 opacity-20 border-2 border-dashed border-white/10 rounded-[2rem]">
                                     <Pill size={64} className="mx-auto text-white mb-4" />
-                                    <p className="text-white text-xs font-black uppercase tracking-widest">Regimen list is empty</p>
+                                    <p className="text-white text-xs font-black uppercase tracking-widest">Regimen List Empty</p>
                                 </div>
                             ) : (
                                 <div className="space-y-4 relative z-10">
                                     {prescriptions.map((drug) => (
-                                        <div key={drug.id} className="bg-white/5 border border-white/10 p-6 rounded-[2rem] flex justify-between items-center group">
+                                        <div key={drug.id} className="bg-white/5 border border-white/10 p-6 rounded-[2rem] flex justify-between items-center group hover:bg-white/10 transition-all">
                                             <div className="flex items-center gap-5">
                                                 <div className="bg-blue-600/20 p-4 rounded-2xl text-blue-400"><Pill size={20}/></div>
                                                 <div>
-                                                    <p className="text-white font-black text-lg uppercase tracking-tight">{drug.drug_name}</p>
+                                                    <p className="text-white font-black text-lg uppercase tracking-tight">{drug.medication_name}</p>
                                                     <p className="text-[10px] font-bold text-slate-500 uppercase">{drug.dosage} • {drug.frequency} • {drug.route}</p>
                                                 </div>
                                             </div>
@@ -198,8 +237,8 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                                     ))}
 
                                     <div className="grid grid-cols-2 gap-4 mt-12">
-                                        <button className="bg-white/10 text-white py-5 rounded-[2rem] font-black uppercase tracking-widest text-[10px] hover:bg-white/20 transition-all flex items-center justify-center gap-3">
-                                            <Save size={18} /> Save for Record
+                                        <button className="bg-white/5 text-white py-5 rounded-[2rem] font-black uppercase tracking-widest text-[10px] border border-white/10 hover:bg-white/10 transition-all flex items-center justify-center gap-3">
+                                            <Save size={18} /> Save Progress
                                         </button>
                                         <button 
                                             onClick={handleSendToPharmacy}
@@ -217,7 +256,10 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                     </div>
                 </div>
             ) : (
-                <div className="p-20 text-center text-slate-400 italic">Please select a patient from the queue hub above to start prescribing.</div>
+                <div className="bg-white border border-dashed border-slate-200 rounded-[3rem] p-32 text-center shadow-sm">
+                    <Clock size={64} className="mx-auto text-slate-200 mb-6 animate-pulse" />
+                    <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mt-4 italic">Select a patient from the queue hub above to generate clinical orders.</p>
+                </div>
             )}
         </div>
     );
