@@ -119,7 +119,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     serializer_class = AppointmentSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['appointment_date', 'status', 'visit_type', 'practitioner']
+    filterset_fields = ['patient', 'practitioner', 'visit_type','appointment_date', 'status']
     search_fields = ['patient__name', 'patient__registry_no', 'manual_patient_name']
 
     @action(detail=True, methods=['post'])
@@ -174,6 +174,7 @@ class VitalSignViewSet(viewsets.ModelViewSet):
             current_station='DOCTOR',
             status='WAITING'
         )
+
 
 # --- 6. REMAINING VIEWSETS ---
 

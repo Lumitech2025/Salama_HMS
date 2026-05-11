@@ -2,21 +2,21 @@ import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api';
 import { 
   Users, Calendar, CheckCircle, Clock, 
-  Search, ArrowRight, ChevronLeft, ChevronRight, Activity, Loader2
+  Search, ArrowRight, ChevronLeft, ChevronRight, Activity, Loader2, Play, ChevronRightSquare
 } from 'lucide-react';
 
 const DoctorHome = ({ onSelectPatient }) => {
-    const [viewMode, setViewMode] = useState('appointments'); 
+    const [viewMode, setViewMode] = useState('queue'); 
     const [loading, setLoading] = useState(true);
     const [appointments, setAppointments] = useState([]);
+    const [queue, setQueue] = useState([]); 
     
-    // Default to actual today's date for the initial view
-    const todayStr = new Date().toISOString().split('T')[0];
-    const [selectedDate, setSelectedDate] = useState(todayStr);
+    const systemToday = new Date().toISOString().split('T')[0];
+    const [selectedDate, setSelectedDate] = useState(systemToday);
     
     const [stats, setStats] = useState({
         inQueue: 0,
-        apptsToday: 0, // This is the KPI for the actual current day
+        apptsToday: 0, 
         attended: 0,
         criticalLabs: 3
     });
@@ -24,37 +24,44 @@ const DoctorHome = ({ onSelectPatient }) => {
     const fetchDashboardData = useCallback(async () => {
         setLoading(true);
         try {
-            // 1. Fetch appointments filtered by the date selected on the calendar
-            // 2. Fetch general analytics for the KPI cards
-            const [resAppts, resAnalytics] = await Promise.all([
-                API.get(`/appointments/?date=${selectedDate}`),
-                API.get('/queue/analytics/?station=DOCTOR') 
-            ]);
-
-            // Set the list for the table based on calendar selection
-            setAppointments(resAppts.data.results || resAppts.data);
+            // Use individual try-catches or separate variables to prevent one error from breaking everything
             
-            // Set the KPI stats
-            setStats(prev => ({
-                ...prev,
-                inQueue: resAnalytics.data.station_queue || 0,
-                // Ensure this KPI always shows the count for 'todayStr', not necessarily 'selectedDate'
-                apptsToday: resAnalytics.data.total_appointments_today || 0,
+            // 1. Fetch appointments for the calendar list
+            const resAppts = await API.get(`/appointments/?appointment_date=${selectedDate}`).catch(() => ({ data: [] }));
+            setAppointments(resAppts.data.results || resAppts.data || []);
+
+            // 2. Fetch LIVE QUEUE (Station: DOCTOR) - These are patients from Triage
+            const resQueue = await API.get('/queue/?current_station=DOCTOR').catch(() => ({ data: [] }));
+            const queueData = resQueue.data.results || resQueue.data || [];
+            setQueue(queueData);
+
+            // 3. Fetch analytics for KPI cards
+            const resAnalytics = await API.get('/queue/analytics/?station=DOCTOR').catch(() => ({ data: {} }));
+            
+            // 4. Fetch Appts specifically for TODAY (for the KPI)
+            const resToday = await API.get(`/appointments/?appointment_date=${systemToday}`).catch(() => ({ data: [] }));
+            const todayCount = resToday.data.count || (resToday.data.results?.length) || resToday.data.length || 0;
+
+            setStats({
+                inQueue: queueData.length || resAnalytics.data.station_queue || 0,
+                apptsToday: todayCount, 
                 attended: resAnalytics.data.completed_today || 0,
-            }));
+                criticalLabs: 3
+            });
 
         } catch (err) {
-            console.error("Fetch error", err);
+            console.error("Critical Dashboard Error", err);
         } finally {
             setLoading(false);
         }
-    }, [selectedDate]); // Refetch whenever the calendar date changes
+    }, [selectedDate, systemToday]);
 
     useEffect(() => {
         fetchDashboardData();
+        const interval = setInterval(fetchDashboardData, 30000); // Auto-refresh for triage arrivals
+        return () => clearInterval(interval);
     }, [fetchDashboardData]);
 
-    // Simple helper to generate days for the UI
     const daysInMonth = Array.from({ length: 31 }, (_, i) => i + 1);
 
     return (
@@ -62,13 +69,10 @@ const DoctorHome = ({ onSelectPatient }) => {
             
             {/* KPI TIER */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <KPICard label="In Queue" value={stats.inQueue} icon={<Clock className="text-blue-600"/>} sub="Active Waiting" />
-                
-                {/* This card now correctly shows Today's total regardless of calendar navigation */}
-                <KPICard label="Appts Today" value={stats.apptsToday} icon={<Calendar className="text-teal-600"/>} sub="Total Scheduled" />
-                
-                <KPICard label="Attended" value={stats.attended} icon={<CheckCircle className="text-green-600"/>} sub="Completed" />
-                <KPICard label="Critical Labs" value={stats.criticalLabs} icon={<Activity className="text-red-600"/>} sub="Action Required" />
+                <KPICard label="In Queue" value={stats.inQueue} icon={<Clock className="text-blue-600"/>} sub="Awaiting Doctor" color="blue" />
+                <KPICard label="Appts Today" value={stats.apptsToday} icon={<Calendar className="text-teal-600"/>} sub="Total Scheduled" color="teal" />
+                <KPICard label="Attended" value={stats.attended} icon={<CheckCircle className="text-green-600"/>} sub="Completed" color="green" />
+                <KPICard label="Critical Labs" value={stats.criticalLabs} icon={<Activity className="text-red-600"/>} sub="Action Needed" color="red" />
             </div>
 
             {/* TOGGLE & SEARCH */}
@@ -77,100 +81,88 @@ const DoctorHome = ({ onSelectPatient }) => {
                     <button onClick={() => setViewMode('queue')} className={`px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${viewMode === 'queue' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Live Queue</button>
                     <button onClick={() => setViewMode('appointments')} className={`px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${viewMode === 'appointments' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Calendar</button>
                 </div>
-                <div className="relative flex-1 w-full group">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-teal-600 transition-colors" size={18} />
-                    <input type="text" placeholder="Search appointments..." className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl focus:ring-4 focus:ring-teal-500/5 outline-none transition-all font-medium" />
+                <div className="relative flex-1 w-full">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input type="text" placeholder="Search patient..." className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-teal-500/5 transition-all" />
                 </div>
             </div>
 
             <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden min-h-[500px]">
-                {viewMode === 'appointments' ? (
+                {viewMode === 'queue' ? (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead className="bg-slate-50/50 border-b border-slate-100">
+                                <tr>
+                                    <th className="p-10 text-[11px] font-black text-slate-400 uppercase tracking-widest">Incoming Patient</th>
+                                    <th className="p-10 text-[11px] font-black text-slate-400 uppercase tracking-widest">Token ID</th>
+                                    <th className="p-10 text-[11px] font-black text-slate-400 uppercase tracking-widest">Vitals Status</th>
+                                    <th className="p-10 text-right text-[11px] font-black text-slate-400 uppercase tracking-widest">Workflow</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {queue.length > 0 ? queue.map((pat, i) => (
+                                    <tr key={i} className="hover:bg-teal-50/20 transition-all group">
+                                        <td className="px-10 py-8">
+                                            <p className="font-black text-slate-900 text-lg uppercase">{pat.patient_name}</p>
+                                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">UCRN: {pat.patient_id_no}</p>
+                                        </td>
+                                        <td className="px-10 py-8">
+                                            <span className="bg-slate-900 text-white px-4 py-2 rounded-xl font-mono font-bold shadow-lg">{pat.token_id}</span>
+                                        </td>
+                                        <td className="px-10 py-8">
+                                            <span className="px-4 py-2 bg-green-50 text-green-700 rounded-full text-[9px] font-black uppercase tracking-widest border border-green-100">Vitals Captured</span>
+                                        </td>
+                                        <td className="px-10 py-8 text-right">
+                                            <button onClick={() => onSelectPatient(pat)} className="bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 ml-auto hover:bg-teal-600 transition-all">
+                                                Attend Patient <Play size={14} fill="currentColor"/>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                )) : (
+                                    <tr><td colSpan="4" className="py-40 text-center text-slate-400 italic">Queue is currently empty. Waiting for Triage...</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
                     <div className="p-8 grid grid-cols-1 lg:grid-cols-12 gap-10">
-                        {/* CALENDAR SIDE */}
-                        <div className="lg:col-span-4 bg-slate-50 rounded-[2.5rem] p-8 h-fit">
+                        <div className="lg:col-span-4 bg-slate-50 rounded-[2.5rem] p-8 h-fit border border-slate-100">
                             <div className="flex justify-between items-center mb-8">
                                 <h5 className="font-black text-slate-900 uppercase text-xs tracking-widest">May 2026</h5>
-                                <div className="flex gap-2">
-                                    <button className="p-2 hover:bg-white rounded-xl transition-all"><ChevronLeft size={18}/></button>
-                                    <button className="p-2 hover:bg-white rounded-xl transition-all"><ChevronRight size={18}/></button>
-                                </div>
                             </div>
                             <div className="grid grid-cols-7 gap-3">
                                 {daysInMonth.map(day => {
                                     const dateKey = `2026-05-${day.toString().padStart(2, '0')}`;
-                                    const isSelected = selectedDate === dateKey;
-                                    const isToday = todayStr === dateKey;
-
                                     return (
                                         <button 
                                             key={day}
                                             onClick={() => setSelectedDate(dateKey)}
-                                            className={`relative py-3 rounded-2xl text-xs font-bold transition-all 
-                                                ${isSelected ? 'bg-slate-900 text-white shadow-xl scale-110 z-10' : 'hover:bg-white text-slate-600'}
-                                                ${isToday && !isSelected ? 'border-2 border-teal-500' : ''}`}
+                                            className={`py-3 rounded-2xl text-xs font-bold transition-all ${selectedDate === dateKey ? 'bg-slate-900 text-white shadow-xl' : 'hover:bg-white text-slate-600'}`}
                                         >
                                             {day}
-                                            {isToday && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-teal-500 rounded-full" />}
                                         </button>
                                     );
                                 })}
                             </div>
                         </div>
 
-                        {/* LIST SIDE */}
                         <div className="lg:col-span-8 space-y-4">
-                            <div className="flex justify-between items-center mb-6">
-                                <div>
-                                    <h4 className="font-black text-slate-900 text-2xl tracking-tight">
-                                        {selectedDate === todayStr ? "Today's Schedule" : `Schedule for ${selectedDate}`}
-                                    </h4>
-                                    <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">
-                                        {appointments.length} Appointments Found
-                                    </p>
-                                </div>
-                                <div className="bg-teal-50 text-teal-700 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-teal-100">
-                                    {selectedDate}
-                                </div>
-                            </div>
-
-                            {loading ? (
-                                <div className="py-20 text-center"><Loader2 className="animate-spin text-teal-500 mx-auto" size={40} /></div>
-                            ) : appointments.length > 0 ? (
-                                <div className="grid grid-cols-1 gap-4">
-                                    {appointments.map((appt, i) => (
-                                        <div key={i} className="flex items-center justify-between p-6 border border-slate-100 rounded-[2rem] hover:border-teal-500 hover:shadow-xl hover:shadow-teal-500/5 transition-all group bg-white">
-                                            <div className="flex items-center gap-6">
-                                                <div className="bg-slate-900 text-white p-4 rounded-2xl font-black text-sm w-20 text-center shadow-lg">
-                                                    {appt.appointment_time?.substring(0, 5) || "00:00"}
-                                                </div>
-                                                <div>
-                                                    <p className="font-black text-slate-900 text-lg uppercase tracking-tight group-hover:text-teal-600 transition-colors">{appt.patient_name}</p>
-                                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2 mt-1">
-                                                        <Activity size={14} className="text-teal-500"/> {appt.reason || "Consultation"}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <button 
-                                                onClick={() => onSelectPatient(appt)}
-                                                className="p-5 bg-slate-50 text-slate-400 rounded-2xl group-hover:bg-teal-500 group-hover:text-white transition-all shadow-sm"
-                                            >
-                                                <ArrowRight size={24} />
-                                            </button>
+                            <h4 className="font-black text-slate-900 text-2xl tracking-tight mb-6 italic">Schedule: {selectedDate}</h4>
+                            {appointments.length > 0 ? appointments.map((appt, i) => (
+                                <div key={i} className="flex items-center justify-between p-6 border border-slate-100 rounded-[2rem] bg-white hover:border-teal-500 transition-all">
+                                    <div className="flex items-center gap-6">
+                                        <div className="bg-slate-900 text-white p-4 rounded-2xl font-black text-sm w-20 text-center shadow-md group-hover:bg-teal-600">{appt.appointment_time?.substring(0,5)}</div>
+                                        <div>
+                                            <p className="font-black text-slate-900 text-lg uppercase">{appt.patient_name}</p>
+                                            <p className="text-[10px] text-teal-600 font-bold uppercase tracking-widest">{appt.reason || "Consultation"}</p>
                                         </div>
-                                    ))}
+                                    </div>
+                                    <button onClick={() => onSelectPatient(appt)} className="p-5 bg-slate-50 text-slate-400 rounded-2xl hover:bg-teal-500 hover:text-white transition-all shadow-sm"><ArrowRight size={24} /></button>
                                 </div>
-                            ) : (
-                                <div className="py-32 text-center border-2 border-dashed border-slate-100 rounded-[3rem] bg-slate-50/30">
-                                    <Calendar size={64} className="mx-auto text-slate-200 mb-4" />
-                                    <p className="text-slate-400 font-bold uppercase tracking-widest text-sm">Clean Slate</p>
-                                    <p className="text-slate-300 text-xs mt-2">No appointments scheduled for this date.</p>
-                                </div>
+                            )) : (
+                                <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2rem]"><p className="text-slate-400 font-medium italic">No appointments for this date.</p></div>
                             )}
                         </div>
-                    </div>
-                ) : (
-                    <div className="p-10 text-center text-slate-400 italic font-medium uppercase tracking-[0.3em]">
-                        Live Queue Module Loading...
                     </div>
                 )}
             </div>
@@ -178,19 +170,17 @@ const DoctorHome = ({ onSelectPatient }) => {
     );
 };
 
-const KPICard = ({ label, value, icon, sub }) => (
-    <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:border-teal-500 transition-all">
+const KPICard = ({ label, value, icon, sub, color }) => (
+    <div className={`bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm group hover:border-${color}-500 transition-all`}>
         <div className="flex justify-between items-start mb-6">
-            <div className="p-4 bg-slate-50 rounded-[1.2rem] group-hover:bg-teal-50 group-hover:text-teal-600 transition-colors">{icon}</div>
-            <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Live</span>
+            <div className="p-4 bg-slate-50 rounded-[1.2rem]">{icon}</div>
+            <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest italic tracking-[0.2em]">Salama Oncology</span>
         </div>
         <h4 className="text-5xl font-black text-slate-950 tracking-tighter italic">{value}</h4>
         <p className="text-xs font-bold text-slate-500 uppercase mt-2 tracking-widest">{label}</p>
-        <div className="mt-4 pt-4 border-t border-slate-50">
-            <p className="text-[10px] text-teal-600 font-black uppercase tracking-tighter flex items-center gap-2">
-                <span className="w-1.5 h-1.5 bg-teal-500 rounded-full animate-pulse" /> {sub}
-            </p>
-        </div>
+        <p className="text-[10px] text-teal-600 font-black uppercase mt-4 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 bg-teal-500 rounded-full animate-pulse" /> {sub}
+        </p>
     </div>
 );
 

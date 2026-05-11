@@ -14,7 +14,7 @@ const OncologistSidebar = ({ activeModule, setActiveModule }) => {
 
     const modules = [
         { id: 'registry', name: 'Patient Registry', icon: <Users size={20} /> },
-        { id: 'treatment', name: 'Treatment', icon: <Microscope size={20} /> },
+        { id: 'treatment', name: 'Vitals', icon: <Microscope size={20} /> },
         { id: 'emr', name: 'Clinical EMR', icon: <ClipboardList size={20} /> },
         { id: 'lab', name: 'Laboratory', icon: <Beaker size={20} /> },
         { id: 'palliative', name: 'Palliative Care', icon: <HeartPulse size={20} /> },

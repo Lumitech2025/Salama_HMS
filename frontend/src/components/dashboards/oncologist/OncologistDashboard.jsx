@@ -4,7 +4,7 @@ import OncologistSidebar from './OncologistSidebar';
 
 // Clinical Modules
 import DoctorHome from './modules/DoctorHome'; // The new Command Center
-import OncologyTreatment from './modules/OncologyTreatment'; 
+import OncologyVitals from './modules/OncologyVitals';
 import ClinicalEMR from './modules/ClinicalEMR'; 
 import LaboratoryResults from './modules/LaboratoryResults';
 import PalliativeCare from './modules/PalliativeCare';
@@ -105,9 +105,7 @@ const OncologistDashboard = () => {
                             <ClinicalEMR patient={selectedPatient} />
                         )}
                         
-                        {activeModule === 'treatment' && (
-                            <OncologyTreatment patient={selectedPatient} />
-                        )}
+                        {activeModule === 'treatment' && <OncologyVitals patient={selectedPatient} />}
                         
                         {activeModule === 'lab' && (
                             <LaboratoryResults patient={selectedPatient} />
@@ -117,22 +115,7 @@ const OncologistDashboard = () => {
                             <PalliativeCare patient={selectedPatient} />
                         )}
 
-                        {/* Fallback for empty state */}
-                        {activeModule !== 'home' && !selectedPatient && (
-                            <div className="flex flex-col items-center justify-center h-[60vh] text-center">
-                                <div className="bg-slate-50 p-8 rounded-full mb-6 text-slate-300">
-                                    <History size={48} />
-                                </div>
-                                <h3 className="text-xl font-black text-slate-900 uppercase">No Patient Selected</h3>
-                                <p className="text-slate-500 max-w-xs mt-2">Please return to the Dashboard Queue to select a patient for clinical review.</p>
-                                <button 
-                                    onClick={() => setActiveModule('home')}
-                                    className="mt-6 bg-slate-900 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-teal-600 transition-all"
-                                >
-                                    Return to Queue
-                                </button>
-                            </div>
-                        )}
+                        
                     </div>
                     
                     {/* Footer Sync Status */}

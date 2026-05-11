@@ -30,6 +30,7 @@ router.register(r'queue', QueueViewSet, basename='queue')
 
 # --- 3. Triage & Clinical Care ---
 router.register(r'vitals', VitalSignViewSet, basename='vital')
+router.register(r'vital-signs', VitalSignViewSet, basename='vital-signs')
 router.register(r'protocols', ProtocolViewSet, basename='protocol')
 router.register(r'treatments', TreatmentViewSet, basename='treatment')
 
