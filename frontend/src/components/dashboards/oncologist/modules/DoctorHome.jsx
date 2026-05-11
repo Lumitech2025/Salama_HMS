@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api';
 import { 
   Users, Calendar, CheckCircle, Clock, 
-  Search, ArrowRight, ChevronLeft, ChevronRight, Activity, Loader2, Play, ChevronRightSquare
+  Search, ArrowRight, ChevronLeft, ChevronRight, Activity, Loader2, Play
 } from 'lucide-react';
 
 const DoctorHome = ({ onSelectPatient }) => {
@@ -24,13 +24,12 @@ const DoctorHome = ({ onSelectPatient }) => {
     const fetchDashboardData = useCallback(async () => {
         setLoading(true);
         try {
-            // Use individual try-catches or separate variables to prevent one error from breaking everything
-            
             // 1. Fetch appointments for the calendar list
             const resAppts = await API.get(`/appointments/?appointment_date=${selectedDate}`).catch(() => ({ data: [] }));
             setAppointments(resAppts.data.results || resAppts.data || []);
 
-            // 2. Fetch LIVE QUEUE (Station: DOCTOR) - These are patients from Triage
+            // 2. Fetch LIVE QUEUE (Station: DOCTOR)
+            // Patients will disappear from here once their status changes
             const resQueue = await API.get('/queue/?current_station=DOCTOR').catch(() => ({ data: [] }));
             const queueData = resQueue.data.results || resQueue.data || [];
             setQueue(queueData);
@@ -38,7 +37,7 @@ const DoctorHome = ({ onSelectPatient }) => {
             // 3. Fetch analytics for KPI cards
             const resAnalytics = await API.get('/queue/analytics/?station=DOCTOR').catch(() => ({ data: {} }));
             
-            // 4. Fetch Appts specifically for TODAY (for the KPI)
+            // 4. Fetch Appts specifically for TODAY (for the KPI card)
             const resToday = await API.get(`/appointments/?appointment_date=${systemToday}`).catch(() => ({ data: [] }));
             const todayCount = resToday.data.count || (resToday.data.results?.length) || resToday.data.length || 0;
 
@@ -58,9 +57,32 @@ const DoctorHome = ({ onSelectPatient }) => {
 
     useEffect(() => {
         fetchDashboardData();
-        const interval = setInterval(fetchDashboardData, 30000); // Auto-refresh for triage arrivals
+        const interval = setInterval(fetchDashboardData, 30000); 
         return () => clearInterval(interval);
     }, [fetchDashboardData]);
+
+    // 🎯 THE ATTEND PATIENT LOGIC
+    const handleAttendPatient = async (pat) => {
+        try {
+            // 1. Backend Update: Move patient to 'UNDER_CONSULTATION' 
+            // This ensures they are removed from the "Incoming" list and counted in analytics
+            await API.patch(`/queue/${pat.id}/`, {
+                status: 'UNDER_CONSULTATION',
+                current_station: 'DOCTOR'
+            });
+
+            // 2. Refresh Local Data: Update KPIs and clear the table list immediately
+            await fetchDashboardData();
+
+            // 3. Navigation: Switch to the Vitals/EMR tab in the parent Dashboard
+            onSelectPatient(pat);
+
+        } catch (err) {
+            console.error("Error attending patient:", err);
+            // Fallback: Navigate anyway if the status update fails
+            onSelectPatient(pat);
+        }
+    };
 
     const daysInMonth = Array.from({ length: 31 }, (_, i) => i + 1);
 
@@ -81,9 +103,9 @@ const DoctorHome = ({ onSelectPatient }) => {
                     <button onClick={() => setViewMode('queue')} className={`px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${viewMode === 'queue' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Live Queue</button>
                     <button onClick={() => setViewMode('appointments')} className={`px-8 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${viewMode === 'appointments' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>Calendar</button>
                 </div>
-                <div className="relative flex-1 w-full">
+                <div className="relative flex-1 w-full group">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input type="text" placeholder="Search patient..." className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-teal-500/5 transition-all" />
+                    <input type="text" placeholder="Search incoming patients..." className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-teal-500/5 transition-all" />
                 </div>
             </div>
 
@@ -103,41 +125,46 @@ const DoctorHome = ({ onSelectPatient }) => {
                                 {queue.length > 0 ? queue.map((pat, i) => (
                                     <tr key={i} className="hover:bg-teal-50/20 transition-all group">
                                         <td className="px-10 py-8">
-                                            <p className="font-black text-slate-900 text-lg uppercase">{pat.patient_name}</p>
+                                            <p className="font-black text-slate-900 text-lg uppercase tracking-tight">{pat.patient_name}</p>
                                             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">UCRN: {pat.patient_id_no}</p>
                                         </td>
                                         <td className="px-10 py-8">
-                                            <span className="bg-slate-900 text-white px-4 py-2 rounded-xl font-mono font-bold shadow-lg">{pat.token_id}</span>
+                                            <span className="bg-slate-900 text-white px-4 py-2 rounded-xl font-mono font-bold shadow-lg group-hover:bg-teal-600">{pat.token_id}</span>
                                         </td>
                                         <td className="px-10 py-8">
                                             <span className="px-4 py-2 bg-green-50 text-green-700 rounded-full text-[9px] font-black uppercase tracking-widest border border-green-100">Vitals Captured</span>
                                         </td>
                                         <td className="px-10 py-8 text-right">
-                                            <button onClick={() => onSelectPatient(pat)} className="bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 ml-auto hover:bg-teal-600 transition-all">
+                                            <button 
+                                                onClick={() => handleAttendPatient(pat)} 
+                                                className="bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 ml-auto hover:bg-teal-600 transition-all active:scale-95 shadow-xl"
+                                            >
                                                 Attend Patient <Play size={14} fill="currentColor"/>
                                             </button>
                                         </td>
                                     </tr>
                                 )) : (
-                                    <tr><td colSpan="4" className="py-40 text-center text-slate-400 italic">Queue is currently empty. Waiting for Triage...</td></tr>
+                                    <tr><td colSpan="4" className="py-40 text-center text-slate-400 italic">No patients in incoming queue.</td></tr>
                                 )}
                             </tbody>
                         </table>
                     </div>
                 ) : (
                     <div className="p-8 grid grid-cols-1 lg:grid-cols-12 gap-10">
+                        {/* CALENDAR SIDE */}
                         <div className="lg:col-span-4 bg-slate-50 rounded-[2.5rem] p-8 h-fit border border-slate-100">
-                            <div className="flex justify-between items-center mb-8">
-                                <h5 className="font-black text-slate-900 uppercase text-xs tracking-widest">May 2026</h5>
+                            <div className="flex justify-between items-center mb-8 text-slate-900">
+                                <h5 className="font-black uppercase text-xs tracking-widest">May 2026</h5>
                             </div>
                             <div className="grid grid-cols-7 gap-3">
                                 {daysInMonth.map(day => {
                                     const dateKey = `2026-05-${day.toString().padStart(2, '0')}`;
+                                    const isSelected = selectedDate === dateKey;
                                     return (
                                         <button 
                                             key={day}
                                             onClick={() => setSelectedDate(dateKey)}
-                                            className={`py-3 rounded-2xl text-xs font-bold transition-all ${selectedDate === dateKey ? 'bg-slate-900 text-white shadow-xl' : 'hover:bg-white text-slate-600'}`}
+                                            className={`py-3 rounded-2xl text-xs font-bold transition-all ${isSelected ? 'bg-slate-900 text-white shadow-xl' : 'hover:bg-white text-slate-600'}`}
                                         >
                                             {day}
                                         </button>
@@ -146,18 +173,21 @@ const DoctorHome = ({ onSelectPatient }) => {
                             </div>
                         </div>
 
+                        {/* LIST SIDE */}
                         <div className="lg:col-span-8 space-y-4">
                             <h4 className="font-black text-slate-900 text-2xl tracking-tight mb-6 italic">Schedule: {selectedDate}</h4>
                             {appointments.length > 0 ? appointments.map((appt, i) => (
-                                <div key={i} className="flex items-center justify-between p-6 border border-slate-100 rounded-[2rem] bg-white hover:border-teal-500 transition-all">
+                                <div key={i} className="flex items-center justify-between p-6 border border-slate-100 rounded-[2rem] bg-white hover:border-teal-500 transition-all group">
                                     <div className="flex items-center gap-6">
-                                        <div className="bg-slate-900 text-white p-4 rounded-2xl font-black text-sm w-20 text-center shadow-md group-hover:bg-teal-600">{appt.appointment_time?.substring(0,5)}</div>
+                                        <div className="bg-slate-900 text-white p-4 rounded-2xl font-black text-sm w-20 text-center group-hover:bg-teal-600">{appt.appointment_time?.substring(0,5)}</div>
                                         <div>
-                                            <p className="font-black text-slate-900 text-lg uppercase">{appt.patient_name}</p>
-                                            <p className="text-[10px] text-teal-600 font-bold uppercase tracking-widest">{appt.reason || "Consultation"}</p>
+                                            <p className="font-black text-slate-900 text-lg uppercase tracking-tight">{appt.patient_name}</p>
+                                            <p className="text-[10px] text-teal-600 font-bold uppercase tracking-widest">{appt.reason || "General Oncology Review"}</p>
                                         </div>
                                     </div>
-                                    <button onClick={() => onSelectPatient(appt)} className="p-5 bg-slate-50 text-slate-400 rounded-2xl hover:bg-teal-500 hover:text-white transition-all shadow-sm"><ArrowRight size={24} /></button>
+                                    <button onClick={() => handleAttendPatient(appt)} className="p-5 bg-slate-50 text-slate-400 rounded-2xl hover:bg-teal-500 hover:text-white transition-all shadow-sm active:scale-95">
+                                        <ArrowRight size={24} />
+                                    </button>
                                 </div>
                             )) : (
                                 <div className="py-20 text-center border-2 border-dashed border-slate-100 rounded-[2rem]"><p className="text-slate-400 font-medium italic">No appointments for this date.</p></div>
@@ -173,8 +203,8 @@ const DoctorHome = ({ onSelectPatient }) => {
 const KPICard = ({ label, value, icon, sub, color }) => (
     <div className={`bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm group hover:border-${color}-500 transition-all`}>
         <div className="flex justify-between items-start mb-6">
-            <div className="p-4 bg-slate-50 rounded-[1.2rem]">{icon}</div>
-            <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest italic tracking-[0.2em]">Salama Oncology</span>
+            <div className="p-4 bg-slate-50 rounded-[1.2rem] group-hover:scale-110 transition-transform">{icon}</div>
+            <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest italic tracking-[0.2em]">Salama HMS</span>
         </div>
         <h4 className="text-5xl font-black text-slate-950 tracking-tighter italic">{value}</h4>
         <p className="text-xs font-bold text-slate-500 uppercase mt-2 tracking-widest">{label}</p>
