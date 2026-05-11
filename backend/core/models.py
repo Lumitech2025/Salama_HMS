@@ -5,6 +5,8 @@ from datetime import date
 import math
 import random
 
+from authentication.models import User
+
 # --- Clinical Models ---
 
 class Patient(models.Model):
@@ -102,7 +104,12 @@ class Queue(models.Model):
         ('PHARMACY', 'Pharmacy'),
         ('BILLING', 'Billing/Discharge'),
     ]
-    STATUS_CHOICES = [('WAITING', 'Waiting'), ('IN_PROGRESS', 'In Attendance'), ('COMPLETED', 'Completed'), ('SKIPPED', 'Skipped')]
+    STATUS_CHOICES = [
+        ('WAITING', 'Waiting'), 
+        ('UNDER_CONSULTATION', 'Under Consultation'), # For Doctor KPI
+        ('AWAITING_MEDICATION', 'Awaiting Medication'), # For Pharmacist KPI
+        ('COMPLETED', 'Completed')
+    ]
     PRIORITY_CHOICES = [('NORMAL', 'Normal Priority'), ('HIGH', 'High Priority'), ('EMERGENCY', 'Emergency')]
 
     token_id = models.CharField(max_length=10, unique=True, editable=False)
@@ -130,6 +137,8 @@ class Queue(models.Model):
 
     def __str__(self):
         return f"{self.token_id} - {self.patient.name}"
+    
+
 
 class VitalSign(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='vitals')
@@ -144,8 +153,9 @@ class VitalSign(models.Model):
     weight = models.DecimalField(max_digits=5, decimal_places=2, help_text="kg")
     height = models.DecimalField(max_digits=5, decimal_places=2, help_text="cm")
     spo2 = models.PositiveIntegerField(verbose_name="Oxygen Saturation %", blank=True, null=True)
-    
-    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    bmi = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    bsa = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    recorded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     @property
@@ -190,7 +200,19 @@ class ChemoSession(models.Model):
     pre_auth_code = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)
 
-# --- Inventory & Billing ---
+class ClinicalNote(models.Model):
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
+    note_type = models.CharField(max_length=50, choices=[('CONSULT', 'Consultation'), ('PROGRESS', 'Progress')])
+    content = models.TextField()
+    doctor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class ImagingRecord(models.Model):
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
+    scan_type = models.CharField(max_length=50) # MRI, CT, XRAY
+    image_url = models.URLField(blank=True) # Link to PACS or Cloud storage
+    findings = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
 
 class Drug(models.Model):
     name = models.CharField(max_length=255)
@@ -261,3 +283,23 @@ class StockAdjustment(models.Model):
     remaining_stock = models.IntegerField()
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+    
+
+class Prescription(models.Model):
+    STATUS_CHOICES = [('PENDING', 'Pending'), ('DISPENSED', 'Dispensed'), ('CANCELLED', 'Cancelled')]
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
+    prescribed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    clinical_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+class PrescriptionItem(models.Model):
+    prescription = models.ForeignKey(Prescription, related_name='items', on_delete=models.CASCADE)
+    medication_name = models.CharField(max_length=255)
+    dosage = models.CharField(max_length=100)
+    route = models.CharField(max_length=100)     
+    frequency = models.CharField(max_length=100) 
+    duration = models.CharField(max_length=100)  
+    instructions = models.TextField(blank=True)

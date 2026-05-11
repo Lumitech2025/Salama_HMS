@@ -14,7 +14,7 @@ const OncologistDashboard = () => {
     const [activeModule, setActiveModule] = useState('home');
     const [selectedPatient, setSelectedPatient] = useState(null);
     
-    // 🟢 SESSION COUNTER: Tracks how many patients have been attended in this session
+    // Tracks how many patients have been attended in this browser session
     const [attendedCount, setAttendedCount] = useState(0);
 
     const handleLogout = () => {
@@ -22,15 +22,9 @@ const OncologistDashboard = () => {
         navigate('/login');
     };
 
-    // 🎯 Triggered when "Attend Patient" is clicked in DoctorHome
     const handleAttendPatient = (patient) => {
-        // 1. Increment the persistent session counter
         setAttendedCount(prev => prev + 1);
-        
-        // 2. Set the global patient context
         setSelectedPatient(patient);
-        
-        // 3. Switch view to Vitals module
         setActiveModule('vitals'); 
     };
 
@@ -90,9 +84,7 @@ const OncologistDashboard = () => {
                         </div>
                     )}
                     
-                    {/* Content Area */}
                     <div className="bg-white rounded-[3rem] p-4 min-h-[75vh] shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden">
-                        {/* 1. Dashboard Landing Page - Passing the counter props */}
                         {activeModule === 'home' && (
                             <DoctorHome 
                                 onSelectPatient={handleAttendPatient} 
@@ -100,7 +92,6 @@ const OncologistDashboard = () => {
                             />
                         )}
 
-                        {/* 2. Clinical Modules */}
                         {selectedPatient ? (
                             <>
                                 {activeModule === 'vitals' && (
