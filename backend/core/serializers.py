@@ -5,7 +5,7 @@ from .models import (
     Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue,
     LabInventoryItem, Prescription, PrescriptionItem, 
-    ClinicalNote, ImagingRecord
+    ClinicalNote, ImagingRecord, RegistrationRecord
 )
 
 User = get_user_model()
@@ -184,3 +184,19 @@ class ChemoSessionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChemoSession
         fields = '__all__'
+
+
+
+class RegistrationRecordSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RegistrationRecord
+        fields = '__all__'
+
+class RegistrationAnalyticsSerializer(serializers.Serializer):
+    total_patients = serializers.IntegerField()
+    todays_registrations = serializers.IntegerField()
+    urgent_today = serializers.IntegerField()        
+    returning_today = serializers.IntegerField()     
+    gender_distribution = serializers.DictField()    
+    age_groups = serializers.DictField()
+    insurance_distribution = serializers.DictField()

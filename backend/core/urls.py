@@ -17,7 +17,8 @@ from .views import (
     PrescriptionViewSet,     
     ClinicalNoteViewSet,     
     ImagingRecordViewSet,    
-    SalamaTokenObtainPairView  
+    SalamaTokenObtainPairView,
+    RegistrationRecordViewSet  
 )
 
 # Using DefaultRouter for automatic URL conf and a clean API root
@@ -52,6 +53,8 @@ router.register(r'inventory', LabInventoryViewSet, basename='inventory')
 # --- 6. Diagnostics & Revenue Cycle ---
 router.register(r'lab-results', LabResultViewSet, basename='lab-result')
 router.register(r'bills', BillViewSet, basename='bill')
+
+router.register(r'registrations', RegistrationRecordViewSet, basename='registration-records')
 
 urlpatterns = [
     path('', include(router.urls)), 

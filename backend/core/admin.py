@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.urls import reverse
 from django.http import HttpResponse
 import csv
-from .models import (
+from .models import (RegistrationRecord,
     LabInventoryItem, Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue,
     Prescription, PrescriptionItem, ClinicalNote, ImagingRecord
@@ -34,9 +34,9 @@ export_as_csv.short_description = "Export Selected to CSV"
 
 @admin.register(Queue)
 class QueueAdmin(admin.ModelAdmin):
-    list_display = ('token_id', 'patient', 'current_station', 'status_tag', 'priority_tag', 'live_wait_time')
-    list_filter = ('current_station', 'status', 'priority', 'entered_at')
-    search_fields = ('token_id', 'patient__name', 'patient__registry_no')
+    list_display = ('token_id', 'patient', 'current_station', 'status', 'priority', 'entered_at')
+    list_filter = ('current_station', 'status', 'priority')
+    search_fields = ('token_id', 'patient__name')
     readonly_fields = ('token_id', 'entered_at')
     
     def live_wait_time(self, obj):
@@ -62,6 +62,57 @@ class QueueAdmin(admin.ModelAdmin):
             '<span style="background: {}; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold;">{}</span>',
             colors.get(obj.priority, '#6c757d'), obj.priority
         )
+
+# --- Find your RegistrationRecordAdmin and update it to this: ---
+
+@admin.register(RegistrationRecord)
+class RegistrationRecordAdmin(admin.ModelAdmin):
+    # Updated list_display to include new KPIs
+    list_display = (
+        'queue_id', 'urgency_badge', 'returning_tag', 
+        'name', 'phone', 'age', 'gender_tag', 
+        'insurance_tag', 'registered_at'
+    )
+    
+    # Updated filters to include new flags
+    list_filter = ('is_urgent', 'is_returning', 'gender', 'insurance', 'registered_at')
+    
+    search_fields = ('queue_id', 'name', 'id_number', 'phone')
+    readonly_fields = ('queue_id', 'registered_at')
+
+    # Visual Badge for Urgency (High Visibility)
+    def urgency_badge(self, obj):
+        if obj.is_urgent:
+            return format_html(
+                '<span style="background: #dc3545; color: white; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 900; animation: pulse 2s infinite;">URGENT</span>'
+            )
+        return format_html('<span style="color: #6c757d; font-size: 10px;">Normal</span>')
+    urgency_badge.short_description = "Priority"
+
+    # Tag for Returning vs New
+    def returning_tag(self, obj):
+        if obj.is_returning:
+            return format_html('<span style="color: #28a745; font-weight: bold;">🔄 Returning</span>')
+        return format_html('<span style="color: #007bff; font-weight: bold;">✨ New</span>')
+    returning_tag.short_description = "Type"
+
+    def gender_tag(self, obj):
+        colors = {'M': '#007bff', 'F': '#e83e8c', 'O': '#6c757d'}
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            colors.get(obj.gender, '#000'), obj.get_gender_display()
+        )
+    gender_tag.short_description = "Gender"
+
+    def insurance_tag(self, obj):
+        color = "#28a745" if obj.insurance != "CASH" else "#ffc107"
+        return format_html(
+            '<span style="background: {}; color: {}; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: bold;">{}</span>',
+            color, "white" if obj.insurance != "CASH" else "black", obj.insurance
+        )
+    insurance_tag.short_description = "Billing Mode"
+
+
 
 # --- 2. PHARMACY & PRESCRIPTIONS ---
 

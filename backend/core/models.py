@@ -333,3 +333,36 @@ class Drug(models.Model):
     @property
     def is_expired(self):
         return date.today() >= self.expiry_date if self.expiry_date else False
+    
+
+class RegistrationRecord(models.Model):
+    GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
+    
+    name = models.CharField(max_length=255)
+    phone = models.CharField(max_length=20)
+    id_number = models.CharField(max_length=50, unique=True)
+    age = models.PositiveIntegerField()
+    gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
+    insurance = models.CharField(max_length=100, default="CASH")
+    insurance_number = models.CharField(max_length=100, blank=True, null=True)
+    is_urgent = models.BooleanField(default=False)
+    is_returning = models.BooleanField(default=False)
+    
+    # Automatically assigns Q001, Q002, etc.
+    queue_id = models.CharField(max_length=10, unique=True, editable=False)
+    
+    registered_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        if not self.queue_id:
+            # Logic for Q001 sequence
+            last_record = RegistrationRecord.objects.all().order_by('id').last()
+            if not last_record:
+                self.queue_id = "Q001"
+            else:
+                last_id = int(last_record.queue_id[1:])
+                self.queue_id = f"Q{str(last_id + 1).zfill(3)}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.queue_id} - {self.name}"

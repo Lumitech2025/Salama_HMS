@@ -12,14 +12,14 @@ from .models import (
     Patient, Protocol, Treatment, ChemoSession, Drug, 
     LabResult, Bill, Appointment, VitalSign, Queue, 
     LabInventoryItem, StockAdjustment, Prescription, 
-    PrescriptionItem, ClinicalNote, ImagingRecord
+    PrescriptionItem, ClinicalNote, ImagingRecord, RegistrationRecord
 )
 from .serializers import (
     PatientSerializer, ProtocolSerializer, TreatmentSerializer, 
     ChemoSessionSerializer, DrugSerializer, LabResultSerializer, 
     BillSerializer, SalamaTokenObtainPairSerializer, LabInventorySerializer, 
     StockAdjustmentSerializer, AppointmentSerializer, VitalSignSerializer, 
-    QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer
+    QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer, RegistrationRecordSerializer
 )
 
 # --- 1. PERMISSION LOGIC ---
@@ -233,3 +233,46 @@ class TreatmentViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
     def get_queryset(self):
         return Treatment.objects.select_related('patient', 'protocol', 'oncologist').all()
+    
+# Add to core/views.py
+
+class RegistrationRecordViewSet(viewsets.ModelViewSet):
+    queryset = RegistrationRecord.objects.all().order_by('-registered_at')
+    serializer_class = RegistrationRecordSerializer
+
+    @action(detail=False, methods=['get'])
+    def analytics(self, request):
+        today = timezone.now().date()
+        # All records for lifetime stats
+        total_qs = self.get_queryset()
+        # Filtered records for today's operational stats
+        today_qs = total_qs.filter(registered_at__date=today)
+        
+        # 1. Age group logic (Filtered for today so cards reflect current traffic)
+        age_groups = {
+            "Pediatric (0-17)": today_qs.filter(age__lt=18).count(),
+            "Adult (18-55)": today_qs.filter(age__gte=18, age__lte=55).count(),
+            "Senior (55+)": today_qs.filter(age__gt=55).count(),
+        }
+
+        # 2. Logic for Gender Distribution (Today)
+        # Using the map we created to avoid multiple database hits
+        gender_data = today_qs.values('gender').annotate(count=Count('gender'))
+        gender_map = {item['gender']: item['count'] for item in gender_data}
+
+        # 3. Logic for Insurance Distribution (Today)
+        insurance_data = today_qs.values('insurance').annotate(count=Count('insurance'))
+        insurance_map = {item['insurance']: item['count'] for item in insurance_data}
+
+        return Response({
+            "total_patients": total_qs.count(),
+            "todays_registrations": today_qs.count(),
+            "urgent_today": today_qs.filter(is_urgent=True).count(),
+            "returning_today": today_qs.filter(is_returning=True).count(),
+            "gender_distribution": {
+                "M": gender_map.get('M', 0),
+                "F": gender_map.get('F', 0)
+            },
+            "age_groups": age_groups,
+            "insurance_distribution": insurance_map
+        })
