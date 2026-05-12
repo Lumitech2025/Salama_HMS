@@ -14,9 +14,9 @@ from .views import (
     AppointmentViewSet,
     VitalSignViewSet,
     QueueViewSet,               
-    PrescriptionViewSet,     # Added
-    ClinicalNoteViewSet,     # Added
-    ImagingRecordViewSet,    # Added
+    PrescriptionViewSet,     
+    ClinicalNoteViewSet,     
+    ImagingRecordViewSet,    
     SalamaTokenObtainPairView  
 )
 
@@ -28,11 +28,11 @@ router.register(r'appointments', AppointmentViewSet, basename='appointment')
 router.register(r'patients', PatientViewSet, basename='patient')
 
 # --- 2. Queue & Workflow Orchestration ---
-# Powers the Live Monitor and KPI Analytics
+# This powers the Live Monitor and the KPI Analytics (Doctor & Pharmacy)
 router.register(r'queue', QueueViewSet, basename='queue')
 
 # --- 3. Triage & Clinical EMR Data ---
-# These power the Longitudinal History/EMR Tab
+# These power the Longitudinal History/EMR Tab and Triage workflows
 router.register(r'vital-signs', VitalSignViewSet, basename='vital-signs')
 router.register(r'clinical-notes', ClinicalNoteViewSet, basename='clinical-note')
 router.register(r'imaging', ImagingRecordViewSet, basename='imaging')
@@ -43,7 +43,8 @@ router.register(r'treatments', TreatmentViewSet, basename='treatment')
 router.register(r'chemo-sessions', ChemoSessionViewSet, basename='chemo-session')
 
 # --- 5. Pharmacy & Inventory ---
-# Powers the Doctor-to-Pharmacy "Push" and Pharmacist "Dispense" flow
+# 'prescriptions' handles the doctor-to-pharmacy push
+# 'drugs' handles the Pharmacy Shop and Main Store inventory
 router.register(r'prescriptions', PrescriptionViewSet, basename='prescription')
 router.register(r'drugs', DrugViewSet, basename='drug')
 router.register(r'inventory', LabInventoryViewSet, basename='inventory')
@@ -55,7 +56,7 @@ router.register(r'bills', BillViewSet, basename='bill')
 urlpatterns = [
     path('', include(router.urls)), 
 
-    # Auth Endpoints
+    # Authentication Endpoints
     path('token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 ]

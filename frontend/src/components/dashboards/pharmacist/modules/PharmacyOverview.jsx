@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api';
 import { 
   Users, Pill, AlertTriangle, TrendingUp, 
-  Clock, ArrowRight, RefreshCw, Loader2, Package, Activity, Eye
+  ArrowRight, RefreshCw, Loader2, Package, Activity, Eye
 } from 'lucide-react';
 
 const PharmacyOverview = ({ onAction }) => {
@@ -17,7 +17,6 @@ const PharmacyOverview = ({ onAction }) => {
 
   // 1. Centralized Data Fetcher
   const fetchData = useCallback(async () => {
-    // Only show loader on initial mount, use RefreshCw for subsequent ones
     try {
       const [resQueue, resStats] = await Promise.all([
         API.get('/queue/?current_station=PHARMACY'),
@@ -42,29 +41,25 @@ const PharmacyOverview = ({ onAction }) => {
     }
   }, []);
 
-  // 2. Real-time Listening: Poll every 10 seconds to catch Doctor's "Push" actions
+  // 2. Real-time Listening: Poll every 10 seconds
   useEffect(() => { 
     fetchData(); 
     const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // 3. Process Logic: Remove from queue and update KPI locally before navigating
+  // 3. Process Logic
   const handleProcessOrder = async (patient) => {
     try {
-      // Optimistic UI: Update KPIs immediately
+      // Optimistic UI update
       setStats(prev => ({
         ...prev,
         pending: Math.max(0, prev.pending - 1)
       }));
-
-      // Locally remove from queue table
       setQueue(prevQueue => prevQueue.filter(p => p.id !== patient.id));
 
-      // Trigger parent action to switch to the 'Prescriptions' tab
-      // This sends the patient object to the detailed fulfillment view
+      // Trigger navigation to detailed view
       onAction(patient, 'prescriptions'); 
-
     } catch (err) {
       console.error("Process error", err);
       onAction(patient, 'prescriptions');
@@ -90,7 +85,7 @@ const PharmacyOverview = ({ onAction }) => {
           <Users size={120} className="absolute -right-8 -bottom-8 text-white/[0.02] group-hover:text-teal-500/[0.05] transition-colors" />
         </div>
 
-        {/* 2. Orders Fulfilled */}
+        {/* 2. Fulfillment Rate */}
         <div className="bg-[#020617] p-8 rounded-[2.5rem] border border-white/5 shadow-2xl relative overflow-hidden group hover:border-blue-500/30 transition-all">
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-4">
@@ -103,7 +98,7 @@ const PharmacyOverview = ({ onAction }) => {
           <Pill size={120} className="absolute -right-8 -bottom-8 text-white/[0.02] group-hover:rotate-12 transition-transform" />
         </div>
 
-        {/* 3. Low Stock */}
+        {/* 3. Inventory Alerts */}
         <div className={`p-8 rounded-[2.5rem] border shadow-2xl relative overflow-hidden group transition-all ${stats.lowStock > 0 ? 'bg-rose-950/20 border-rose-500/30' : 'bg-[#020617] border-white/5'}`}>
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-4">
@@ -116,7 +111,7 @@ const PharmacyOverview = ({ onAction }) => {
           <AlertTriangle size={120} className={`absolute -right-8 -bottom-8 ${stats.lowStock > 0 ? 'text-rose-500/[0.08]' : 'text-white/[0.02]'}`} />
         </div>
 
-        {/* 4. Revenue */}
+        {/* 4. Daily Revenue */}
         <div className="bg-[#020617] p-8 rounded-[2.5rem] border border-emerald-500/20 shadow-2xl relative overflow-hidden group">
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-4">
@@ -133,7 +128,7 @@ const PharmacyOverview = ({ onAction }) => {
         </div>
       </div>
 
-      {/* LIVE QUEUE TABLE */}
+      {/* PIPELINE TABLE - REMOVED QUEUE DURATION COLUMN */}
       <div className="bg-white rounded-[3.5rem] border border-slate-100 shadow-xl overflow-hidden">
         <div className="p-10 border-b border-slate-50 flex justify-between items-center bg-slate-50/30">
           <div className="flex items-center gap-4">
@@ -141,7 +136,7 @@ const PharmacyOverview = ({ onAction }) => {
             <h3 className="font-black text-slate-900 uppercase italic tracking-tighter text-xl">Prescription Pipeline</h3>
           </div>
           <button onClick={fetchData} className="p-3 hover:bg-white rounded-2xl transition-all border border-transparent hover:border-slate-200 group">
-             <RefreshCw size={20} className={`text-slate-400 group-hover:text-teal-600 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw size={20} className={`text-slate-400 group-hover:text-teal-600 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
 
@@ -151,7 +146,6 @@ const PharmacyOverview = ({ onAction }) => {
               <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] bg-slate-50/50">
                 <th className="px-12 py-8">Patient Identity</th>
                 <th className="px-12 py-8">Token</th>
-                <th className="px-12 py-8">Queue Duration</th>
                 <th className="px-12 py-8">Clinic Status</th>
                 <th className="px-12 py-8 text-right">Workflow</th>
               </tr>
@@ -159,9 +153,9 @@ const PharmacyOverview = ({ onAction }) => {
             <tbody className="divide-y divide-slate-50">
               {loading && queue.length === 0 ? (
                 <tr>
-                  <td colSpan="5" className="py-32 text-center">
+                  <td colSpan="4" className="py-32 text-center">
                     <Loader2 className="animate-spin mx-auto text-teal-500" size={40} />
-                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-4">Syncing with Oncology Command...</p>
+                    <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-4">Syncing Pipeline Data...</p>
                   </td>
                 </tr>
               ) : queue.map((patient) => (
@@ -174,12 +168,6 @@ const PharmacyOverview = ({ onAction }) => {
                     <span className="bg-slate-900 text-white font-mono font-bold px-4 py-2 rounded-xl text-sm shadow-lg group-hover:bg-teal-600 transition-colors">
                       {patient.token_id}
                     </span>
-                  </td>
-                  <td className="px-12 py-10">
-                    <div className="flex items-center gap-3 text-slate-500 font-black text-xs uppercase">
-                      <Clock size={16} className={patient.wait_time > 20 ? 'text-rose-500' : 'text-teal-500'} />
-                      <span className={patient.wait_time > 20 ? 'text-rose-500 animate-pulse' : ''}>{patient.wait_time || '0'} mins</span>
-                    </div>
                   </td>
                   <td className="px-12 py-10">
                     <span className="px-4 py-2 bg-teal-50 text-teal-700 rounded-xl text-[9px] font-black uppercase tracking-widest border border-teal-100/50 shadow-sm">
@@ -202,7 +190,7 @@ const PharmacyOverview = ({ onAction }) => {
               <div className="py-40 text-center">
                   <Pill size={64} className="mx-auto mb-6 text-slate-200 opacity-20" />
                   <p className="text-slate-400 font-black uppercase tracking-[0.5em] text-xs italic">
-                      Dispensary Queue is Empty
+                      Pipeline is currently clear
                   </p>
               </div>
           )}

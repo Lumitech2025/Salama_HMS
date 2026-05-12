@@ -63,7 +63,7 @@ class QueueAdmin(admin.ModelAdmin):
             colors.get(obj.priority, '#6c757d'), obj.priority
         )
 
-# --- 2. PHARMACY & PRESCRIPTIONS (The New Flow) ---
+# --- 2. PHARMACY & PRESCRIPTIONS ---
 
 class PrescriptionItemInline(admin.TabularInline):
     model = PrescriptionItem
@@ -77,7 +77,32 @@ class PrescriptionAdmin(admin.ModelAdmin):
     inlines = [PrescriptionItemInline]
     actions = [export_as_csv]
 
-# --- 3. LONGITUDINAL EMR (Medical History) ---
+# --- 3. DRUG INVENTORY (THE SHOP & MAIN STORE) ---
+
+@admin.register(Drug)
+class DrugAdmin(admin.ModelAdmin):
+    list_display = ('name', 'manufacturer', 'strength', 'store_location', 'stock_status', 'expiry_status', 'price_tag')
+    list_filter = ('store_location', 'is_hazardous', 'expiry_date')
+    search_fields = ('name', 'generic_name', 'batch_number', 'manufacturer')
+    list_editable = ('store_location',)
+
+    def stock_status(self, obj):
+        if obj.quantity_in_stock <= obj.reorder_level:
+            return format_html('<b style="color: #dc3545;">🚨 {} (Low)</b>', obj.quantity_in_stock)
+        return format_html('<span style="color: #28a745;">{}</span>', obj.quantity_in_stock)
+    stock_status.short_description = "Qty in Stock"
+
+    def expiry_status(self, obj):
+        if obj.is_expired:
+            return format_html('<b style="color: white; background: #dc3545; padding: 2px 5px; border-radius: 3px;">EXPIRED</b>')
+        return obj.expiry_date
+    expiry_status.short_description = "Expiry"
+
+    def price_tag(self, obj):
+        return format_html('<b>Ksh {:,.2f}</b>', obj.selling_price_kes)
+    price_tag.short_description = "Price"
+
+# --- 4. LONGITUDINAL EMR ---
 
 @admin.register(ClinicalNote)
 class ClinicalNoteAdmin(admin.ModelAdmin):
@@ -94,7 +119,7 @@ class ImagingRecordAdmin(admin.ModelAdmin):
         return bool(obj.image_url)
     has_image.boolean = True
 
-# --- 4. PATIENT REGISTRY ---
+# --- 5. PATIENT REGISTRY & TRIAGE ---
 
 class VitalSignInline(admin.StackedInline):
     model = VitalSign
@@ -115,7 +140,7 @@ class PatientAdmin(admin.ModelAdmin):
         ('Insurance & Finance', {'fields': ('insurance_type', 'insurance_no', 'benefit_balance')}),
     )
 
-# --- 5. SCHEDULING, REVENUE & INVENTORY ---
+# --- 6. SCHEDULING & REVENUE ---
 
 @admin.register(Appointment)
 class AppointmentAdmin(admin.ModelAdmin):
@@ -123,11 +148,6 @@ class AppointmentAdmin(admin.ModelAdmin):
     list_editable = ('status',) 
     search_fields = ('patient__name', 'manual_patient_name')
     date_hierarchy = 'appointment_date'
-
-@admin.register(VitalSign)
-class VitalSignAdmin(admin.ModelAdmin):
-    list_display = ('patient', 'recorded_by', 'systolic_bp', 'diastolic_bp', 'temperature', 'created_at')
-    readonly_fields = ('created_at', 'recorded_by')
 
 @admin.register(Bill)
 class BillAdmin(admin.ModelAdmin):
@@ -139,10 +159,8 @@ class BillAdmin(admin.ModelAdmin):
     def mark_as_paid(self, request, queryset):
         queryset.update(is_paid=True, billing_officer=request.user)
 
-@admin.register(Drug)
-class DrugAdmin(admin.ModelAdmin):
-    list_display = ('name', 'batch_no', 'stock_quantity', 'expiry_date')
-    
+# --- 7. LAB & OTHERS ---
+
 @admin.register(LabInventoryItem)
 class LabInventoryAdmin(admin.ModelAdmin):
     list_display = ('name', 'category', 'stock', 'min_stock')
@@ -151,8 +169,8 @@ class LabInventoryAdmin(admin.ModelAdmin):
 class StockAdjustmentAdmin(admin.ModelAdmin):
     list_display = ('item', 'quantity_used', 'remaining_stock', 'technician', 'created_at')
 
-# Register remaining simple models
 admin.site.register(Protocol)
 admin.site.register(LabResult)
 admin.site.register(ChemoSession)
 admin.site.register(Treatment)
+admin.site.register(VitalSign)

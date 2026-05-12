@@ -23,6 +23,7 @@ class SalamaTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         data_input = self.context['request'].data
+        # Map custom frontend fields to standard Django fields
         attrs['username'] = data_input.get('employeeID', attrs.get('username'))
         attrs['password'] = data_input.get('securityCode', attrs.get('password'))
         
@@ -59,15 +60,27 @@ class AppointmentSerializer(serializers.ModelSerializer):
         return obj.patient.name if obj.patient else obj.manual_patient_name
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. PRESCRIPTION HANDSHAKE (The Doctor-Pharmacy Bridge)
+# 3. PHARMACY & DRUG INVENTORY (The Shop Logic)
 # ─────────────────────────────────────────────────────────────────────────────
+class DrugSerializer(serializers.ModelSerializer):
+    is_expired = serializers.ReadOnlyField()
+    # Ensure currency and decimals are handled correctly for the frontend
+    selling_price_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Drug
+        fields = '__all__'
+
+    def get_selling_price_display(self, obj):
+        return f"Ksh {obj.selling_price_kes:,.2f}"
+
 class PrescriptionItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = PrescriptionItem
-        fields = ['medication_name', 'dosage', 'route', 'frequency', 'duration', 'instructions']
+        fields = ['id', 'medication_name', 'dosage', 'route', 'frequency', 'duration', 'instructions']
 
 class PrescriptionSerializer(serializers.ModelSerializer):
-    items = PrescriptionItemSerializer(many=True) # Nested list of meds
+    items = PrescriptionItemSerializer(many=True) 
     patient_name = serializers.ReadOnlyField(source='patient.name')
     doctor_name = serializers.ReadOnlyField(source='prescribed_by.get_full_name')
 
@@ -76,6 +89,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         fields = ['id', 'patient', 'patient_name', 'doctor_name', 'status', 'clinical_notes', 'items', 'created_at']
 
     def create(self, validated_data):
+        """Allows posting multiple drugs at once from the Doctor portal"""
         items_data = validated_data.pop('items')
         prescription = Prescription.objects.create(**validated_data)
         for item_data in items_data:
@@ -119,20 +133,16 @@ class PatientSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def create(self, validated_data):
+        # Handle virtual name fields from the registration form
         first = validated_data.pop('first_name', '')
         last = validated_data.pop('last_name', '')
         if not validated_data.get('name'):
             validated_data['name'] = f"{first} {last}".strip()
         
         patient = super().create(validated_data)
+        # Automatic Triage Queue placement on registration
         Queue.objects.create(patient=patient, current_station='TRIAGE', status='WAITING')
         return patient
-
-class DrugSerializer(serializers.ModelSerializer):
-    is_expired = serializers.ReadOnlyField()
-    class Meta:
-        model = Drug
-        fields = '__all__'
 
 class LabResultSerializer(serializers.ModelSerializer):
     patient_name = serializers.ReadOnlyField(source='patient.name')
@@ -163,9 +173,9 @@ class ProtocolSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class TreatmentSerializer(serializers.ModelSerializer):
-     oncologist_name = serializers.CharField(source='oncologist.get_full_name', read_only=True)
-     protocol_name = serializers.ReadOnlyField(source='protocol.name')
-     class Meta:
+    oncologist_name = serializers.CharField(source='oncologist.get_full_name', read_only=True)
+    protocol_name = serializers.ReadOnlyField(source='protocol.name')
+    class Meta:
         model = Treatment
         fields = '__all__'
 

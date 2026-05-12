@@ -85,7 +85,6 @@ class QueueViewSet(viewsets.ModelViewSet):
         
         station_qs = Queue.objects.filter(entered_at__date=today, current_station=station)
         
-        # Determine 'pending' logic based on the station
         if station == 'PHARMACY':
             pending_count = station_qs.filter(status='AWAITING_MEDICATION').count()
         else:
@@ -118,7 +117,7 @@ class VitalSignViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         vital = serializer.save(recorded_by=self.request.user)
-        # Auto-advance to Doctor after Triage
+        # Advance Queue automatically
         Queue.objects.filter(patient=vital.patient, current_station='TRIAGE').update(
             current_station='DOCTOR', status='WAITING'
         )
@@ -144,18 +143,19 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         patient_id = self.request.query_params.get('patient')
-        if patient_id:
-            return self.queryset.filter(patient_id=patient_id)
-        return self.queryset
+        status_val = self.request.query_params.get('status')
+        qs = self.queryset
+        if patient_id: qs = qs.filter(patient_id=patient_id)
+        if status_val: qs = qs.filter(status=status_val)
+        return qs
 
     @action(detail=False, methods=['get'], url_path='summary')
     def pharmacy_summary(self, request):
-        """KPI stats for the Pharmacist."""
         today = timezone.now().date()
         return Response({
             'dispensed_today': Prescription.objects.filter(created_at__date=today, status='DISPENSED').count(),
             'revenue_today': Bill.objects.filter(created_at__date=today, is_paid=True).aggregate(Sum('total_amount'))['total_amount__sum'] or 0,
-            'low_stock_items': Drug.objects.filter(stock_quantity__lt=10).count()
+            'low_stock_items': Drug.objects.filter(quantity_in_stock__lte=F('reorder_level')).count()
         })
 
 # --- 6. APPOINTMENTS & BILLING ---
@@ -211,9 +211,12 @@ class LabInventoryViewSet(viewsets.ModelViewSet):
         return Response({'status': 'Stock adjusted', 'new_stock': item.stock})
 
 class DrugViewSet(viewsets.ModelViewSet):
-    queryset = Drug.objects.all()
+    queryset = Drug.objects.all().order_by('name')
     serializer_class = DrugSerializer
     permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['store_location'] # 👈 Supports our toggle (main/pharmacy)
+    search_fields = ['name', 'batch_number']
 
 class ProtocolViewSet(viewsets.ModelViewSet):
     queryset = Protocol.objects.all()

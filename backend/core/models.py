@@ -303,3 +303,33 @@ class PrescriptionItem(models.Model):
     frequency = models.CharField(max_length=100) 
     duration = models.CharField(max_length=100)  
     instructions = models.TextField(blank=True)
+
+class Drug(models.Model):
+    STORE_CHOICES = [('main', 'Main Bulk Store'), ('pharmacy', 'Pharmacy Shop')]
+    
+    name = models.CharField(max_length=255)
+    generic_name = models.CharField(max_length=255, blank=True)
+    manufacturer = models.CharField(max_length=255, blank=True)
+    batch_number = models.CharField(max_length=100)
+    
+    strength = models.CharField(max_length=100, help_text="e.g., 500mg, 10mg/ml")
+    unit_type = models.CharField(max_length=50, default="vial", help_text="e.g., vial, tablet, bottle")
+    
+    quantity_in_stock = models.PositiveIntegerField(default=0)
+    reorder_level = models.PositiveIntegerField(default=10, help_text="Minimum threshold before requisition")
+    
+    expiry_date = models.DateField(null=True) 
+    selling_price_kes = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    
+    store_location = models.CharField(max_length=20, choices=STORE_CHOICES, default='pharmacy')
+    storage_requirements = models.TextField(blank=True, help_text="e.g., Refrigerate 2-8°C")
+    is_hazardous = models.BooleanField(default=False, verbose_name="Cytotoxic/Hazardous")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.batch_number}) - {self.store_location.upper()}"
+
+    @property
+    def is_expired(self):
+        return date.today() >= self.expiry_date if self.expiry_date else False
