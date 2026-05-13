@@ -54,28 +54,40 @@ class QueueViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def move_next(self, request, pk=None):
-        """Advances the patient to the next clinical station."""
+        """Advances the patient. Supports both automated flow and manual selection."""
         queue_item = self.get_object()
-        flow = {
-            'REGISTRATION': 'TRIAGE',
-            'TRIAGE': 'DOCTOR',
-            'DOCTOR': 'LAB', 
-            'LAB': 'DOCTOR',
-            'RADIOLOGY': 'DOCTOR',
-            'PHARMACY': 'BILLING',
-            'BILLING': 'COMPLETED'
-        }
-        current = queue_item.current_station
-        next_station = flow.get(current, 'COMPLETED')
         
-        if next_station == 'COMPLETED':
+        # 1. Check if the Frontend sent a specific target (e.g., from the Triage dropdown)
+        target_station = request.data.get('target_station')
+        
+        if not target_station:
+            # 2. Fallback to your hardcoded flow if no target was provided
+            flow = {
+                'REGISTRATION': 'TRIAGE',
+                'TRIAGE': 'DOCTOR',
+                'DOCTOR': 'LAB', 
+                'LAB': 'DOCTOR',
+                'RADIOLOGY': 'DOCTOR',
+                'PHARMACY': 'BILLING',
+                'BILLING': 'COMPLETED'
+            }
+            target_station = flow.get(queue_item.current_station, 'COMPLETED')
+
+        # 3. Apply the move
+        if target_station == 'COMPLETED':
             queue_item.status = 'COMPLETED'
         else:
-            queue_item.current_station = next_station
+            queue_item.current_station = target_station
             queue_item.status = 'WAITING'
             
         queue_item.save()
-        return Response({'status': f'Patient moved to {next_station}'})
+        
+        # Return display-friendly names for the alert box
+        return Response({
+            'status': 'success',
+            'next_station': queue_item.get_current_station_display(),
+            'current_status': queue_item.get_status_display()
+        })
 
     @action(detail=False, methods=['get'])
     def analytics(self, request):
@@ -91,9 +103,10 @@ class QueueViewSet(viewsets.ModelViewSet):
             pending_count = station_qs.filter(status='WAITING').count()
 
         return Response({
-            'station_queue': pending_count,
-            'completed_today': station_qs.exclude(status__in=['WAITING', 'AWAITING_MEDICATION']).count(),
-            'total_appointments': Appointment.objects.filter(appointment_date=today).count()
+            "total_appointments": Appointment.objects.count(),
+            "today_appointments": Appointment.objects.filter(appointment_date=today).count(),
+            "total_registrations": Patient.objects.count(), 
+            "today_total": Queue.objects.filter(entered_at__date=today).count(),
         })
 
 # --- 4. CLINICAL & EMR MODULES ---
@@ -125,8 +138,13 @@ class VitalSignViewSet(viewsets.ModelViewSet):
 class ClinicalNoteViewSet(viewsets.ModelViewSet):
     queryset = ClinicalNote.objects.all().order_by('-created_at')
     serializer_class = ClinicalNoteSerializer
-    permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
-    filterset_fields = ['patient']
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ['patient', 'visit', 'note_type']
+    
+
+    def perform_create(self, serializer):
+        # Automatically set the author to the logged-in staff member
+        serializer.save(author=self.request.user)
 
 class ImagingRecordViewSet(viewsets.ModelViewSet):
     queryset = ImagingRecord.objects.all().order_by('-created_at')
@@ -189,7 +207,7 @@ class BillViewSet(viewsets.ModelViewSet):
 # --- 7. INVENTORY & LAB ---
 
 class LabResultViewSet(viewsets.ModelViewSet):
-    queryset = LabResult.objects.all().order_by('-test_date')
+    queryset = LabResult.objects.all().order_by('-created_at') 
     serializer_class = LabResultSerializer
     permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
     filterset_fields = ['patient', 'is_critical']

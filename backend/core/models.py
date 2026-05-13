@@ -104,6 +104,7 @@ class Queue(models.Model):
         ('PHARMACY', 'Pharmacy'),
         ('BILLING', 'Billing/Discharge'),
     ]
+
     STATUS_CHOICES = [
         ('WAITING', 'Waiting'), 
         ('UNDER_CONSULTATION', 'Under Consultation'), # For Doctor KPI
@@ -113,9 +114,11 @@ class Queue(models.Model):
     PRIORITY_CHOICES = [('NORMAL', 'Normal Priority'), ('HIGH', 'High Priority'), ('EMERGENCY', 'Emergency')]
 
     token_id = models.CharField(max_length=10, unique=True, editable=False)
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='queue_entries')
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE)
     appointment = models.ForeignKey(Appointment, on_delete=models.SET_NULL, null=True, blank=True)
-    
+
+    visit = models.OneToOneField('RegistrationRecord', on_delete=models.CASCADE, related_name='queue_ticket', null=True, blank=True)
+       
     
     current_station = models.CharField(max_length=20, choices=STATION_CHOICES, default='TRIAGE')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='WAITING')
@@ -142,7 +145,7 @@ class Queue(models.Model):
 
 class VitalSign(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='vitals')
-    appointment = models.OneToOneField(Appointment, on_delete=models.CASCADE, null=True, blank=True)
+    visit = models.ForeignKey('RegistrationRecord', on_delete=models.CASCADE, related_name='vitals', null=True)
     queue_entry = models.ForeignKey(Queue, on_delete=models.SET_NULL, null=True, blank=True)
     
     temperature = models.DecimalField(max_digits=4, decimal_places=1, help_text="°C")
@@ -173,6 +176,10 @@ class VitalSign(models.Model):
             return round(bsa_value, 2)
         return 0.0
 
+class Meta:
+        # Crucial: Always get the latest recorded vitals first
+        ordering = ['-created_at']
+
 # --- Treatment & Protocol ---
 
 class Protocol(models.Model):
@@ -200,12 +207,6 @@ class ChemoSession(models.Model):
     pre_auth_code = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)
 
-class ClinicalNote(models.Model):
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-    note_type = models.CharField(max_length=50, choices=[('CONSULT', 'Consultation'), ('PROGRESS', 'Progress')])
-    content = models.TextField()
-    doctor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    created_at = models.DateTimeField(auto_now_add=True)
 
 class ImagingRecord(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
@@ -229,14 +230,6 @@ class Drug(models.Model):
     def is_expired(self):
         return date.today() >= self.expiry_date if self.expiry_date else False
 
-class LabResult(models.Model):
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-    queue_entry = models.ForeignKey('Queue', on_delete=models.SET_NULL, null=True, blank=True)
-    test_name = models.CharField(max_length=255)
-    result_value = models.CharField(max_length=255)
-    is_critical = models.BooleanField(default=False)
-    test_date = models.DateTimeField(auto_now_add=True)
-    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, limit_choices_to={'role': 'LAB_TECH'})
 
 class Bill(models.Model):
     bill_no = models.CharField(max_length=20, unique=True, blank=True)
@@ -315,7 +308,7 @@ class Drug(models.Model):
     strength = models.CharField(max_length=100, help_text="e.g., 500mg, 10mg/ml")
     unit_type = models.CharField(max_length=50, default="vial", help_text="e.g., vial, tablet, bottle")
     
-    quantity_in_stock = models.PositiveIntegerField(default=0)
+    quantity_in_stock = models.PositiveIntegerField(default=25)
     reorder_level = models.PositiveIntegerField(default=10, help_text="Minimum threshold before requisition")
     
     expiry_date = models.DateField(null=True) 
@@ -340,15 +333,17 @@ class RegistrationRecord(models.Model):
     
     name = models.CharField(max_length=255)
     phone = models.CharField(max_length=20)
-    id_number = models.CharField(max_length=50, unique=True)
+    id_number = models.CharField(max_length=20) 
+    
     age = models.PositiveIntegerField()
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
     insurance = models.CharField(max_length=100, default="CASH")
     insurance_number = models.CharField(max_length=100, blank=True, null=True)
     is_urgent = models.BooleanField(default=False)
     is_returning = models.BooleanField(default=False)
+
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='registrations')
     
-    # Automatically assigns Q001, Q002, etc.
     queue_id = models.CharField(max_length=10, unique=True, editable=False)
     
     registered_at = models.DateTimeField(auto_now_add=True)
@@ -366,3 +361,69 @@ class RegistrationRecord(models.Model):
 
     def __str__(self):
         return f"{self.queue_id} - {self.name}"
+
+class ClinicalNote(models.Model):
+    NOTE_TYPES = [
+        ('TRIAGE', 'Triage Assessment'),
+        ('ONCOLOGY', 'Oncology Consultation'),
+        ('LAB_REPORT', 'Laboratory Summary'),
+        ('PHARMACY', 'Pharmacist Notes'),
+        ('GENERAL', 'General Progress Note'),
+    ]
+
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='clinical_notes')
+    visit = models.ForeignKey('RegistrationRecord', on_delete=models.CASCADE, related_name='visit_notes', null=True)
+    note_type = models.CharField(max_length=50, choices=NOTE_TYPES)
+    content = models.TextField()
+    # Changed 'doctor' to 'author' to include Nurses/Lab Techs/Pharmacists
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    
+class LabResult(models.Model):
+    TEST_CHOICES = [
+        ('CBC', 'Full Blood Count (CBC)'),
+        ('PSA', 'Prostate Specific Antigen (PSA)'),
+        ('UE', 'Urea & Electrolytes (U&E)'),
+        ('LFT', 'Liver Function Test (LFT)'),
+        ('URINALYSIS', 'Urinalysis (Routine)'),
+        ('BG_CROSS', 'Blood Group & Cross Match'),
+        ('MALARIA_BS', 'Blood Slide for Malaria'),
+    ]
+
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('COLLECTED', 'Sample Collected'),
+        ('COMPLETED', 'Result Ready'),
+    ]
+
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='lab_history')
+    visit = models.ForeignKey('RegistrationRecord', on_delete=models.CASCADE, related_name='lab_orders', null=True)
+    test_name = models.CharField(max_length=50, choices=TEST_CHOICES)
+    
+    # JSONField stores the specific breakdown (e.g., Color, pH, etc.)
+    parameters = models.JSONField(default=dict, help_text="Structured results based on test type")
+    
+    # Global summary and critical flags
+    technician_notes = models.TextField(blank=True, null=True)
+    is_critical = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        limit_choices_to={'role': 'LAB_TECH'}
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.get_test_name_display()} - {self.patient.name}"
+    

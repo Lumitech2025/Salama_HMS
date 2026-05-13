@@ -3,7 +3,7 @@ import API from '../../../api/api';
 import { 
   Calendar, Clock, UserPlus, Activity, List, 
   ArrowRight, RefreshCcw, TrendingUp, Users, 
-  CheckCircle2, AlertCircle, Loader2 
+  CheckCircle2, AlertCircle, Loader2, HeartPulse
 } from 'lucide-react';
 
 // Import modules
@@ -20,7 +20,12 @@ const ReceptionistDashboard = () => {
   
   // Dashboard State
   const [view, setView] = useState('live-queue'); 
-  const [stats, setStats] = useState({ total_appts: 0, today_appts: 0, registered: 0 });
+  const [stats, setStats] = useState({ 
+    total_appts: 0, 
+    today_appts: 0, 
+    total_reg: 0, 
+    today_reg: 0 
+  });
   const [liveQueue, setLiveQueue] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -39,10 +44,12 @@ const ReceptionistDashboard = () => {
       setLiveQueue(Array.isArray(resQueue.data) ? resQueue.data : (resQueue.data.results || []));
       setAppointments(Array.isArray(resAppts.data) ? resAppts.data : (resAppts.data.results || []));
       
+      // Update stats based on the new 4-KPI backend response
       setStats({
         total_appts: resStats.data.total_appointments || 0,
         today_appts: resStats.data.today_appointments || 0,
-        registered: resStats.data.today_total || 0
+        total_reg: resStats.data.total_registrations || 0,
+        today_reg: resStats.data.today_total || 0
       });
     } catch (err) {
       console.error("Dashboard Sync Error:", err);
@@ -58,17 +65,17 @@ const ReceptionistDashboard = () => {
   }, [fetchDashboardData]);
 
   const StatCard = ({ icon: Icon, label, value, gradient, shadowColor }) => (
-    <div className={`relative overflow-hidden bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl ${shadowColor} transition-all hover:-translate-y-1`}>
+    <div className={`relative overflow-hidden bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl ${shadowColor} transition-all hover:-translate-y-1`}>
       <div className="flex justify-between items-start relative z-10">
         <div>
-          <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{label}</p>
-          <p className="text-5xl font-black text-slate-900 tracking-tighter italic">{value}</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-1">{label}</p>
+          <p className="text-4xl font-black text-slate-900 tracking-tighter italic">{value}</p>
         </div>
-        <div className={`p-4 rounded-2xl text-white shadow-lg ${gradient}`}>
-          <Icon size={24} strokeWidth={3} />
+        <div className={`p-3 rounded-xl text-white shadow-lg ${gradient}`}>
+          <Icon size={20} strokeWidth={3} />
         </div>
       </div>
-      <TrendingUp size={80} className="absolute -right-4 -bottom-4 text-slate-50 opacity-40" />
+      <TrendingUp size={60} className="absolute -right-4 -bottom-4 text-slate-50 opacity-40" />
     </div>
   );
 
@@ -85,8 +92,8 @@ const ReceptionistDashboard = () => {
         return (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
             
-            {/* 1. KPI SECTION */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 px-2">
+            {/* 1. KPI SECTION (Updated to 4 Cards) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 px-2">
               <StatCard 
                 icon={Users} 
                 label="Total Appointments" 
@@ -102,9 +109,16 @@ const ReceptionistDashboard = () => {
                 shadowColor="shadow-teal-500/10"
               />
               <StatCard 
+                icon={HeartPulse} 
+                label="Total Registrations" 
+                value={stats.total_reg} 
+                gradient="bg-gradient-to-br from-orange-600 to-amber-400"
+                shadowColor="shadow-orange-500/10"
+              />
+              <StatCard 
                 icon={UserPlus} 
-                label="Todays Registered Patients" 
-                value={stats.registered} 
+                label="Today's Intakes" 
+                value={stats.today_reg} 
                 gradient="bg-gradient-to-br from-indigo-600 to-purple-500"
                 shadowColor="shadow-indigo-500/10"
               />
@@ -150,7 +164,7 @@ const ReceptionistDashboard = () => {
                         <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
                           <th className="px-8 py-5">Token</th>
                           <th className="px-8 py-5">Patient Identity</th>
-                          <th className="px-8 py-5 text-center">Current Station</th>
+                          <th className="px-8 py-5 text-center">Station & Status</th>
                           <th className="px-8 py-5 text-right">Action</th>
                         </tr>
                       </thead>
@@ -164,9 +178,15 @@ const ReceptionistDashboard = () => {
                                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">{item.patient_id_no}</p>
                               </td>
                               <td className="px-8 py-7 text-center">
-                                <span className="px-6 py-2 rounded-xl bg-[#020617] text-teal-400 text-[10px] font-black uppercase tracking-widest border border-white/10">
-                                  {item.station_display}
-                                </span>
+                                <div className="flex flex-col items-center gap-2">
+                                  <span className="px-6 py-2 rounded-xl bg-[#020617] text-teal-400 text-[10px] font-black uppercase tracking-widest border border-white/10">
+                                    {item.station_display}
+                                  </span>
+                                  {/* Added Status Display here */}
+                                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                                    {item.status_display}
+                                  </span>
+                                </div>
                               </td>
                               <td className="px-8 py-7 text-right">
                                 <button className="p-4 bg-slate-50 hover:bg-teal-500 hover:text-white rounded-2xl transition-all shadow-sm">
@@ -186,8 +206,8 @@ const ReceptionistDashboard = () => {
                 ) : (
                   <div className="animate-in fade-in duration-500">
                     <div className="flex items-center gap-4 mb-10 border-b border-slate-50 pb-8">
-                       <Calendar className="text-blue-500" size={24} />
-                       <h3 className="text-xl font-black text-slate-900 tracking-tighter uppercase italic">Confirmed Appointments</h3>
+                        <Calendar className="text-blue-500" size={24} />
+                        <h3 className="text-xl font-black text-slate-900 tracking-tighter uppercase italic">Confirmed Appointments</h3>
                     </div>
                     <table className="w-full text-left">
                       <thead>

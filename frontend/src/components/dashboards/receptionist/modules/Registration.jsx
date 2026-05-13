@@ -62,13 +62,16 @@ const Registration = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
-    setErrorMessage('');
     
+    // Check if patient exists or create one (Logic depends on your backend)
+    // For now, let's ensure the payload is clean:
     const payload = {
-      name: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
+      // Concatenate names for the backend 'name' field
+      first_name: formData.firstName.trim(),
+      last_name: formData.lastName.trim(), 
+      id_number: formData.id_number,
       phone: formData.phone,
-      id_number: formData.id_number.trim(),
-      age: parseInt(formData.age),
+      age: formData.age,
       gender: formData.gender,
       insurance: formData.insurance,
       insurance_number: formData.insurance_number,
@@ -81,8 +84,7 @@ const Registration = () => {
       if (response.status === 201 || response.status === 200) {
         setRegStatus('success');
         setFormData(initialFormState); 
-        await fetchData();
-        setTimeout(() => setRegStatus('idle'), 3000);
+        fetchData(); // Refresh analytics and log
       }
     } catch (error) {
       setRegStatus('error');

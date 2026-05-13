@@ -4,12 +4,14 @@ from django.utils.html import format_html
 from django.utils import timezone
 from django.urls import reverse
 from django.http import HttpResponse
+
 import csv
 from .models import (RegistrationRecord,
     LabInventoryItem, Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue,
     Prescription, PrescriptionItem, ClinicalNote, ImagingRecord
 )
+
 
 User = get_user_model()
 
@@ -68,25 +70,29 @@ class QueueAdmin(admin.ModelAdmin):
 @admin.register(RegistrationRecord)
 class RegistrationRecordAdmin(admin.ModelAdmin):
     # Updated list_display to include new KPIs
-    list_display = (
-        'queue_id', 'urgency_badge', 'returning_tag', 
-        'name', 'phone', 'age', 'gender_tag', 
-        'insurance_tag', 'registered_at'
-    )
+    list_display = ('queue_id', 'urgency_badge', 'patient', 'insurance', 'registered_at')
     
     # Updated filters to include new flags
     list_filter = ('is_urgent', 'is_returning', 'gender', 'insurance', 'registered_at')
     
-    search_fields = ('queue_id', 'name', 'id_number', 'phone')
+    list_filter = ('is_urgent', 'insurance', 'registered_at')
+    search_fields = ('queue_id', 'patient__name', 'id_number')
+
     readonly_fields = ('queue_id', 'registered_at')
 
-    # Visual Badge for Urgency (High Visibility)
+    
+
     def urgency_badge(self, obj):
         if obj.is_urgent:
             return format_html(
-                '<span style="background: #dc3545; color: white; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 900; animation: pulse 2s infinite;">URGENT</span>'
+                '<span style="background: #dc3545; color: white; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 900;">{}</span>',
+                "URGENT"
             )
-        return format_html('<span style="color: #6c757d; font-size: 10px;">Normal</span>')
+        return format_html(
+            '<span style="background: #e9ecef; color: #6c757d; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 700;">{}</span>',
+            "NORMAL"
+        )
+    
     urgency_badge.short_description = "Priority"
 
     # Tag for Returning vs New
@@ -155,10 +161,12 @@ class DrugAdmin(admin.ModelAdmin):
 
 # --- 4. LONGITUDINAL EMR ---
 
+
 @admin.register(ClinicalNote)
 class ClinicalNoteAdmin(admin.ModelAdmin):
-    list_display = ('patient', 'note_type', 'doctor', 'created_at')
-    list_filter = ('note_type', 'created_at')
+    # Change 'doctor' to 'author'
+    list_display = ('patient', 'note_type', 'author', 'created_at') 
+    list_filter = ('note_type', 'created_at', 'author')
     search_fields = ('patient__name', 'content')
 
 @admin.register(ImagingRecord)
