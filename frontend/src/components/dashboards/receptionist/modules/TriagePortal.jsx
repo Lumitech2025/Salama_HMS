@@ -207,7 +207,6 @@ const TriagePortal = () => {
                                 <div className="bg-rose-500 p-2 rounded-lg text-white"><AlertCircle size={18} /></div>
                                 <div>
                                     <p className="text-xs font-black uppercase italic">Urgent Case Warning</p>
-                                    <p className="text-[10px] font-bold uppercase opacity-70">Immediate assessment and prioritized doctor referral required.</p>
                                 </div>
                             </div>
                         )}

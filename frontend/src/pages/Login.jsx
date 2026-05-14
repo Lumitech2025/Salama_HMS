@@ -11,38 +11,45 @@ const Login = () => {
     const navigate = useNavigate();
 
     const handleLogin = async (e) => {
-        e.preventDefault();
-        setError('');
-        setIsLoading(true);
-        
-        try {
-            const response = await fetch('http://localhost:8000/api/auth/login/', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ employee_id: employeeId, password: password }),
-            });
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+    
+    try {
+        const response = await fetch('http://localhost:8000/api/auth/login/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ employee_id: employeeId, password: password }),
+        });
 
-            const data = await response.json();
+        const data = await response.json();
 
-            if (response.ok) {
-                localStorage.setItem('access_token', data.access);
-                localStorage.setItem('user_role', data.designation);
-                const role = data.designation?.toUpperCase().trim();
+        if (response.ok) {
+            localStorage.setItem('access_token', data.access);
+            
+            // ONE clean role variable
+            const cleanRole = (data.role || data.designation || "").toUpperCase().trim();
+            
+            // Save to BOTH keys to satisfy App.jsx AND Dashboard.jsx
+            localStorage.setItem('user_role', cleanRole);
+            localStorage.setItem('designation', cleanRole);
 
-                if (role === 'HMS ADMIN' || role === 'ADMIN') {
-                    navigate('/admin-dashboard');
-                } else {
-                    navigate('/'); 
-                }
-            } else {
-                setError(response.status === 401 ? 'Authentication Failed: Invalid Credentials' : 'Access Denied');
+            // Use the cleanRole for navigation
+            if (cleanRole === 'HMS ADMIN' || cleanRole === 'HMS_ADMIN' || cleanRole === 'ADMIN') {
+                navigate('/admin-dashboard');
+            } 
+            else {
+                navigate('/'); 
             }
-        } catch (err) {
-            setError('System Connection Error: Verify Server Status');
-        } finally {
-            setIsLoading(false);
+        } else {
+            setError(response.status === 401 ? 'Authentication Failed: Invalid Credentials' : 'Access Denied');
         }
-    };
+    } catch (err) {
+        setError('System Connection Error: Verify Server Status');
+    } finally {
+        setIsLoading(false);
+    }
+};
 
     return (
         <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-slate-950 font-['Inter'] antialiased">

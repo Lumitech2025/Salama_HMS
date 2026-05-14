@@ -4,6 +4,7 @@ from django.utils.html import format_html
 from django.utils import timezone
 from django.urls import reverse
 from django.http import HttpResponse
+from django.utils.safestring import mark_safe
 
 import csv
 from .models import (RegistrationRecord,
@@ -186,12 +187,119 @@ class VitalSignInline(admin.StackedInline):
     readonly_fields = ('created_at', 'recorded_by')
     classes = ('collapse',)
 
+class LabResultInline(admin.TabularInline):
+    model = LabResult
+    extra = 0
+    readonly_fields = ('test_name', 'status_badge', 'is_critical', 'display_parameters', 'technician_notes', 'created_at')
+    fields = ('test_name', 'status_badge', 'is_critical', 'display_parameters', 'technician_notes', 'created_at')
+
+    def display_parameters(self, obj):
+        if not obj.parameters or not isinstance(obj.parameters, dict):
+            return "Results pending..."
+        
+        # Build rows using simple concatenation and mark_safe to avoid format_html placeholder issues
+        from django.utils.safestring import mark_safe
+        html_rows = []
+        for key, value in obj.parameters.items():
+            clean_key = key.replace("_", " ").upper()
+            html_rows.append(
+                f'<div style="margin-bottom: 5px;">'
+                f'<b style="font-size: 9px; color: #64748b;">{clean_key}:</b> '
+                f'<span style="font-weight: 800; color: #0f172a; margin-left: 5px;">{value}</span>'
+                f'</div>'
+            )
+        return mark_safe("".join(html_rows))
+    
+    display_parameters.short_description = "Diagnostic Data"
+
+    def status_badge(self, obj):
+        status_map = {
+            'PENDING': ('#f59e0b', 'Waiting'),
+            'COMPLETED': ('#10b981', 'Finalized'),
+            'CANCELLED': ('#ef4444', 'Voided'),
+        }
+        bg_color, label = status_map.get(obj.status, ('#64748b', obj.status))
+        
+        # Using a simple f-string and mark_safe is safer than format_html for style tags
+        from django.utils.safestring import mark_safe
+        return mark_safe(
+            f'<span style="background: {bg_color}; color: white; padding: 3px 10px; border-radius: 20px; '
+            f'font-size: 9px; font-weight: 900; text-transform: uppercase;">{label}</span>'
+        )
+    status_badge.short_description = "Status"
+
+class ClinicalNoteInline(admin.TabularInline):
+    model = ClinicalNote
+    extra = 0
+    readonly_fields = ('author_role', 'author', 'note_type', 'content_display', 'created_at')
+    fields = ('author_role', 'author', 'note_type', 'content_display', 'created_at')
+    verbose_name = "Clinical Narrative"
+    verbose_name_plural = "Clinical Narratives & Observations"
+
+    def author_role(self, obj):
+        if not obj.author: return "-"
+        # Checking groups - ensures we match your actual DB groups
+        role = "STAFF"
+        if obj.author.groups.filter(name__icontains='ONCOLOGIST').exists(): role = "ONCOLOGIST"
+        elif obj.author.groups.filter(name__icontains='NURSE').exists(): role = "NURSE"
+        elif obj.author.groups.filter(name__icontains='LAB').exists(): role = "LAB TECH"
+        
+        colors = {'ONCOLOGIST': '#2563eb', 'NURSE': '#db2777', 'LAB TECH': '#0d9488', 'STAFF': '#64748b'}
+        bg = colors.get(role, '#64748b')
+        return mark_safe(
+            f'<span style="background: {bg}; color: white; padding: 3px 10px; border-radius: 6px; '
+            f'font-size: 10px; font-weight: 900; text-transform: uppercase;">{role}</span>'
+        )
+    author_role.short_description = "Department"
+
+    def content_display(self, obj):
+        if not obj.content:
+            return mark_safe('<span style="color: #94a3b8; font-style: italic;">No narrative recorded</span>')
+        # Added a border-left for a "medical log" look
+        return mark_safe(
+            f'<div style="max-width: 450px; font-weight: 600; color: #1e293b; border-left: 3px solid #e2e8f0; '
+            f'padding-left: 10px; line-height: 1.5;">{obj.content}</div>'
+        )
+    content_display.short_description = "Clinical Observation"
+
+class PrescriptionInline(admin.TabularInline):
+    model = Prescription
+    extra = 0
+    # We show a summary of drugs so the admin doesn't have to click into the prescription
+    readonly_fields = ('prescribed_by', 'status_badge', 'medication_summary', 'created_at')
+    fields = ('prescribed_by', 'status_badge', 'medication_summary', 'created_at')
+    can_delete = False
+    show_change_link = True # This adds a link to go to your existing PrescriptionAdmin
+
+    def medication_summary(self, obj):
+        """Pulls items from the PrescriptionItem model to show in the Patient view"""
+        # Note: adjust 'prescriptionitem_set' if you have a different related_name
+        items = obj.prescriptionitem_set.all() 
+        if not items: return "No items recorded"
+        
+        html = "".join([
+            f'<div style="margin-bottom:4px; font-size:11px;">'
+            f'<b style="color:#0f172a;">• {item.drug.name}</b> '
+            f'<span style="color:#64748b;">({item.dosage} - {item.duration})</span>'
+            f'</div>' for item in items
+        ])
+        return mark_safe(html)
+    medication_summary.short_description = "Items"
+
+    def status_badge(self, obj):
+        color = "#10b981" if obj.status == 'DISPENSED' else "#3b82f6"
+        return mark_safe(
+            f'<span style="background: {color}; color: white; padding: 2px 8px; '
+            f'border-radius: 6px; font-size: 9px; font-weight: 900;">{obj.status}</span>'
+        )
+    status_badge.short_description = "Status"
+
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
     list_display = ['registry_no', 'name', 'gender', 'cancer_type', 'staging', 'created_at']
     search_fields = ('name', 'registry_no', 'phone')
     list_filter = ('gender', 'cancer_type', 'staging')
-    inlines = [VitalSignInline]
+    inlines = [VitalSignInline, LabResultInline, ClinicalNoteInline, PrescriptionInline]
     
     fieldsets = (
         ('Core Identity', {'fields': ('name', 'registry_no', 'dob', 'gender', 'phone', 'email', 'blood_group')}),
@@ -228,8 +336,59 @@ class LabInventoryAdmin(admin.ModelAdmin):
 class StockAdjustmentAdmin(admin.ModelAdmin):
     list_display = ('item', 'quantity_used', 'remaining_stock', 'technician', 'created_at')
 
+
+# --- 7. LAB & DIAGNOSTICS ---
+@admin.register(LabResult)
+class LabResultAdmin(admin.ModelAdmin):
+    list_display = ('test_name_display', 'patient_link', 'visit_token', 'status_tag', 'is_critical', 'created_at')
+    list_filter = ('status', 'is_critical', 'test_name', 'created_at')
+    search_fields = ('patient__name', 'test_name')
+    
+    fieldsets = (
+        ('Encounter Context', {
+            'fields': ('patient', 'visit', 'test_name', 'status')
+        }),
+        ('Diagnostic Data', {
+            'fields': ('parameters', 'technician_notes', 'is_critical'),
+            'description': 'Input results in JSON format. Example: {"hb": "13.5", "wbc": "7.2"}'
+        }),
+        ('Audit Trail', {
+            'fields': ('recorded_by', 'created_at'),
+        }),
+    )
+    readonly_fields = ('created_at',)
+
+    def test_name_display(self, obj):
+        return obj.get_test_name_display() if hasattr(obj, 'get_test_name_display') else obj.test_name
+    test_name_display.short_description = "Investigation"
+
+    def patient_link(self, obj):
+        if obj.patient:
+            return format_html('<a href="{}"><b>{}</b></a>', 
+                reverse("admin:core_patient_change", args=(obj.patient.id,)),
+                obj.patient.name
+            )
+        return "No Patient"
+    patient_link.short_description = "Patient"
+
+    def visit_token(self, obj):
+        if obj.visit:
+            token = getattr(obj.visit, 'queue_id', getattr(obj.visit, 'token_id', 'N/A'))
+            return format_html('<span style="font-family: monospace; font-weight: bold; color: #2563eb;">#{}</span>', token)
+        return "-"
+    visit_token.short_description = "Token"
+
+    def status_tag(self, obj):
+        colors = {'PENDING': '#fd7e14', 'COMPLETED': '#28a745', 'CANCELLED': '#dc3545'}
+        bg_color = colors.get(obj.status, '#6c757d')
+        style = f"background: {bg_color}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 900;"
+        return format_html('<span style="{}">{}</span>', style, obj.status)
+    
+    status_tag.short_description = "Status"
+
+
+
 admin.site.register(Protocol)
-admin.site.register(LabResult)
+
 admin.site.register(ChemoSession)
 admin.site.register(Treatment)
-admin.site.register(VitalSign)

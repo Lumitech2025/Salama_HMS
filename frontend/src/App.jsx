@@ -6,10 +6,13 @@ import AdminDashboard from './components/dashboards/admin/AdminDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import TriagePortal from "./components/dashboards/receptionist/modules/TriagePortal";
 
+// Import the Portal Wrapper instead of just the Dashboard
+import FinancePortal from './components/dashboards/Finance/FinancePortal';
+
 const Unauthorized = () => (
   <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-white p-6 font-['Inter']">
-    <div className="bg-white/5 border border-white/10 p-12 rounded-[3rem] backdrop-blur-xl text-center">
-      <h1 className="text-5xl font-black mb-4 text-red-500 tracking-tighter">403</h1>
+    <div className="bg-white/5 border border-white/10 p-12 rounded-[3rem] backdrop-blur-xl text-center shadow-2xl">
+      <h1 className="text-5xl font-black mb-4 text-red-500 tracking-tighter italic">403</h1>
       <p className="text-slate-400 font-bold uppercase tracking-widest text-xs mb-8">Access Denied: Restricted Department</p>
       <button 
         onClick={() => window.location.href = '/login'} 
@@ -28,12 +31,23 @@ function App() {
     'BILLING_OFFICER', 'STAFF', 'LAB_TECH', 'RADIOLOGIST', 'PATIENT', 'CLIENT'
   ];
 
-  // Roles allowed to access the High-Level Admin Command Center
-  const ADMIN_ROLES = ['ADMIN', 'HMS ADMIN'];
+  // Roles allowed to access the High-Level Admin & Finance Center
+  // Note: Ensure strings match your Django choices exactly (e.g., 'HMS_ADMIN' vs 'HMS ADMIN')
+  const ADMIN_ROLES = ['ADMIN', 'HMS ADMIN', 'HMS_ADMIN', 'FINANCE', 'BILLING'];
 
   return (
     <Routes>
-      {/* 1. Admin Command Center */}
+      {/* 1. Finance & Procurement Portal */}
+      <Route 
+        path="/finance-dashboard" 
+        element={
+          <ProtectedRoute allowedRoles={['FINANCE', 'ADMIN', 'HMS_ADMIN']}>
+            <FinancePortal />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* 2. Admin Command Center */}
       <Route 
         path="/admin-dashboard" 
         element={
@@ -43,7 +57,7 @@ function App() {
         } 
       />
 
-      {/* 2. Clinical Dashboard (Main Hub) */}
+      {/* 3. Clinical Hub / Switchboard */}
       <Route 
         path="/" 
         element={
@@ -53,8 +67,7 @@ function App() {
         } 
       />
 
-      {/* 3. Triage Portal (Now PROTECTED) */}
-      {/* Ensure only Nurses and Oncologists (and Admins) can access Triage */}
+      {/* 4. Triage Portal */}
       <Route 
         path="/triage" 
         element={
@@ -72,11 +85,11 @@ function App() {
         } 
       />
 
-      {/* 4. Authentication & Security */}
+      {/* Security Routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/unauthorized" element={<Unauthorized />} />
 
-      {/* 5. Global Fallback */}
+      {/* Global Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

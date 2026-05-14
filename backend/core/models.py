@@ -427,3 +427,49 @@ class LabResult(models.Model):
     def __str__(self):
         return f"{self.get_test_name_display()} - {self.patient.name}"
     
+## Finance & Revenue Cycle Models
+
+class Requisition(models.Model):
+    DEPARTMENT_CHOICES = [
+        ('LAB', 'Laboratory'),
+        ('NURSING', 'Nursing'),
+        ('PHARMACY', 'Pharmacy'),
+        ('RADIOLOGY', 'Radiology'),
+        ('MARKETING', 'Marketing'),
+        ('ADMIN', 'General Admin'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending Approval'),
+        ('APPROVED', 'Approved'),
+        ('REJECTED', 'Rejected'),
+        ('FULFILLED', 'Fulfilled'),
+    ]
+
+    department = models.CharField(max_length=20, choices=DEPARTMENT_CHOICES)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    reason = models.TextField(help_text="Clinical or operational justification for the request")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    total_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    is_viewed_by_finance = models.BooleanField(default=False) # For the notification badge
+
+    def __str__(self):
+        return f"REQ-{self.id} ({self.department})"
+
+class RequisitionItem(models.Model):
+    requisition = models.ForeignKey(Requisition, related_name='items', on_delete=models.CASCADE)
+    # Linking to inventory to pull the latest buying_price
+    item = models.ForeignKey('LabInventoryItem', on_delete=models.PROTECT)
+    quantity = models.PositiveIntegerField(default=1)
+    # This captures the cost at the moment of request
+    line_total = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
+
+    def save(self, *args, **kwargs):
+        # Automatically calculate cost based on current inventory price
+        self.line_total = self.item.buying_price * self.quantity
+        super().save(*args, **kwargs)
+        # Update the parent requisition total
+        self.requisition.total_cost = sum(item.line_total for item in self.requisition.items.all())
+        self.requisition.save()

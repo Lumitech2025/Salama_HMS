@@ -35,7 +35,7 @@ class IsClinicalStaff(permissions.BasePermission):
 
 class IsFinancialStaff(permissions.BasePermission):
     def has_permission(self, request, view):
-        return request.user.is_authenticated and getattr(request.user, 'role', '') in ['BILLING', 'ADMIN']
+        return request.user.is_authenticated and getattr(request.user, 'role', '') in ['BILLING', 'FINANCE','ADMIN']
 
 # --- 2. AUTHENTICATION ---
 

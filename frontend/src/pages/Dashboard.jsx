@@ -9,6 +9,8 @@ import ReceptionistDashboard from "../components/dashboards/receptionist/Recepti
 import BillingOfficerDashboard from "../components/dashboards/billingofficer/BillingOfficerDashboard";
 import PatientDashboard from "../components/dashboards/patient/PatientDashboard";
 import AdminDashboard from "../components/dashboards/admin/AdminDashboard";
+import FinanceDashboard from "../components/dashboards/Finance/FinanceDashboard";
+
 
 const Dashboard = () => {
     // We check for 'designation' first (from your latest API response) 
@@ -24,7 +26,9 @@ const Dashboard = () => {
             case 'SUPERUSER':
                 return <AdminDashboard />;
 
-            
+            case 'FINANCE':
+                return <FinanceDashboard />;
+
             case 'ONCOLOGIST':
                 return <OncologistDashboard />;
             

@@ -15,6 +15,7 @@ class User(AbstractUser):
         ('STAFF', 'General Staff'),
         ('PATIENT', 'Patient'),
         ('CLIENT', 'Client'),
+        ('FINANCE', 'Finance Officer'),
     ]
     
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='RECEPTIONIST')

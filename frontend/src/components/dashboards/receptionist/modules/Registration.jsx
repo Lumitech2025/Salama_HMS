@@ -113,7 +113,7 @@ const Registration = () => {
             color="teal" 
           />
           <StatCard 
-            label="Urgent Cases" 
+            label="Urgent Case" 
             value={analytics.urgent_today} 
             icon={<AlertTriangle className={analytics.urgent_today > 0 ? "text-rose-500 animate-pulse" : "text-slate-400"}/>} 
             color={analytics.urgent_today > 0 ? "rose" : "slate"} 
@@ -191,7 +191,7 @@ const Registration = () => {
                       onChange={handleChange}
                       className="w-5 h-5 rounded border-slate-300 text-rose-600 focus:ring-rose-500" 
                     />
-                    <span className={`text-[10px] font-black uppercase tracking-widest ${formData.is_urgent ? 'text-rose-600' : 'text-slate-500'} group-hover:text-rose-600 transition-colors`}>Urgent Intake</span>
+                    <span className={`text-[10px] font-black uppercase tracking-widest ${formData.is_urgent ? 'text-rose-600' : 'text-slate-500'} group-hover:text-rose-600 transition-colors`}>Urgent Case</span>
                 </label>
             </div>
           </div>

@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api';
 import { 
-  FlaskConical, Clock, CheckCircle2, AlertCircle, 
-  Beaker, Users, ArrowRight, Search, RefreshCcw, Loader2, Microscope,
-  Activity, LayoutGrid, Layers
+  FlaskConical, Clock, Beaker, Users, ArrowRight, Search, 
+  RefreshCcw, Loader2, Microscope, Activity, LayoutGrid, Layers, ClipboardList
 } from 'lucide-react';
 
 import LabSidebar from './LabSidebar';
@@ -18,47 +17,55 @@ const LabTechDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     pending: 0, 
-    todays_patients: 0, 
-    total_individual_tests: 0
+    todays_tests: 0, 
+    total_lifetime_tests: 0
   });
 
   const fetchLabData = useCallback(async () => {
+    setLoading(true);
     try {
-      const [resQueue, resAnalytics] = await Promise.all([
-        API.get('/queue/?current_station=LAB&status=WAITING'),
-        API.get('/queue/analytics/?station=LAB')
-      ]);
-      
-      setQueue(resQueue.data.results || resQueue.data);
-      
-      // We map the analytics from the backend
-      setStats({
-        pending: resAnalytics.data.station_queue || 0,
-        todays_patients: resAnalytics.data.today_total || 0, 
-        // This would be a sum of all test lines across all patients today
-        total_individual_tests: resAnalytics.data.total_tests_count || 142 
-      });
+        // 1. Fetch the Queue and the actual Lab Result records in parallel
+        const [resQueue, resLabs, resAnalytics] = await Promise.all([
+            API.get('/queue/', { params: { current_station: 'LAB', status: 'WAITING' } }),
+            API.get('/lab-results/', { params: { status: 'PENDING' } }), // Get actual test records
+            API.get('/queue/analytics/', { params: { station: 'LAB' } })
+        ]);
+        
+        const queueData = resQueue.data.results || resQueue.data || [];
+        const labsData = resLabs.data.results || resLabs.data || [];
+
+        // 2. Map the tests to each patient in the queue
+        const enrichedQueue = queueData.map(patient => {
+            // Find all pending tests belonging to this patient's current visit
+            const patientTests = labsData.filter(lab => lab.visit === patient.visit_id || lab.visit === patient.visit);
+            
+            return {
+                ...patient,
+                // Extract the readable labels (e.g., "Full Blood Count", "Urinalysis")
+                requested_tests: patientTests.map(t => t.test_label || t.test_name),
+                test_count: patientTests.length
+            };
+        });
+
+        setQueue(enrichedQueue);
+        
+        setStats({
+            pending: enrichedQueue.length,
+            todays_tests: resAnalytics.data.today_total || 0,
+            total_lifetime_tests: resAnalytics.data.total_registrations || 0 
+        });
     } catch (err) {
-      console.error("Lab Sync Error", err);
+        console.error("Lab Sync Error", err);
     } finally {
-      setLoading(false);
+        setLoading(false);
     }
-  }, []);
+}, []);
 
   useEffect(() => {
     fetchLabData();
-    const interval = setInterval(fetchLabData, 15000);
+    const interval = setInterval(fetchLabData, 30000);
     return () => clearInterval(interval);
   }, [fetchLabData]);
-
-  const handleProcessPatient = async (queueId) => {
-    try {
-      await API.post(`/queue/${queueId}/move_next/`);
-      fetchLabData();
-    } catch (err) {
-      alert("Flow Error: Ensure results are entered before moving.");
-    }
-  };
 
   const renderModule = () => {
     switch (activeTab) {
@@ -67,135 +74,96 @@ const LabTechDashboard = () => {
       case 'reference': return <LabReference />;
       case 'inventory': return <LabInventory />;
       default: return (
-        <div className="space-y-10">
-          {/* KPI TIER: UPDATED LAB METRICS */}
+        <div className="space-y-10 animate-in fade-in duration-700">
+          
+          {/* 1. KPI SECTION: CLEAN LIGHT THEME */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            
-            {/* 1. Pending Tests (In Queue) */}
-            <div className="bg-white/5 p-10 rounded-[3rem] border border-white/10 relative overflow-hidden group hover:border-teal-500/30 transition-all shadow-2xl">
-              <div className="relative z-10">
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                  <Clock size={14} className="text-teal-500" /> Pending Worklist
-                </p>
-                <div className="flex items-baseline gap-2">
-                  <h4 className="text-6xl font-black text-white italic tracking-tighter">{stats.pending}</h4>
-                  <span className="text-slate-500 text-xs font-bold uppercase">Patients</span>
-                </div>
-              </div>
-              <FlaskConical className="absolute -right-6 -bottom-6 text-white/5 w-32 h-32 group-hover:rotate-12 transition-transform" />
-            </div>
-
-            {/* 2. Today's Tests (Patient Count) */}
-            <div className="bg-white/5 p-10 rounded-[3rem] border border-white/10 relative overflow-hidden group hover:border-blue-500/30 transition-all shadow-2xl">
-              <div className="relative z-10">
-                <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                  <Users size={14} className="text-blue-400" /> Today's Admissions
-                </p>
-                <div className="flex items-baseline gap-2">
-                  <h4 className="text-6xl font-black text-white italic tracking-tighter">{stats.todays_patients}</h4>
-                  <span className="text-slate-500 text-xs font-bold uppercase">Processed</span>
-                </div>
-              </div>
-              <Activity className="absolute -right-6 -bottom-6 text-white/5 w-32 h-32 group-hover:scale-110 transition-transform" />
-            </div>
-
-            {/* 3. Total Individual Tests (Specific Count) */}
-            <div className="bg-teal-600/10 p-10 rounded-[3rem] border border-teal-500/20 relative overflow-hidden group hover:border-teal-500/50 transition-all shadow-2xl">
-              <div className="relative z-10">
-                <p className="text-teal-400 text-[10px] font-black uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-                  <Layers size={14} /> Aggregate Tests Done
-                </p>
-                <div className="flex items-baseline gap-2">
-                  <h4 className="text-6xl font-black text-white italic tracking-tighter">{stats.total_individual_tests}</h4>
-                  <span className="text-teal-500 text-xs font-bold uppercase tracking-tighter">Units</span>
-                </div>
-              </div>
-              <Beaker className="absolute -right-6 -bottom-6 text-teal-500/10 w-32 h-32" />
-            </div>
+            <StatCard icon={Clock} label="Waitlist Queue" value={stats.pending} color="blue" />
+            <StatCard icon={Beaker} label="Today's Lab Tests" value={stats.todays_tests} color="teal" />
+            <StatCard icon={Layers} label="Total Tests Logged" value={stats.total_lifetime_tests} color="indigo" />
           </div>
 
-          {/* LIVE QUEUE TABLE */}
-          <div className="bg-white/5 rounded-[3.5rem] border border-white/10 overflow-hidden shadow-2xl">
-            <div className="p-10 border-b border-white/10 flex justify-between items-center bg-white/[0.02]">
-              <div className="flex items-center gap-4">
-                <div className="w-3 h-3 bg-teal-500 rounded-full animate-pulse shadow-[0_0_15px_rgba(20,184,166,0.5)]" />
-                <h3 className="font-black text-white uppercase italic tracking-tighter text-xl">Live Lab Queue</h3>
+          {/* 2. SEARCH & REFRESH */}
+          <div className="flex items-center justify-between bg-[#020617] p-5 rounded-[2.5rem] shadow-2xl">
+              <div className="relative w-full md:w-[450px] ml-2">
+                <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                <input 
+                  type="text" 
+                  placeholder="Find patient sample..." 
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-3 pl-14 pr-6 text-sm font-bold text-white outline-none focus:ring-2 focus:ring-teal-500 transition-all"
+                />
               </div>
-              <div className="flex items-center gap-4">
-                 <div className="relative">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                    <input className="bg-slate-900 border-none rounded-2xl py-3 pl-12 pr-6 text-sm font-bold outline-none focus:ring-2 focus:ring-teal-500 text-white w-80 transition-all" placeholder="Filter by Name or Token..." />
-                 </div>
-                 <button onClick={fetchLabData} className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all border border-white/5">
-                    <RefreshCcw size={20} className="text-teal-400" />
-                 </button>
-              </div>
+              <button onClick={fetchLabData} className="mr-4 p-4 hover:bg-white/10 rounded-2xl transition-all group">
+                <RefreshCcw size={20} className={`text-teal-400 ${loading ? 'animate-spin' : ''}`} />
+              </button>
+          </div>
+
+          {/* 3. LIVE QUEUE TABLE */}
+          <div className="bg-white rounded-[4rem] shadow-2xl border border-slate-100 overflow-hidden">
+            <div className="p-10 border-b border-slate-50 flex items-center gap-4 bg-white">
+                <div className="p-4 bg-teal-50 rounded-2xl text-teal-600 shadow-sm">
+                    <Microscope size={24} />
+                </div>
+                <div>
+                    <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">Diagnostic Worklist</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2">Active samples requiring verification</p>
+                </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
+            <div className="overflow-x-auto min-h-[400px]">
+              <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] bg-slate-900/50">
-                    <th className="px-12 py-8">Patient Identity</th>
-                    <th className="px-12 py-8">Flow Token</th>
-                    <th className="px-12 py-8">Wait Time</th>
-                    <th className="px-12 py-8 text-right">Workflow Action</th>
+                  <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] border-b border-slate-50 bg-slate-50/50">
+                    <th className="px-12 py-6">Patient Identity</th>
+                    <th className="px-12 py-6">Token</th>
+                    <th className="px-12 py-6">Requested Investigations</th>
+                    <th className="px-12 py-6 text-right">No. of Tests</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5">
+                <tbody className="divide-y divide-slate-50">
                   {loading ? (
                     <tr>
-                      <td colSpan="4" className="py-32 text-center">
-                        <Loader2 className="animate-spin text-teal-500 mx-auto" size={48} />
-                        <p className="mt-4 text-slate-500 font-black uppercase text-[10px] tracking-widest">Syncing worklist...</p>
+                      <td colSpan="4" className="py-32 text-center font-black text-slate-400 uppercase text-[10px] tracking-widest italic">
+                        <Loader2 className="animate-spin mx-auto mb-4 text-teal-500" size={32} />
+                        Syncing Diagnostic Pipeline...
                       </td>
                     </tr>
-                  ) : queue.map((p) => (
-                    <tr key={p.id} className="hover:bg-white/[0.03] transition-all group">
-                      <td className="px-12 py-10">
-                        <p className="font-black text-white text-lg uppercase tracking-tight group-hover:text-teal-400 transition-colors">{p.patient_name}</p>
-                        <p className="text-xs font-bold text-slate-500 mt-1">Registry ID: #{p.patient_id_no}</p>
-                      </td>
-                      <td className="px-12 py-10">
-                        <span className="bg-slate-900 text-teal-500 font-black italic px-4 py-2 rounded-xl border border-teal-500/20 text-sm">
-                          {p.token_id}
-                        </span>
-                      </td>
-                      <td className="px-12 py-10">
-                        <div className="flex items-center gap-3 text-slate-400 font-black text-sm uppercase">
-                          <Clock size={16} className={p.wait_time > 45 ? 'text-red-400' : 'text-slate-500'} /> 
-                          <span className={p.wait_time > 45 ? 'text-red-400 animate-pulse' : ''}>{p.wait_time} Minutes</span>
-                        </div>
-                      </td>
-                      <td className="px-12 py-10 text-right">
-                        <div className="flex justify-end gap-3">
-                           <button 
-                            onClick={() => setActiveTab('diagnostics')}
-                            className="bg-white/5 hover:bg-teal-500 p-4 rounded-2xl transition-all border border-white/5 group" 
-                            title="Input Result Values"
-                           >
-                              <Microscope size={20} className="group-hover:scale-110 transition-transform" />
-                           </button>
-                           <button 
-                            onClick={() => handleProcessPatient(p.id)}
-                            className="bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase flex items-center gap-3 hover:bg-teal-600 transition-all shadow-xl"
-                           >
-                            Finalize & Release <ArrowRight size={16} />
-                           </button>
-                        </div>
+                  ) : queue.length > 0 ? (
+                    queue.map((p) => (
+                      <tr key={p.id} className="hover:bg-slate-50/50 transition-all group cursor-pointer" onClick={() => setActiveTab('diagnostics')}>
+                        <td className="px-12 py-8">
+                          <p className="font-black text-slate-900 text-base uppercase tracking-tight">{p.patient_name}</p>
+                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest italic">{p.patient_id_no}</p>
+                        </td>
+                        <td className="px-12 py-8">
+                          <span className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-teal-600 shadow-sm italic">
+                            #{p.token_id}
+                          </span>
+                        </td>
+                        <td className="px-12 py-8">
+                            {/* Displaying test names as tags */}
+                            <div className="flex flex-wrap gap-2">
+                                {p.requested_tests?.map((test, idx) => (
+                                    <span key={idx} className="bg-slate-900 text-teal-400 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border border-white/10">
+                                        {test}
+                                    </span>
+                                )) || <span className="text-slate-400 italic text-[10px]">Processing Order...</span>}
+                            </div>
+                        </td>
+                        <td className="px-12 py-8 text-right font-black text-slate-900 text-lg italic">
+                           {p.test_count || 0}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="4" className="py-32 text-center text-slate-300 font-bold uppercase tracking-[0.4em] text-xs">
+                        Worklist Clear / No Pending Samples
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
-              {!loading && queue.length === 0 && (
-                 <div className="py-32 text-center">
-                    <Microscope size={64} className="mx-auto mb-6 text-slate-800 opacity-20" />
-                    <p className="text-slate-500 font-black uppercase tracking-[0.5em] text-xs italic">
-                        Worklist clear. No active samples.
-                    </p>
-                 </div>
-              )}
             </div>
           </div>
         </div>
@@ -204,32 +172,34 @@ const LabTechDashboard = () => {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-950 font-sans text-slate-200 selection:bg-teal-500/30">
+    <div className="flex bg-slate-50 min-h-screen overflow-hidden font-['Inter']">
       <LabSidebar activeTab={activeTab} setActiveTab={setActiveTab} />
-      <main className="flex-1 p-12 overflow-y-auto custom-scrollbar">
-        <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-16 gap-8">
-          <div>
-            <h1 className="text-4xl font-black text-white tracking-tighter uppercase italic">
-              Salama <span className="text-teal-500 underline decoration-4 underline-offset-[12px]">Lab Hub</span>
-            </h1>
-            <p className="text-slate-500 text-sm mt-4 font-bold tracking-[0.2em] uppercase">Oncology Diagnostic Command Center</p>
-          </div>
-          
-          <div className="flex items-center space-x-6 bg-white/5 p-4 rounded-[2rem] border border-white/10 shadow-2xl backdrop-blur-md">
-             <div className="text-right px-2">
-               <p className="text-xs font-black text-white uppercase tracking-widest">Lab Specialist</p>
-               <p className="text-[10px] text-teal-500 font-black tracking-[0.3em] uppercase mt-1 italic">Unit Alpha-01</p>
-             </div>
-             <div className="w-14 h-14 bg-teal-500 rounded-[1.2rem] flex items-center justify-center font-black text-white text-sm shadow-xl shadow-teal-500/20">
-               CK
-             </div>
-          </div>
-        </header>
-
-        <section className="animate-in fade-in slide-in-from-bottom-8 duration-1000 fill-mode-both">
+      <main className="flex-1 overflow-y-auto max-h-screen p-10 lg:p-16">
+        <div className="max-w-[1400px] mx-auto">
           {renderModule()}
-        </section>
+        </div>
       </main>
+    </div>
+  );
+};
+
+// Reusable Light Theme StatCard
+const StatCard = ({ icon: Icon, label, value, color }) => {
+  const themes = {
+    blue: "bg-blue-50 text-blue-600 border-blue-100",
+    teal: "bg-teal-50 text-teal-600 border-teal-100",
+    indigo: "bg-indigo-50 text-indigo-600 border-indigo-100"
+  };
+  return (
+    <div className={`${themes[color]} p-8 rounded-[3rem] border-2 shadow-sm relative overflow-hidden group transition-all duration-500`}>
+      <div className="flex items-center gap-4 mb-4 relative z-10">
+        <div className="p-3 bg-white rounded-2xl shadow-md group-hover:rotate-6 transition-transform">
+            <Icon size={20} />
+        </div>
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80">{label}</p>
+      </div>
+      <p className="text-5xl font-black tracking-tighter relative z-10 italic leading-none">{value}</p>
+      <Activity size={100} className="absolute -right-6 -bottom-6 opacity-[0.04] rotate-12" />
     </div>
   );
 };
