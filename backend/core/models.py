@@ -473,3 +473,204 @@ class RequisitionItem(models.Model):
         # Update the parent requisition total
         self.requisition.total_cost = sum(item.line_total for item in self.requisition.items.all())
         self.requisition.save()
+
+
+# --- 1. SUPPLIER & VENDOR MANAGEMENT ---
+class Supplier(models.Model):
+    CATEGORY_CHOICES = [
+        ('PHARMA', 'Pharmaceuticals & Oncology Drugs'),
+        ('LAB', 'Laboratory Reagents'),
+        ('SURGICAL', 'Surgical & Medical Consumables'),
+        ('GENERAL', 'General Supplies & Services'),
+    ]
+
+    name = models.CharField(max_length=255)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='PHARMA')
+    contact_person = models.CharField(max_length=100)
+    email = models.EmailField()
+    phone = models.CharField(max_length=20)
+    tin_number = models.CharField(max_length=50, blank=True, help_text="Tax ID Number")
+    
+    # Banking (Crucial for Dorcas to process payments)
+    bank_name = models.CharField(max_length=100, blank=True)
+    account_name = models.CharField(max_length=255, blank=True)
+    account_number = models.CharField(max_length=50, blank=True)
+    branch_code = models.CharField(max_length=20, blank=True)
+    swift_code = models.CharField(max_length=20, blank=True)
+
+    # Contract & Terms
+    contract_document = models.FileField(upload_to='supplier_contracts/', null=True, blank=True)
+    contract_start = models.DateField(null=True, blank=True)
+    contract_end = models.DateField(null=True, blank=True)
+    payment_terms = models.CharField(max_length=100, default="Net 30") 
+    performance_rating = models.IntegerField(default=5, help_text="1 to 5 stars")
+    
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.category})"
+
+# --- 2. PROCUREMENT (PO -> INVOICE -> STOCK) ---
+
+class PurchaseOrder(models.Model):
+    PO_STATUS = [
+        ('DRAFT', 'Draft'),
+        ('SENT', 'Sent to Vendor'),
+        ('PARTIAL', 'Partially Received'),
+        ('CLOSED', 'Closed/Fulfilled'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+    po_number = models.CharField(max_length=50, unique=True, editable=False)
+    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE)
+    issue_date = models.DateField(auto_now_add=True)
+    delivery_deadline = models.DateField()
+    status = models.CharField(max_length=20, choices=PO_STATUS, default='DRAFT')
+    total_estimated_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    linked_requisitions = models.ManyToManyField('Requisition', blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.po_number:
+            count = PurchaseOrder.objects.count() + 1
+            self.po_number = f"SALAMA-PO-{timezone.now().year}-{count:04d}"
+        super().save(*args, **kwargs)
+
+class PurchaseInvoice(models.Model):
+    """The formal bill sent by the Supplier after delivery"""
+    invoice_number = models.CharField(max_length=100, unique=True)
+    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE)
+    purchase_order = models.OneToOneField(PurchaseOrder, on_delete=models.SET_NULL, null=True, blank=True)
+    
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    due_date = models.DateField()
+    is_fully_paid = models.BooleanField(default=False)
+    
+    # The Physical Scan of the Invoice
+    invoice_file = models.FileField(upload_to='invoices/', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"INV-{self.invoice_number} ({self.supplier.name})"
+
+class MainStoreBatch(models.Model):
+    item = models.ForeignKey('LabInventoryItem', on_delete=models.CASCADE, related_name='batches')
+    supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True)
+    invoice = models.ForeignKey(PurchaseInvoice, on_delete=models.SET_NULL, null=True, related_name='batches')
+    
+    batch_number = models.CharField(max_length=100, unique=True)
+    grn_number = models.CharField(max_length=50, unique=True, help_text="Goods Received Note")
+    
+    quantity_received = models.PositiveIntegerField()
+    current_quantity = models.PositiveIntegerField()
+    buying_price = models.DecimalField(max_digits=12, decimal_places=2)
+    
+    expiry_date = models.DateField()
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def valuation(self):
+        return self.current_quantity * self.buying_price
+
+
+class InsuranceCompany(models.Model):
+    """
+    Main registry for Insurance Providers (Payers).
+    """
+    name = models.CharField(max_length=255, unique=True)
+    contact_person = models.CharField(max_length=100)
+    email = models.EmailField()
+    phone = models.CharField(max_length=20)
+    portal_link = models.URLField(
+        blank=True, 
+        help_text="Link to the insurer's online claims submission portal"
+    )
+    
+    # Financial Aggregates for the KPI Cards
+    total_billed = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    total_remitted = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def aging_debt(self):
+        """Calculates money still sitting with this insurer."""
+        return self.total_billed - self.total_remitted
+
+    def __str__(self):
+        return self.name
+
+
+class InsuranceClaim(models.Model):
+    """
+    Individual treatment claims submitted for payment.
+    """
+    CLAIM_STATUS = [
+        ('DRAFT', 'Drafting'),
+        ('SUBMITTED', 'Submitted to Payer'),
+        ('ADJUDICATION', 'Under Review/In Process'),
+        ('DISPUTED', 'Disputed/Rejected'),
+        ('REMITTED', 'Paid/Remitted'),
+    ]
+    
+    insurance_company = models.ForeignKey(InsuranceCompany, on_delete=models.CASCADE)
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE)
+    
+    # Oncology specific tracking
+    claim_number = models.CharField(max_length=100, unique=True)
+    pre_auth_code = models.CharField(
+        max_length=100, 
+        help_text="The code provided by the insurer before the chemo/radio cycle started"
+    )
+    
+    # Money
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    amount_paid = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00, 
+        help_text="Amount actually remitted by the insurer"
+    )
+    
+    date_submitted = models.DateField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=CLAIM_STATUS, default='DRAFT')
+    
+    # Conflict resolution
+    rejection_reason = models.TextField(blank=True, help_text="Notes from the insurer if rejected")
+    reconciled_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"CLAIM-{self.claim_number} ({self.patient.name})"
+
+
+class RemittanceBatch(models.Model):
+    """
+    Container for bulk payments received from insurers.
+    """
+    insurance_company = models.ForeignKey(InsuranceCompany, on_delete=models.CASCADE)
+    payment_reference = models.CharField(
+        max_length=100, 
+        unique=True, 
+        help_text="EFT Number, Cheque No, or Bank Transfer ID"
+    )
+    total_amount_received = models.DecimalField(max_digits=15, decimal_places=2)
+    date_received = models.DateField()
+    
+    # The formal document upload
+    remittance_file = models.FileField(
+        upload_to='remittances/', 
+        null=True, 
+        blank=True, 
+        help_text="Upload the PDF/Excel advice provided by the insurer"
+    )
+    
+    # Meta
+    reconciled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name_plural = "Remittance Batches"
+
+    def __str__(self):
+        return f"REMIT-{self.payment_reference} ({self.insurance_company.name})"

@@ -30,7 +30,7 @@ const RequisitionHub = () => {
                         <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
                             <th className="p-8">ID & Department</th>
                             <th className="p-8">Requested By</th>
-                            <th className="p-8">Items/Justification</th>
+                            <th className="p-8">Items</th>
                             <th className="p-8">Total Cost</th>
                             <th className="p-8 text-right">Actions</th>
                         </tr>

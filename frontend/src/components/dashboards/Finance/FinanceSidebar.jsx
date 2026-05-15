@@ -30,17 +30,16 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
   }, []);
 
   const menuItems = [
-    { id: 'overview', label: 'Overview', icon: LayoutDashboard, desc: 'Analytics & KPIs' },
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard,  },
     { 
       id: 'requisitions', 
       label: 'Requisitions', 
       icon: ClipboardList, 
-      desc: 'Approval Queue',
-      badge: unreadCount > 0 ? unreadCount : null // Add the dynamic badge here
+      badge: unreadCount > 0 ? unreadCount : null 
     },
-    { id: 'inventory', label: 'Main Store', icon: Database, desc: 'Global Ledger' },
-    { id: 'vendors', label: 'Suppliers', icon: Truck, desc: 'Vendor Directory' },
-    { id: 'claims', label: 'Insurance Hub', icon: Receipt, desc: 'Reconciliation' },
+    { id: 'inventory', label: 'Main Store', icon: Database,  },
+    { id: 'vendors', label: 'Suppliers', icon: Truck, },
+    { id: 'claims', label: 'Insurance Hub', icon: Receipt,  },
   ];
 
   return (
@@ -52,11 +51,9 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
         </div>
         <div>
           <h1 className="text-2xl font-black tracking-tighter uppercase italic leading-none text-white">
-            Salama <span className="text-teal-400">Finance</span>
+            Salama <span className="text-teal-400">Finance Portal</span>
           </h1>
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em] mt-1">
-            Accountant Portal
-          </p>
+          
         </div>
       </div>
 
@@ -117,7 +114,7 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
           className="w-full flex items-center gap-4 p-5 rounded-3xl bg-rose-500/5 border border-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white transition-all duration-300 group"
         >
           <LogOut size={20} className="group-hover:scale-110 transition-transform" />
-          <span className="text-[10px] font-black uppercase tracking-[0.2em]">Logout Session</span>
+          <span className="text-[10px] font-black uppercase tracking-[0.2em]">Logout</span>
         </button>
       </div>
     </div>

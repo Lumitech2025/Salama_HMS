@@ -1,8 +1,12 @@
 import React, { useState } from 'react';
 import FinanceSidebar from './FinanceSidebar';
 import FinanceDashboard from './FinanceDashboard';
-// Import the new module
-import RequisitionHub from './modules/RequisitionHub'; 
+
+// Import all functional modules
+import RequisitionHub from './modules/RequisitionHub';
+import MainStoreLedger from './modules/MainStoreLedger';
+import SupplierManagement from './modules/SupplierManagement';
+import InsuranceClaimsHub from './modules/InsuranceClaimsHub'; 
 
 const FinancePortal = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -18,17 +22,17 @@ const FinancePortal = () => {
         return <FinanceDashboard />;
       
       case 'requisitions': 
-        // Swapped the placeholder for the real module
         return <RequisitionHub />; 
       
       case 'inventory': 
-        return <div className="p-20 text-center text-slate-300 font-black uppercase italic tracking-widest">Main Store Ledger</div>;
+        return <MainStoreLedger />;
       
       case 'vendors': 
-        return <div className="p-20 text-center text-slate-300 font-black uppercase italic tracking-widest">Vendor Management</div>;
+        return <SupplierManagement />;
       
       case 'claims': 
-        return <div className="p-20 text-center text-slate-300 font-black uppercase italic tracking-widest">Insurance Reconciliation</div>;
+        // Replaced the placeholder with the functional Hub
+        return <InsuranceClaimsHub />; 
       
       default: 
         return <FinanceDashboard />;
@@ -37,7 +41,7 @@ const FinancePortal = () => {
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      {/* Pass handleLogout to the sidebar */}
+      {/* The sidebar controls the activeTab state */}
       <FinanceSidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
