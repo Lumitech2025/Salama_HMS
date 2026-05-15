@@ -6,7 +6,7 @@ from .models import (
     Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue,
     LabInventoryItem, Prescription, PrescriptionItem, 
-    ClinicalNote, ImagingRecord, RegistrationRecord
+    ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem
 )
 
 User = get_user_model()
@@ -252,4 +252,9 @@ class ChemoSessionSerializer(serializers.ModelSerializer):
     administered_by_name = serializers.CharField(source='administered_by.get_full_name', read_only=True)
     class Meta:
         model = ChemoSession
+        fields = '__all__'
+
+class InventoryItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InventoryItem
         fields = '__all__'

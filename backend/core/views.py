@@ -7,19 +7,20 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework_simplejwt.views import TokenObtainPairView
 from datetime import datetime, time
 
+
 # Import local models and serializers
 from .models import (
     Patient, Protocol, Treatment, ChemoSession, Drug, 
     LabResult, Bill, Appointment, VitalSign, Queue, 
     LabInventoryItem, StockAdjustment, Prescription, 
-    PrescriptionItem, ClinicalNote, ImagingRecord, RegistrationRecord
+    PrescriptionItem, ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem
 )
 from .serializers import (
     PatientSerializer, ProtocolSerializer, TreatmentSerializer, 
     ChemoSessionSerializer, DrugSerializer, LabResultSerializer, 
     BillSerializer, SalamaTokenObtainPairSerializer, LabInventorySerializer, 
     StockAdjustmentSerializer, AppointmentSerializer, VitalSignSerializer, 
-    QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer, RegistrationRecordSerializer
+    QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer, RegistrationRecordSerializer, InventoryItemSerializer
 )
 
 # --- 1. PERMISSION LOGIC ---
@@ -294,3 +295,7 @@ class RegistrationRecordViewSet(viewsets.ModelViewSet):
             "age_groups": age_groups,
             "insurance_distribution": insurance_map
         })
+    
+class InventoryItemViewSet(viewsets.ModelViewSet):
+    queryset = InventoryItem.objects.all().order_by('-added_at')
+    serializer_class = InventoryItemSerializer

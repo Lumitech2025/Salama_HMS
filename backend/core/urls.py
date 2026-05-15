@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
+    InventoryItemViewSet,
     LabInventoryViewSet,
     PatientViewSet, 
     ProtocolViewSet, 
@@ -58,6 +59,9 @@ router.register(r'bills', BillViewSet, basename='bill')
 router.register(r'registrations', RegistrationRecordViewSet, basename='registration-records')
 
 router.register(r'vitals', VitalSignViewSet, basename='vitals')
+
+router = DefaultRouter()
+router.register(r'inventory-items', InventoryItemViewSet)
 
 
 urlpatterns = [

@@ -674,3 +674,25 @@ class RemittanceBatch(models.Model):
 
     def __str__(self):
         return f"REMIT-{self.payment_reference} ({self.insurance_company.name})"
+    
+
+class InventoryItem(models.Model):
+    DEPARTMENT_CHOICES = [
+        ('PHARMACY', 'Pharmacy'),
+        ('LAB', 'Laboratory'),
+        ('NURSING', 'Nursing'),
+        ('RADIOLOGY', 'Radiology'),
+        ('ADMIN', 'General Admin'),
+    ]
+
+    name = models.CharField(max_length=255)
+    quantity_available = models.IntegerField(default=0)
+    cost_per_unit = models.DecimalField(max_digits=12, decimal_places=2)
+    department = models.CharField(max_length=50, choices=DEPARTMENT_CHOICES)
+    batch_number = models.CharField(max_length=100)
+    expiry_date = models.DateField(null=True, blank=True) # Optional
+    
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} - {self.batch_number}"
