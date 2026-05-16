@@ -10,7 +10,7 @@ import csv
 from .models import (RegistrationRecord,
     LabInventoryItem, Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue,
-    Prescription, PrescriptionItem, ClinicalNote, ImagingRecord
+    Prescription, PrescriptionItem, ClinicalNote, ImagingRecord, PsychologyEnrollment, SessionLog, BereavementLog
 )
 
 
@@ -385,6 +385,53 @@ class LabResultAdmin(admin.ModelAdmin):
         return format_html('<span style="{}">{}</span>', style, obj.status)
     
     status_tag.short_description = "Status"
+
+@admin.register(PsychologyEnrollment)
+class PsychologyEnrollmentAdmin(admin.ModelAdmin):
+    # What columns show up on the main list dashboard view
+    list_display = ('medical_record_no', 'patient_name', 'current_stage', 'status', 'location_department', 'consent_form_signed', 'created_at')
+    
+    # Quick filter sidebar tools
+    list_filter = ('current_stage', 'status', 'location_department', 'consent_form_signed')
+    
+    # Search bar indexing fields
+    search_fields = ('patient_name', 'medical_record_no', 'diagnosis')
+    
+    # Organizes structural metadata into read-only tracking blocks
+    readonly_fields = ('created_at', 'updated_at', 'enrolled_by')
+    
+    # Form layout styling partitioning
+    fieldsets = (
+        ('Patient Identity & Intake Context', {
+            'fields': ('patient_name', 'medical_record_no', 'diagnosis', 'initial_intake_note')
+        }),
+        ('Clinical Status Tracking', {
+            'fields': ('current_stage', 'status', 'location_department')
+        }),
+        ('Institutional Pre-Requisites', {
+            'fields': ('consent_form_signed',)
+        }),
+        ('System Metadata Audit Logs', {
+            'fields': ('enrolled_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',), # Minimizes block unless clicked open
+        }),
+    )
+
+
+@admin.register(SessionLog)
+class SessionLogAdmin(admin.ModelAdmin):
+    list_display = ('enrollment', 'session_date', 'is_synced_with_hro')
+    list_filter = ('is_synced_with_hro', 'session_date')
+    search_fields = ('enrollment__patient_name', 'enrollment__medical_record_no', 'clinical_notes')
+    readonly_fields = ('session_date',)
+
+
+@admin.register(BereavementLog)
+class BereavementLogAdmin(admin.ModelAdmin):
+    list_display = ('primary_contact_name', 'contact_phone', 'support_status', 'total_sessions_conducted', 'last_contact_date')
+    list_filter = ('support_status', 'last_contact_date')
+    search_fields = ('primary_contact_name', 'contact_phone', 'enrollment__patient_name')
+    readonly_fields = ('last_contact_date',)
 
 
 

@@ -696,3 +696,82 @@ class InventoryItem(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.batch_number}"
+    
+class PsychologyEnrollment(models.Model):
+    STAGE_CHOICES = [
+        ('DENIAL', 'Denial & Shock'),
+        ('ANGER', 'Anger & Resistance'),
+        ('BARGAINING', 'Bargaining Process'),
+        ('DEPRESSION', 'Depression'),
+        ('ACCEPTANCE', 'Acceptance & Compliance'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('IN_THERAPY', 'In Therapy'),
+        ('BAD_NEWS_DEBRIEF', 'Bad News Debrief'),
+        ('SUPPORT_GROUP', 'Support Group'),
+        ('LOST_TO_FOLLOW_UP', 'Lost to Follow Up'),
+        ('CASE_CLOSED', 'Case Closed'),
+    ]
+
+    DEPARTMENT_CHOICES = [
+        ('CHEMO_SUITE', 'Chemo Suite'),
+        ('PHARMACY_REFILL', 'Pharmacy Refill'),
+        ('RADIOLOGY_REF', 'Radiology Reference'),
+        ('LABORATORY', 'Laboratory'),
+        ('WARDS', 'In-Patient Wards'),
+    ]
+
+    # Links directly to your central medical records/patient system
+    patient_name = models.CharField(max_length=255)
+    medical_record_no = models.CharField(max_length=100, unique=True)
+    diagnosis = models.CharField(max_length=255)
+    
+    # Clinical tracking states
+    current_stage = models.CharField(max_length=50, choices=STAGE_CHOICES, default='DENIAL')
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='IN_THERAPY')
+    location_department = models.CharField(max_length=50, choices=DEPARTMENT_CHOICES, default='CHEMO_SUITE')
+    
+    # Pre-requisite checklist from your handwritten notes
+    consent_form_signed = models.BooleanField(default=False)
+    initial_intake_note = models.TextField(blank=True, null=True)
+    
+    # Administrative tracking fields
+    enrolled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.patient_name} ({self.medical_record_no})"
+
+
+class SessionLog(models.Model):
+    """Tracks individual clinical consult iterations for the HRO Daily Sync"""
+    enrollment = models.ForeignKey(PsychologyEnrollment, on_delete=models.CASCADE, related_name='sessions')
+    session_date = models.DateField(auto_now_add=True)
+    clinical_notes = models.TextField()
+    is_synced_with_hro = models.BooleanField(default=False)  # Tracks your HRO Registry requirement
+
+    def __str__(self):
+        return f"Session for {self.enrollment.patient_name} on {self.session_date}"
+
+
+class BereavementLog(models.Model):
+    """Manages tracking details for Caregivers following palliative changes or patient demises"""
+    STATUS_CHOICES = [
+        ('ACTIVE_GRIEF', 'Active Grief Work'),
+        ('BEREAVEMENT', 'Bereavement Support'),
+        ('PALLIATIVE_RECONCILIATION', 'Palliative Reconciliation'),
+        ('MONITORING_CLOSED', 'Monitoring Closed'),
+    ]
+
+    enrollment = models.ForeignKey(PsychologyEnrollment, on_delete=models.SET_NULL, null=True, blank=True)
+    primary_contact_name = models.CharField(max_length=255)  # e.g., Grace Kamau (Spouse)
+    contact_phone = models.CharField(max_length=50)
+    
+    support_status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='ACTIVE_GRIEF')
+    total_sessions_conducted = models.IntegerField(default=0)
+    last_contact_date = models.DateField(auto_now=True)
+
+    def __str__(self):
+        return f"Grief Support: {self.primary_contact_name}"

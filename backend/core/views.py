@@ -7,20 +7,21 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework_simplejwt.views import TokenObtainPairView
 from datetime import datetime, time
 
-
 # Import local models and serializers
 from .models import (
     Patient, Protocol, Treatment, ChemoSession, Drug, 
     LabResult, Bill, Appointment, VitalSign, Queue, 
     LabInventoryItem, StockAdjustment, Prescription, 
-    PrescriptionItem, ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem
+    PrescriptionItem, ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem,PsychologyEnrollment, SessionLog, BereavementLog
 )
 from .serializers import (
     PatientSerializer, ProtocolSerializer, TreatmentSerializer, 
     ChemoSessionSerializer, DrugSerializer, LabResultSerializer, 
     BillSerializer, SalamaTokenObtainPairSerializer, LabInventorySerializer, 
     StockAdjustmentSerializer, AppointmentSerializer, VitalSignSerializer, 
-    QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer, RegistrationRecordSerializer, InventoryItemSerializer
+    QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer, RegistrationRecordSerializer, InventoryItemSerializer,PsychologyEnrollmentSerializer, 
+    SessionLogSerializer, 
+    BereavementLogSerializer
 )
 
 # --- 1. PERMISSION LOGIC ---
@@ -299,3 +300,53 @@ class RegistrationRecordViewSet(viewsets.ModelViewSet):
 class InventoryItemViewSet(viewsets.ModelViewSet):
     queryset = InventoryItem.objects.all().order_by('-added_at')
     serializer_class = InventoryItemSerializer
+
+class PsychologyEnrollmentViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows psychology cases to be viewed, edited, or created.
+    """
+    queryset = PsychologyEnrollment.objects.all().order_by('-created_at')
+    serializer_class = PsychologyEnrollmentSerializer
+    # Adjust permissions based on your system security setup
+    permission_classes = [permissions.IsAuthenticated]
+
+    def perform_create(self, serializer):
+        """Automatically stamp the logging psychologist onto the case file"""
+        serializer.save(enrolled_by=self.request.user)
+
+    @action(detail=False, methods=['get'], url_path='lost-to-follow-up')
+    def lost_to_follow_up(self, request):
+        """Custom endpoint to quickly pull patients flagged for tracking"""
+        ltfu_cases = self.queryset.filter(status='LOST_TO_FOLLOW_UP')
+        page = self.paginate_queryset(ltfu_cases)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(ltfu_cases, many=True)
+        return Response(serializer.data)
+
+
+class SessionLogViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for logging daily therapeutic consult interactions.
+    """
+    queryset = SessionLog.objects.all().order_by('-session_date')
+    serializer_class = SessionLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=['get'], url_path='unsynced-hro')
+    def unsynced_hro(self, request):
+        """Pulls all sessions that haven't been pushed to the HRO Daily Sync yet"""
+        unsynced = self.queryset.filter(is_synced_with_hro=False)
+        serializer = self.get_serializer(unsynced, many=True)
+        return Response(serializer.data)
+
+
+class BereavementLogViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint managing family grief tracking operations.
+    """
+    queryset = BereavementLog.objects.all().order_by('-last_contact_date')
+    serializer_class = BereavementLogSerializer
+    permission_classes = [permissions.IsAuthenticated]

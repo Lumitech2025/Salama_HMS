@@ -20,7 +20,10 @@ from .views import (
     ImagingRecordViewSet,    
     SalamaTokenObtainPairView,
     RegistrationRecordViewSet,
-    VitalSignViewSet
+    VitalSignViewSet,
+    PsychologyEnrollmentViewSet,
+    SessionLogViewSet,
+    BereavementLogViewSet
 )
 
 # Using DefaultRouter for automatic URL conf and a clean API root
@@ -62,6 +65,10 @@ router.register(r'vitals', VitalSignViewSet, basename='vitals')
 
 router = DefaultRouter()
 router.register(r'inventory-items', InventoryItemViewSet)
+
+router.register(r'psychology-enrollments', PsychologyEnrollmentViewSet, basename='psychology-enrollment')
+router.register(r'session-logs', SessionLogViewSet, basename='session-log')
+router.register(r'bereavement-logs', BereavementLogViewSet, basename='bereavement-log')
 
 
 urlpatterns = [

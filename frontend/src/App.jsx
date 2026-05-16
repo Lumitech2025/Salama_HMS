@@ -5,8 +5,6 @@ import Dashboard from './pages/Dashboard';
 import AdminDashboard from './components/dashboards/admin/AdminDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import TriagePortal from "./components/dashboards/receptionist/modules/TriagePortal";
-
-// Import the Portal Wrapper instead of just the Dashboard
 import FinancePortal from './components/dashboards/Finance/FinancePortal';
 
 const Unauthorized = () => (
@@ -25,22 +23,30 @@ const Unauthorized = () => (
 );
 
 function App() {
-  // Roles allowed to access clinical areas
+  // ALIGNED STRINGS: Roles allowed to access clinical switchboard areas and portals
   const CLINICAL_STAFF = [
-    'ONCOLOGIST', 'NURSE', 'RECEPTIONIST', 'PHARMACIST', 
-    'BILLING_OFFICER', 'STAFF', 'LAB_TECH', 'RADIOLOGIST', 'PATIENT', 'CLIENT'
+    'ONCOLOGIST', 
+    'NURSE', 
+    'RECEPTIONIST', 
+    'PHARMACIST', 
+    'LAB_TECH', 
+    'RADIOLOGIST', 
+    'COUNSELING_PSYCHOLOGIST', 
+    'MARKETING', // Aligned to user choices model key
+    'BILLING',   // Aligned to user choices model key
+    'PATIENT', 
+    'STAFF'
   ];
 
-  // Roles allowed to access the High-Level Admin & Finance Center
-  // Note: Ensure strings match your Django choices exactly (e.g., 'HMS_ADMIN' vs 'HMS ADMIN')
-  const ADMIN_ROLES = ['ADMIN', 'HMS ADMIN', 'HMS_ADMIN', 'FINANCE', 'BILLING'];
+  // Roles allowed to access the High-Level Admin & Finance Command Centers
+  const ADMIN_ROLES = ['ADMIN', 'HMS_ADMIN', 'FINANCE', 'BILLING'];
 
   return (
     <Routes>
       {/* 1. Finance & Procurement Portal */}
       <Route 
         path="/finance-dashboard" 
-        element={
+        element = {
           <ProtectedRoute allowedRoles={['FINANCE', 'ADMIN', 'HMS_ADMIN']}>
             <FinancePortal />
           </ProtectedRoute>
@@ -50,17 +56,17 @@ function App() {
       {/* 2. Admin Command Center */}
       <Route 
         path="/admin-dashboard" 
-        element={
+        element = {
           <ProtectedRoute allowedRoles={ADMIN_ROLES}>
             <AdminDashboard />
           </ProtectedRoute>
         } 
       />
 
-      {/* 3. Clinical Hub / Switchboard */}
+      {/* 3. Clinical Hub / Switchboard (Psychologist, Receptionist, Marketing, Billing land here) */}
       <Route 
         path="/" 
-        element={
+        element = {
           <ProtectedRoute allowedRoles={[...CLINICAL_STAFF, ...ADMIN_ROLES]}>
             <Dashboard />
           </ProtectedRoute>
@@ -70,7 +76,7 @@ function App() {
       {/* 4. Triage Portal */}
       <Route 
         path="/triage" 
-        element={
+        element = {
           <ProtectedRoute allowedRoles={['NURSE', 'ONCOLOGIST', ...ADMIN_ROLES]}>
             <TriagePortal />
           </ProtectedRoute>
@@ -78,7 +84,7 @@ function App() {
       />
       <Route 
         path="/triage/:patientId" 
-        element={
+        element = {
           <ProtectedRoute allowedRoles={['NURSE', 'ONCOLOGIST', ...ADMIN_ROLES]}>
             <TriagePortal />
           </ProtectedRoute>

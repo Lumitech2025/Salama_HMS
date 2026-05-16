@@ -6,8 +6,9 @@ from .models import (
     Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue,
     LabInventoryItem, Prescription, PrescriptionItem, 
-    ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem
+    ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem, PsychologyEnrollment, SessionLog, BereavementLog
 )
+
 
 User = get_user_model()
 
@@ -258,3 +259,64 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryItem
         fields = '__all__'
+
+
+
+## Counselling Psychologist serializer
+class SessionLogSerializer(serializers.ModelSerializer):
+    """Handles individual counseling encounter entries for HRO logs"""
+    class Meta:
+        model = SessionLog
+        fields = ['id', 'enrollment', 'session_date', 'clinical_notes', 'is_synced_with_hro']
+        read_only_fields = ['session_date']
+
+
+class BereavementLogSerializer(serializers.ModelSerializer):
+    """Handles tracking records for family and caregiver grief support workflows"""
+    # Read-only convenience fields for frontend presentation display lists
+    last_contact_formatted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BereavementLog
+        fields = [
+            'id', 'enrollment', 'primary_contact_name', 'contact_phone',
+            'support_status', 'total_sessions_conducted', 'last_contact_date',
+            'last_contact_formatted'
+        ]
+        read_only_fields = ['last_contact_date']
+
+    def get_last_contact_formatted(self, obj):
+        if obj.last_contact_date:
+            return obj.last_contact_date.strftime('%d %b %Y')
+        return None
+
+
+class PsychologyEnrollmentSerializer(serializers.ModelSerializer):
+    """The master case file serializer for oncology support enrollments"""
+    # Embedded nested listings to pull related sessions and family tracking logs automatically
+    sessions = SessionLogSerializer(many=True, read_only=True)
+    bereavement_logs = BereavementLogSerializer(many=True, read_only=True)
+    
+    # Read-only utility text transformations for clean UI presentation mappings
+    stage_display = serializers.CharField(source='get_current_stage_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    department_display = serializers.CharField(source='get_location_department_display', read_only=True)
+    enrolled_by_username = serializers.CharField(source='enrolled_by.username', read_only=True)
+    created_at_formatted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PsychologyEnrollment
+        fields = [
+            'id', 'patient_name', 'medical_record_no', 'diagnosis',
+            'current_stage', 'stage_display', 'status', 'status_display',
+            'location_department', 'department_display', 'consent_form_signed',
+            'initial_intake_note', 'enrolled_by', 'enrolled_by_username',
+            'created_at', 'created_at_formatted', 'updated_at',
+            'sessions', 'bereavement_logs'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'enrolled_by']
+
+    def get_created_at_formatted(self, obj):
+        if obj.created_at:
+            return obj.created_at.strftime('%d %b %Y')
+        return None
