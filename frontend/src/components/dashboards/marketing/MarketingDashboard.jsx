@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import API from '@/api/api';
-import { Megaphone, Users, Radio, BarChart3, RefreshCw, PlusCircle, CheckCircle2 } from 'lucide-react';
+import { Megaphone, Users, Radio, BarChart3, RefreshCw, PlusCircle, CheckCircle2, Loader2 } from 'lucide-react';
 
 // Sub-Module Workflow Panels Imports
 import MarketingSidebar from "./MarketingSidebar";
@@ -8,11 +8,13 @@ import OutreachManager from "./modules/OutreachManager";
 import ReferralNetwork from "./modules/ReferralNetwork";
 import CommunicationsHub from "./modules/CommunicationsHub";
 import CampaignAnalytics from "./modules/CampaignAnalytics";
+import MarketingRequisitions from "./modules/MarketingRequisitions";
 
 const MarketingDashboard = ({ onLogout }) => {
   const [marketingTab, setMarketingTab] = useState('overview');
   const [campaigns, setCampaigns] = useState([]);
   const [partners, setPartners] = useState([]);
+  const [pendingPosts, setPendingPosts] = useState([]);
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
@@ -25,16 +27,22 @@ const MarketingDashboard = ({ onLogout }) => {
   const fetchMarketingMetrics = async () => {
     setLoading(true);
     try {
-      // Pulling active outreach camps data from backend
+      // 1. Fetch live outreach campaigns dataset from Django REST framework backend
       const campRes = await API.get('/outreach-campaigns/').catch(() => ({ data: [] }));
       setCampaigns(campRes.data.results || campRes.data || []);
 
-      // Pulling referring hospital providers CRM data
+      // 2. Fetch live referring hospital providers CRM data map
       const partnerRes = await API.get('/referral-partners/').catch(() => ({ data: [] }));
       setPartners(partnerRes.data.results || partnerRes.data || []);
 
-      // Simulating a query for background social posts waiting for clinical validation clearance
-      setPendingApprovalsCount(2); 
+      // 3. Fetch live digital communications log records
+      const postRes = await API.get('/social-media-posts/').catch(() => ({ data: [] }));
+      const allPosts = postRes.data.results || postRes.data || [];
+      
+      // Filter out posts that are genuinely waiting for verification sign-off
+      const filteringPending = allPosts.filter(p => p.status === 'AWAITING_APPROVAL' || p.status === 'DRAFT');
+      setPendingPosts(filteringPending);
+      setPendingApprovalsCount(filteringPending.length);
 
     } catch (err) {
       console.error("Error connecting with public relations metrics:", err);
@@ -52,15 +60,15 @@ const MarketingDashboard = ({ onLogout }) => {
   };
 
   const renderHomeOverview = () => (
-    <div className="space-y-10 animate-in fade-in duration-500 text-left">
+    <div className="space-y-10 animate-in fade-in duration-500 text-left font-['Inter']">
       
       {/* 1. MARKETING KPI BALANCE SCORES */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
           { label: 'Screening Operations', val: `${campaigns.length} Registered`, icon: Megaphone, color: 'text-teal-600', sub: 'County Outreach Camps' },
-          { label: 'Total Screening Turnout', val: calculateTotalTurnout() || '1,420 Individuals', icon: CheckCircle2, color: 'text-blue-600', sub: 'Aggregated Registries' },
+          { label: 'Total Screening Turnout', val: calculateTotalTurnout() > 0 ? `${calculateTotalTurnout().toLocaleString()} Individuals` : '0 Individuals', icon: CheckCircle2, color: 'text-blue-600', sub: 'Aggregated Registries' },
           { label: 'Referral Providers', val: `${partners.length} Practitioners`, icon: Users, color: 'text-amber-600', sub: 'Active Network CRM' },
-          { label: 'Hospital Conversions', val: `${calculateTotalConversions() || 34} Biopsies`, icon: PlusCircle, color: 'text-emerald-600', sub: 'Direct Pipeline Admissions' },
+          { label: 'Hospital Conversions', val: `${calculateTotalConversions()} Admissions`, icon: PlusCircle, color: 'text-emerald-600', sub: 'Direct Pipeline Admissions' },
         ].map((card, i) => (
           <div key={i} className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
              <div className={`p-3 rounded-xl w-fit mb-5 bg-slate-50 ${card.color}`}><card.icon size={22} /></div>
@@ -133,17 +141,8 @@ const MarketingDashboard = ({ onLogout }) => {
                   </tr>
                 )) : (
                   <tr>
-                    {/* Mock Fallback Data matching our low-padding scannable table matrix style if API is fresh and empty */}
-                    <td className="p-5 px-6 text-left">
-                      <p className="font-semibold text-slate-900">Meru County Cancer Awareness Camp</p>
-                      <p className="text-xs text-slate-400 mt-0.5">Free Breast & Prostate Screening</p>
-                    </td>
-                    <td className="p-5 text-left">
-                      <span className="bg-slate-50 text-slate-600 text-[11px] px-2.5 py-1 rounded-md border border-slate-100">Meru Town Square</span>
-                    </td>
-                    <td className="p-5 text-center text-slate-700 font-mono text-xs">340 Turnout</td>
-                    <td className="p-5 text-right px-6">
-                      <span className="bg-teal-50 text-teal-600 border border-teal-100 px-2.5 py-0.5 rounded text-xs font-medium">Active</span>
+                    <td colSpan="4" className="p-12 text-center text-slate-400 font-medium">
+                      No outreach drive logs stored in backend registers. Click "Launch New Drive" to log operational field work.
                     </td>
                   </tr>
                 )}
@@ -160,24 +159,25 @@ const MarketingDashboard = ({ onLogout }) => {
               <p className="text-xs text-slate-400 mt-1">Pending approval media content queues</p>
             </div>
             
-            <div className="space-y-4">
-              <div className="bg-white/5 border border-white/5 p-5 rounded-2xl text-left text-xs">
-                <div className="flex justify-between items-start mb-2.5">
-                  <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">META // POST</span>
-                  <span className="text-[11px] text-slate-400 font-medium">Awaiting MD Signoff</span>
+            <div className="space-y-4 max-h-[300px] overflow-y-auto pr-1">
+              {pendingPosts.length > 0 ? pendingPosts.slice(0, 2).map((post, idx) => (
+                <div key={idx} className="bg-white/5 border border-white/5 p-5 rounded-2xl text-left text-xs space-y-2">
+                  <div className="flex justify-between items-start">
+                    <span className="text-[9px] font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                      {post.target_platform}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium">{post.status_display || post.status}</span>
+                  </div>
+                  <p className="text-slate-200 font-medium line-clamp-2 leading-relaxed">{post.content}</p>
+                  <p className="text-[9px] text-slate-500 pt-1">
+                    Scheduled: {post.schedule_date || 'Immediate'}
+                  </p>
                 </div>
-                <p className="text-slate-200 font-medium line-clamp-2">"Early clinical staging saves lives. Join the Salama oncology tracking unit this Saturday at..."</p>
-                <p className="text-[10px] text-slate-500 mt-2">Target Channel: Facebook Page</p>
-              </div>
-
-              <div className="bg-white/5 border border-white/5 p-5 rounded-2xl text-left text-xs">
-                <div className="flex justify-between items-start mb-2.5">
-                  <span className="text-[10px] font-mono text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded border border-teal-500/20">RADIO // DRIVE</span>
-                  <span className="text-[11px] text-slate-300 font-medium">Scheduled</span>
+              )) : (
+                <div className="p-8 border border-dashed border-white/5 text-center text-slate-500 rounded-2xl text-xs">
+                  All generated media outputs are fully cleared and published live.
                 </div>
-                <p className="text-slate-200 font-medium line-clamp-2">Live Vernacular Cancer Sensitization interactive panel Q&A talk show session.</p>
-                <p className="text-[10px] text-slate-500 mt-2">Air Date: Next Tuesday 08:30 AM</p>
-              </div>
+              )}
             </div>
           </div>
           
@@ -200,6 +200,7 @@ const MarketingDashboard = ({ onLogout }) => {
       case 'referrals': return <ReferralNetwork />;
       case 'communications': return <CommunicationsHub />;
       case 'analytics': return <CampaignAnalytics />;
+      case 'requisitions': return <MarketingRequisitions />;
       default: return renderHomeOverview();
     }
   };

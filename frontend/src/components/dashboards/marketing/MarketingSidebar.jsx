@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Megaphone, Users, Radio, BarChart3, LogOut } from 'lucide-react';
+import { LayoutDashboard, Megaphone, Users, Radio, BarChart3,DollarSign, LogOut } from 'lucide-react';
 
 const MarketingSidebar = ({ activeTab, setActiveTab, onLogout, stats = { pendingApprovals: 0, activeCamps: 0 } }) => {
   // Pulling active authentication metadata directly from server cache state
@@ -13,6 +13,7 @@ const MarketingSidebar = ({ activeTab, setActiveTab, onLogout, stats = { pending
     { id: 'referrals', label: 'Referral Provider CRM', icon: Users },
     { id: 'communications', label: 'Communications Hub', icon: Radio, badge: stats.pendingApprovals, badgeColor: 'bg-amber-500 text-slate-950' },
     { id: 'analytics', label: 'Campaign Evaluation', icon: BarChart3 },
+    { id: 'requisitions', label: 'Finance Requisitions', icon: DollarSign },
   ];
 
   return (
@@ -77,8 +78,8 @@ const MarketingSidebar = ({ activeTab, setActiveTab, onLogout, stats = { pending
         onClick={onLogout}
         className="w-full flex items-center gap-3.5 px-5 py-3.5 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/5 transition-all text-left group text-xs font-medium"
       >
-        <LogOut size={16} className="transition-colors group-hover:text-rose-400" />
-        <span>Terminate Session</span>
+        <LogOut size={20} className="transition-colors group-hover:text-rose-400" />
+        <span>Log Out</span>
       </button>
     </aside>
   );

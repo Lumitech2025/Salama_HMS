@@ -6,7 +6,8 @@ from .models import (
     Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue,
     LabInventoryItem, Prescription, PrescriptionItem, 
-    ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem, PsychologyEnrollment, SessionLog, BereavementLog
+    ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem, PsychologyEnrollment, SessionLog, BereavementLog, 
+    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisition
 )
 
 
@@ -320,3 +321,37 @@ class PsychologyEnrollmentSerializer(serializers.ModelSerializer):
         if obj.created_at:
             return obj.created_at.strftime('%d %b %Y')
         return None
+    
+class OutreachCampaignSerializer(serializers.ModelSerializer):
+    campaign_type_display = serializers.CharField(source='get_campaign_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = OutreachCampaign
+        fields = '__all__'
+
+
+class ReferralPartnerSerializer(serializers.ModelSerializer):
+    partner_type_display = serializers.CharField(source='get_partner_type_display', read_only=True)
+
+    class Meta:
+        model = ReferralPartner
+        fields = '__all__'
+
+
+class SocialMediaPostSerializer(serializers.ModelSerializer):
+    platform_display = serializers.CharField(source='get_target_platform_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = SocialMediaPost
+        fields = '__all__'
+
+class MarketingRequisitionSerializer(serializers.ModelSerializer):
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    campaign_title = serializers.CharField(source='campaign.title', read_only=True)
+
+    class Meta:
+        model = MarketingRequisition
+        fields = '__all__'

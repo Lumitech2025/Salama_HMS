@@ -12,7 +12,8 @@ from .models import (
     Patient, Protocol, Treatment, ChemoSession, Drug, 
     LabResult, Bill, Appointment, VitalSign, Queue, 
     LabInventoryItem, StockAdjustment, Prescription, 
-    PrescriptionItem, ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem,PsychologyEnrollment, SessionLog, BereavementLog
+    PrescriptionItem, ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem,PsychologyEnrollment, SessionLog, BereavementLog, 
+    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisition
 )
 from .serializers import (
     PatientSerializer, ProtocolSerializer, TreatmentSerializer, 
@@ -21,7 +22,7 @@ from .serializers import (
     StockAdjustmentSerializer, AppointmentSerializer, VitalSignSerializer, 
     QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer, RegistrationRecordSerializer, InventoryItemSerializer,PsychologyEnrollmentSerializer, 
     SessionLogSerializer, 
-    BereavementLogSerializer
+    BereavementLogSerializer, OutreachCampaignSerializer, ReferralPartnerSerializer, SocialMediaPostSerializer, MarketingRequisitionSerializer
 )
 
 # --- 1. PERMISSION LOGIC ---
@@ -349,4 +350,28 @@ class BereavementLogViewSet(viewsets.ModelViewSet):
     """
     queryset = BereavementLog.objects.all().order_by('-last_contact_date')
     serializer_class = BereavementLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+class OutreachCampaignViewSet(viewsets.ModelViewSet):
+    queryset = OutreachCampaign.objects.all().order_by('-created_at')
+    serializer_class = OutreachCampaignSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+class ReferralPartnerViewSet(viewsets.ModelViewSet):
+    queryset = ReferralPartner.objects.all().order_by('-total_patients_referred')
+    serializer_class = ReferralPartnerSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+class SocialMediaPostViewSet(viewsets.ModelViewSet):
+    queryset = SocialMediaPost.objects.all().order_by('-created_at')
+    serializer_class = SocialMediaPostSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+class MarketingRequisitionViewSet(viewsets.ModelViewSet):
+    queryset = MarketingRequisition.objects.all().order_by('-created_at')
+    serializer_class = MarketingRequisitionSerializer
     permission_classes = [permissions.IsAuthenticated]

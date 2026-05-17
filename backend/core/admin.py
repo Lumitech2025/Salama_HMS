@@ -10,7 +10,8 @@ import csv
 from .models import (RegistrationRecord,
     LabInventoryItem, Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue,
-    Prescription, PrescriptionItem, ClinicalNote, ImagingRecord, PsychologyEnrollment, SessionLog, BereavementLog
+    Prescription, PrescriptionItem, ClinicalNote, ImagingRecord, PsychologyEnrollment, SessionLog, BereavementLog, 
+    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisition
 )
 
 
@@ -433,6 +434,65 @@ class BereavementLogAdmin(admin.ModelAdmin):
     search_fields = ('primary_contact_name', 'contact_phone', 'enrollment__patient_name')
     readonly_fields = ('last_contact_date',)
 
+@admin.register(OutreachCampaign)
+class OutreachCampaignAdmin(admin.ModelAdmin):
+    # Columns to display in the main list view
+    list_display = ('title', 'campaign_type', 'target_region_location', 'start_date', 'actual_turnout', 'patients_referred_to_salama', 'status')
+    
+    # Filter panels on the right side
+    list_filter = ('campaign_type', 'status', 'start_date')
+    
+    # Search bar fields
+    search_fields = ('title', 'target_region_location', 'notes_summary')
+    
+    # Grouping details logically inside the form layout block
+    fieldsets = (
+        ('Campaign Core Metadata', {
+            'fields': ('title', 'campaign_type', 'target_region_location', 'status')
+        }),
+        ('Timeline Framework', {
+            'fields': ('start_date', 'end_date')
+        }),
+        ('Financial & Influx Impact Metrics', {
+            'fields': ('allocated_budget', 'actual_spent', 'estimated_attendance', 'actual_turnout', 'patients_referred_to_salama')
+        }),
+        ('Strategic Notes', {
+            'fields': ('notes_summary',),
+        }),
+    )
+
+
+@admin.register(ReferralPartner)
+class ReferralPartnerAdmin(admin.ModelAdmin):
+    list_display = ('facility_or_doctor_name', 'partner_type', 'location_base', 'contact_phone', 'total_patients_referred', 'is_active_engagement')
+    list_filter = ('partner_type', 'is_active_engagement', 'location_base')
+    search_fields = ('facility_or_doctor_name', 'contact_phone', 'location_base')
+
+
+@admin.register(SocialMediaPost)
+class SocialMediaPostAdmin(admin.ModelAdmin):
+    list_display = ('target_platform', 'status', 'schedule_date', 'schedule_time', 'consent_verified', 'medical_signoff', 'created_at')
+    list_filter = ('target_platform', 'status', 'consent_verified', 'medical_signoff')
+    search_fields = ('content',)
+    
+    # Form layout styling definition arrays
+    fieldsets = (
+        ('Media Content Copy', {
+            'fields': ('content', 'target_platform', 'status')
+        }),
+        ('Deployment Schedule Vectors', {
+            'fields': ('schedule_date', 'schedule_time')
+        }),
+        ('Clinical Governance & Policy Safeguards', {
+            'fields': ('consent_verified', 'medical_signoff'),
+        }),
+    )
+
+@admin.register(MarketingRequisition)
+class MarketingRequisitionAdmin(admin.ModelAdmin):
+    list_display = ('title', 'category', 'campaign', 'requested_amount', 'status', 'created_at')
+    list_filter = ('category', 'status', 'created_at')
+    search_fields = ('title', 'justification_notes')
 
 
 admin.site.register(Protocol)

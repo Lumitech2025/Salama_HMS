@@ -775,3 +775,123 @@ class BereavementLog(models.Model):
 
     def __str__(self):
         return f"Grief Support: {self.primary_contact_name}"
+    
+
+## Marketing & Outreach Models
+
+class OutreachCampaign(models.Model):
+    CAMPAIGN_TYPE_CHOICES = [
+        ('SCREENING_CAMP', 'Screening Camp'),
+        ('COMMUNITY_BARAZA', 'Community Baraza'),
+        ('MEDIA_DRIVE', 'Media Drive'),
+        ('DIGITAL_OUTREACH', 'Digital Outreach'),
+    ]
+
+    STATUS_CHOICES = [
+        ('PLANNING', 'Planning'),
+        ('ACTIVE', 'Active'),
+        ('COMPLETED', 'Completed'),
+    ]
+
+    title = models.CharField(max_length=255)
+    campaign_type = models.CharField(max_length=40, choices=CAMPAIGN_TYPE_CHOICES, default='SCREENING_CAMP')
+    target_region_location = models.CharField(max_length=255)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    allocated_budget = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    actual_spent = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    estimated_attendance = models.PositiveIntegerField(default=0)
+    actual_turnout = models.PositiveIntegerField(default=0)
+    patients_referred_to_salama = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PLANNING')
+    notes_summary = models.TextField(blank=True, null=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.title} ({self.target_region_location})"
+
+
+class ReferralPartner(models.Model):
+    PARTNER_TYPE_CHOICES = [
+        ('PRIVATE_CLINIC', 'Private Medical Practitioner / Clinic'),
+        ('COUNTY_HOSPITAL', 'County Referral Hospital Unit'),
+        ('CHV_NETWORK', 'Community Health Volunteer Network'),
+        ('ALUMNI_PATIENT', 'Patient Advocate / Survivor'),
+    ]
+
+    facility_or_doctor_name = models.CharField(max_length=255)
+    partner_type = models.CharField(max_length=40, choices=PARTNER_TYPE_CHOICES, default='PRIVATE_CLINIC')
+    contact_phone = models.CharField(max_length=50)
+    email_address = models.EmailField(blank=True, null=True)
+    location_base = models.CharField(max_length=255)
+    total_patients_referred = models.PositiveIntegerField(default=0)
+    is_active_engagement = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.facility_or_doctor_name
+
+
+class SocialMediaPost(models.Model):
+    PLATFORM_CHOICES = [
+        ('FACEBOOK', 'Facebook Page'),
+        ('INSTAGRAM', 'Instagram Business'),
+        ('VERNACULAR_RADIO', 'Vernacular Radio Log'),
+    ]
+
+    STATUS_CHOICES = [
+        ('DRAFT', 'Draft'),
+        ('AWAITING_APPROVAL', 'Awaiting Approval'),
+        ('SCHEDULED', 'Scheduled'),
+        ('DISPATCHED', 'Dispatched'),
+    ]
+
+    content = models.TextField()
+    target_platform = models.CharField(max_length=30, choices=PLATFORM_CHOICES, default='FACEBOOK')
+    schedule_date = models.DateField(blank=True, null=True)
+    schedule_time = models.TimeField(blank=True, null=True)
+    consent_verified = models.BooleanField(default=False)
+    medical_signoff = models.BooleanField(default=False)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='DRAFT')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.target_platform} Post - {self.status} ({self.created_at.date()})"
+    
+
+class MarketingRequisition(models.Model):
+    CATEGORY_CHOICES = [
+        ('POSTERS_PRINTING', 'Posters & Printing Materials'),
+        ('SOCIAL_ADS', 'Social Media Advertising (Meta/Google)'),
+        ('LOGISTICS_TRAVEL', 'Field Transport & Fuel Logistics'),
+        ('MEDIA_AIRTIME', 'Radio Airtime & PR Sponsorships'),
+        ('MISC_SUPPLIES', 'Miscellaneous Camp Supplies'),
+    ]
+
+    STATUS_CHOICES = [
+        ('PENDING', 'Awaiting Finance Review'),
+        ('APPROVED', 'Funds Disbursed'),
+        ('REJECTED', 'Requisition Declined'),
+    ]
+
+    title = models.CharField(max_length=255)
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES)
+    campaign = models.ForeignKey(
+        OutreachCampaign, 
+        on_delete=models.CASCADE, 
+        related_name='requisitions',
+        help_text="Link this budget request to an active outreach program line"
+    )
+    requested_amount = models.DecimalField(max_digits=12, decimal_places=2)
+    justification_notes = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.title} - KES {self.requested_amount} ({self.status})"

@@ -5,6 +5,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     InventoryItemViewSet,
     LabInventoryViewSet,
+    MarketingRequisitionViewSet,
     PatientViewSet, 
     ProtocolViewSet, 
     TreatmentViewSet, 
@@ -14,19 +15,21 @@ from .views import (
     BillViewSet,
     AppointmentViewSet,
     VitalSignViewSet,
-    QueueViewSet,               
+    QueueViewSet,              
     PrescriptionViewSet,     
     ClinicalNoteViewSet,     
     ImagingRecordViewSet,    
     SalamaTokenObtainPairView,
     RegistrationRecordViewSet,
-    VitalSignViewSet,
     PsychologyEnrollmentViewSet,
     SessionLogViewSet,
-    BereavementLogViewSet
+    BereavementLogViewSet,
+    OutreachCampaignViewSet, 
+    ReferralPartnerViewSet, 
+    SocialMediaPostViewSet
 )
 
-# Using DefaultRouter for automatic URL conf and a clean API root
+# Use a single dedicated router variable across the module context
 router = DefaultRouter()
 
 # --- 1. Front Desk & Patient Registry ---
@@ -34,11 +37,9 @@ router.register(r'appointments', AppointmentViewSet, basename='appointment')
 router.register(r'patients', PatientViewSet, basename='patient')
 
 # --- 2. Queue & Workflow Orchestration ---
-# This powers the Live Monitor and the KPI Analytics (Doctor & Pharmacy)
 router.register(r'queue', QueueViewSet, basename='queue')
 
 # --- 3. Triage & Clinical EMR Data ---
-# These power the Longitudinal History/EMR Tab and Triage workflows
 router.register(r'vital-signs', VitalSignViewSet, basename='vital-signs')
 router.register(r'clinical-notes', ClinicalNoteViewSet, basename='clinical-note')
 router.register(r'imaging', ImagingRecordViewSet, basename='imaging')
@@ -49,27 +50,27 @@ router.register(r'treatments', TreatmentViewSet, basename='treatment')
 router.register(r'chemo-sessions', ChemoSessionViewSet, basename='chemo-session')
 
 # --- 5. Pharmacy & Inventory ---
-# 'prescriptions' handles the doctor-to-pharmacy push
-# 'drugs' handles the Pharmacy Shop and Main Store inventory
 router.register(r'prescriptions', PrescriptionViewSet, basename='prescription')
 router.register(r'drugs', DrugViewSet, basename='drug')
 router.register(r'inventory', LabInventoryViewSet, basename='inventory')
+router.register(r'inventory-items', InventoryItemViewSet, basename='inventory-item')
 
 # --- 6. Diagnostics & Revenue Cycle ---
 router.register(r'lab-results', LabResultViewSet, basename='lab-result')
 router.register(r'bills', BillViewSet, basename='bill')
-
 router.register(r'registrations', RegistrationRecordViewSet, basename='registration-records')
-
 router.register(r'vitals', VitalSignViewSet, basename='vitals')
 
-router = DefaultRouter()
-router.register(r'inventory-items', InventoryItemViewSet)
-
+# --- 7. Support & Psychology Units ---
 router.register(r'psychology-enrollments', PsychologyEnrollmentViewSet, basename='psychology-enrollment')
 router.register(r'session-logs', SessionLogViewSet, basename='session-log')
 router.register(r'bereavement-logs', BereavementLogViewSet, basename='bereavement-log')
 
+# --- 8. Outreach Public Relations & Marketing ---
+router.register(r'outreach-campaigns', OutreachCampaignViewSet, basename='outreach-campaigns')
+router.register(r'referral-partners', ReferralPartnerViewSet, basename='referral-partners')
+router.register(r'social-media-posts', SocialMediaPostViewSet, basename='social-media-posts')
+router.register(r'marketing-requisitions', MarketingRequisitionViewSet, basename='marketing-requisitions')
 
 urlpatterns = [
     path('', include(router.urls)), 
