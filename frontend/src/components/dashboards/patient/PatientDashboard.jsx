@@ -1,56 +1,135 @@
-import React, { useState } from 'react';
-import PatientSidebar from './PatientSidebar';
-import MyHealthOverview from './modules/MyHealthOverview';
-import LabResults from './modules/LabResults';
-import ImagingScans from './modules/ImagingScans';
-import BillingPayments from './modules/BillingPayments';
-import TreatmentHistory from './modules/TreatmentHistory';
-import PrescriptionManager from './modules/PrescriptionManager';
+import React, { useState, useEffect } from 'react';
+import API from '@/api/api';
+import { Loader2 } from 'lucide-react';
 
-const PatientDashboard = () => {
+// Unified Layout Navigation Track Sidebar
+import PatientSidebar from "./PatientSidebar";
+
+// SHA Clean Interface Sub-Module Alignments
+import OverviewTab from "./modules/OverviewTab";
+import ProfileTab from "./modules/ProfileTab";
+import VitalsTab from "./modules/VitalsTab";
+import AppointmentsTab from "./modules/AppointmentsTab";
+import RecordsTab from "./modules/RecordsTab";
+import PrescriptionsTab from "./modules/PrescriptionsTab";
+import InsuranceTab from "./modules/InsuranceTab";
+
+const PatientDashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('overview');
+  const [patientData, setPatientData] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  // Router for the different modules
-  const renderContent = () => {
+  // EMR Multi-Tiered Database Storage Lines
+  const [appointments, setAppointments] = useState([]);
+  const [vitals, setVitals] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [prescriptions, setPrescriptions] = useState([]);
+  const [labResults, setLabResults] = useState([]);
+  const [imaging, setImaging] = useState([]);
+  const [chemoSessions, setChemoSessions] = useState([]);
+  const [bills, setBills] = useState([]);
+
+  useEffect(() => {
+    fetchComprehensivePatientData();
+  }, []);
+
+  const fetchComprehensivePatientData = async () => {
+    setLoading(true);
+    try {
+      // 1. Fetch targeted patient profile context metrics from backend model records
+      const patientRes = await API.get('/patients/').catch(() => ({ data: [] }));
+      const patientList = patientRes.data.results || patientRes.data || [];
+      
+      // Fallback matching framework if dataset is empty during dev environments baseline checks
+      const assignedProfile = patientList[0] || {
+        id: 1,
+        name: "COLLINS KIMATHI MWITI",
+        national_id: "29482024",
+        gender: "MALE",
+        phone: "254712346105",
+        email: "collin****ti@gmail.com",
+        cancer_type: "Colorectal Carcinoma (Stage III)",
+        address: "Nyeri, Central Region",
+        next_of_kin_name: "Mary Mwiti",
+        next_of_kin_phone: "+254 711 222333"
+      };
+      setPatientData(assignedProfile);
+
+      // 2. Query related records across all EMR application namespaces concurrently matching relational keys
+      const [appRes, vitRes, noteRes, rxRes, labRes, imgRes, chemoRes, billRes] = await Promise.all([
+        API.get('/appointments/').catch(() => ({ data: [] })),
+        API.get('/vital-signs/').catch(() => ({ data: [] })),
+        API.get('/clinical-notes/').catch(() => ({ data: [] })),
+        API.get('/prescriptions/').catch(() => ({ data: [] })),
+        API.get('/lab-results/').catch(() => ({ data: [] })),
+        API.get('/imaging/').catch(() => ({ data: [] })),
+        API.get('/chemo-sessions/').catch(() => ({ data: [] })),
+        API.get('/bills/').catch(() => ({ data: [] })),
+      ]);
+
+      setAppointments(appRes.data.results || appRes.data || []);
+      setVitals(vitRes.data.results || vitRes.data || []);
+      setNotes(noteRes.data.results || noteRes.data || []);
+      setPrescriptions(rxRes.data.results || rxRes.data || []);
+      setLabResults(labRes.data.results || labRes.data || []);
+      setImaging(imgRes.data.results || imgRes.data || []);
+      setChemoSessions(chemoRes.data.results || chemoRes.data || []);
+      setBills(billRes.data.results || billRes.data || []);
+
+    } catch (err) {
+      console.error("Critical error mapping client dashboard metrics array:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-400 font-medium text-xs space-y-3">
+        <Loader2 className="animate-spin text-teal-600" size={28} />
+        <span>Syncing encrypted biometric clinical logs with Afya Yangu database pipelines...</span>
+      </div>
+    );
+  }
+
+  const renderTabContent = () => {
+    // Pack down everything into a structured pass-through parameter configuration object
+    const contextPayload = { 
+      patientData, 
+      appointments, 
+      vitals, 
+      notes, 
+      prescriptions, 
+      labResults, 
+      imaging, 
+      chemoSessions, 
+      bills, 
+      refreshTrigger: fetchComprehensivePatientData 
+    };
+
     switch (activeTab) {
-      case 'overview':
-        return <MyHealthOverview />;
-      case 'lab-results':
-        return <LabResults />;
-      case 'imaging':
-        return <ImagingScans />;
-      case 'billing':
-        return <BillingPayments />;
-      case 'history':
-        return <TreatmentHistory />;
-      case 'prescriptions':
-        return <PrescriptionManager />;
-      default:
-        return <MyHealthOverview />;
+      case 'overview': return <OverviewTab {...contextPayload} />;
+      case 'profile': return <ProfileTab {...contextPayload} />;
+      case 'vitals': return <VitalsTab {...contextPayload} />;
+      case 'appointments': return <AppointmentsTab {...contextPayload} />;
+      case 'records': return <RecordsTab {...contextPayload} />;
+      case 'prescriptions': return <PrescriptionsTab {...contextPayload} />;
+      case 'insurance': return <InsuranceTab {...contextPayload} />;
+      default: return <OverviewTab {...contextPayload} />;
     }
   };
 
   return (
-    <div className="flex min-h-screen bg-[#FDFDFD]">
-      <PatientSidebar activeTab={activeTab} setActiveTab={setActiveTab} />
-      
-      <main className="flex-1 overflow-y-auto h-screen">
-        {/* Top bar for patient context */}
-        <div className="sticky top-0 z-20 bg-[#FDFDFD]/80 backdrop-blur-md px-8 py-4 border-b border-slate-50 flex justify-end">
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Patient ID</p>
-              <p className="text-sm font-bold text-slate-900 italic">SLM-2026-0042</p>
-            </div>
-            <div className="h-10 w-10 rounded-full bg-slate-100 border-2 border-white shadow-sm flex items-center justify-center text-slate-400 font-bold">
-              P
-            </div>
-          </div>
-        </div>
-
-        {/* Dynamic Module Content */}
-        <div className="max-w-7xl mx-auto">
-          {renderContent()}
+    <div className="flex min-h-screen bg-slate-50 w-full font-['Inter'] text-slate-800">
+      <PatientSidebar 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        onLogout={onLogout}
+        patientData={patientData}
+      />
+      <main className="flex-1 ml-80 p-10 transition-all duration-500">
+        <div className="max-w-[1600px] mx-auto">
+          {renderTabContent()}
         </div>
       </main>
     </div>

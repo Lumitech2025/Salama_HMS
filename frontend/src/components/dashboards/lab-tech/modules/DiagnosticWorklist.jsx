@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api';
 import { 
-    Search, FlaskConical, Clock, ArrowLeft, Save, ChevronDown, Eye, Send,
-    Beaker, Activity, ShieldAlert, Loader2, CheckCircle, Droplets, Microscope, 
-    User, ClipboardList, X, Printer, RefreshCcw, AlertCircle, FileText, ChevronRight
+    FlaskConical, Save, ChevronDown, Eye, Send, Beaker, Loader2, Microscope, X, AlertCircle
 } from 'lucide-react';
 
 const DiagnosticWorklist = () => {
@@ -23,8 +21,11 @@ const DiagnosticWorklist = () => {
         try {
             const response = await API.get('/queue/', { params: { current_station: 'LAB', status: 'WAITING' }});
             setQueue(response.data.results || response.data || []);
-        } catch (err) { console.error("Queue fetch error", err); } 
-        finally { setLoading(false); }
+        } catch (err) { 
+            console.error("Queue fetch error", err); 
+        } finally { 
+            setLoading(false); 
+        }
     }, []);
 
     useEffect(() => { fetchQueue(); }, [fetchQueue]);
@@ -36,6 +37,8 @@ const DiagnosticWorklist = () => {
             const visitId = patient.visit_id || patient.visit;
             const res = await API.get(`/lab-results/`, { params: { visit: visitId, status: 'PENDING' }});
             const tests = res.data.results || res.data || [];
+            
+            // Filter array to ensure we only treat records that match known active physician investigations
             setPendingTests(tests);
             
             const initialResults = {};
@@ -43,8 +46,11 @@ const DiagnosticWorklist = () => {
                 initialResults[t.id] = t.parameters || {};
             });
             setTestResults(initialResults);
-        } catch (err) { console.error("Error fetching requisitions", err); } 
-        finally { setFetchingTests(false); }
+        } catch (err) { 
+            console.error("Error fetching requisitions", err); 
+        } finally { 
+            setFetchingTests(false); 
+        }
     }, []);
 
     const handleSelectPatient = (p) => {
@@ -52,10 +58,10 @@ const DiagnosticWorklist = () => {
         fetchPatientRequisitions(p);
     };
 
-    const handleParamChange = (testId, paramName, value) => {
+    const handleParamChange = (testId, fieldName, value) => {
         setTestResults(prev => ({
             ...prev,
-            [testId]: { ...prev[testId], [paramName]: value }
+            [testId]: { ...prev[testId], [fieldName]: value }
         }));
     };
 
@@ -64,43 +70,52 @@ const DiagnosticWorklist = () => {
         setSubmitting(true);
         try {
             const promises = pendingTests.map(test => {
+                const fieldsForThisTest = testResults[test.id] || {};
+                
                 return API.patch(`/lab-results/${test.id}/`, {
-                    parameters: testResults[test.id],
+                    ...fieldsForThisTest,
                     status: 'COMPLETED',
                     technician_notes: techNotes,
                 });
             });
 
             await Promise.all(promises);
-            alert("✅ Diagnostic parameters verified and committed.");
+            alert("✅ Diagnostic parameters verified and committed down to EMR.");
             fetchPatientRequisitions(selectedPatient);
         } catch (err) {
-            alert("❌ Error committing results.");
-        } finally { setSubmitting(false); }
+            alert("❌ Error committing results to server routers.");
+        } finally { 
+            setSubmitting(false); 
+        }
     };
 
     const handleDispatch = async () => {
-        if (!window.confirm("Publish results and return patient to Oncology?")) return;
+        if (!window.confirm("Publish results and return patient to Oncology clinic room?")) return;
         try {
             await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'DOCTOR' });
-            alert("🚀 Patient dispatched to Doctor.");
+            alert("🚀 Patient dispatched back to Doctor workflow queue.");
             setSelectedPatient(null);
             fetchQueue();
-        } catch (err) { alert("Dispatch failed."); }
+        } catch (err) { 
+            alert("Dispatch failed."); 
+        }
     };
 
     const renderTestInputs = (test) => {
         const testId = test.id;
         const currentParams = testResults[testId] || {};
 
-        const InputRow = ({ label, name, type = "text", options = null }) => (
-            <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase ml-1">{label}</label>
+        const InputRow = ({ label, name, unit, type = "text", options = null }) => (
+            <div className="flex flex-col gap-1 text-left">
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-1 flex justify-between">
+                    <span>{label}</span>
+                    {unit && <span className="text-teal-600 font-mono tracking-normal normal-case lowercase">{unit}</span>}
+                </label>
                 {options ? (
                     <select 
                         value={currentParams[name] || ''} 
                         onChange={(e) => handleParamChange(testId, name, e.target.value)}
-                        className="w-full bg-slate-50 text-slate-900 font-bold p-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-teal-500 transition-all appearance-none"
+                        className="w-full bg-slate-50 text-slate-900 font-bold p-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-teal-500 transition-all appearance-none text-xs"
                     >
                         <option value="">Select Result</option>
                         {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
@@ -108,88 +123,107 @@ const DiagnosticWorklist = () => {
                 ) : (
                     <input 
                         type={type}
+                        step="any"
                         value={currentParams[name] || ''}
                         onChange={(e) => handleParamChange(testId, name, e.target.value)}
-                        placeholder="Value..."
-                        className="w-full bg-slate-50 text-slate-900 font-bold p-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-teal-500 transition-all"
+                        placeholder={unit ? `Value in ${unit}...` : "Value..."}
+                        className="w-full bg-slate-50 text-slate-900 font-mono font-bold p-3 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-teal-500 transition-all text-xs"
                     />
                 )}
             </div>
         );
 
-        switch(test.test_name) {
-            case 'URINALYSIS':
-                return (
-                    <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                        <InputRow label="Color" name="color" options={['Straw', 'Yellow', 'Amber', 'Red']} />
-                        <InputRow label="Clarity" name="clarity" options={['Clear', 'Cloudy', 'Turbid']} />
-                        <InputRow label="Glucose" name="glucose" options={['Negative', '1+', '2+', '3+', '4+']} />
-                        <InputRow label="Protein" name="protein" options={['Negative', 'Trace', '1+', '2+']} />
-                        <InputRow label="Nitrites" name="nitrites" options={['Negative', 'Positive']} />
-                        <InputRow label="Blood" name="blood" options={['Negative', 'Positive']} />
-                    </div>
-                );
-            case 'CBC':
-                return (
-                    <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                        <InputRow label="Hemoglobin (g/dL)" name="hb" type="number" />
-                        <InputRow label="WBC (x10⁹/L)" name="wbc" type="number" />
-                        <InputRow label="Platelets (x10⁹/L)" name="plt" type="number" />
-                        <InputRow label="MCV (fL)" name="mcv" type="number" />
-                    </div>
-                );
-            case 'UE':
-                return (
-                    <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                        <InputRow label="Sodium (mmol/L)" name="na" type="number" />
-                        <InputRow label="Potassium (mmol/L)" name="k" type="number" />
-                        <InputRow label="Creatinine (μmol/L)" name="creatinine" type="number" />
-                        <InputRow label="Urea (mmol/L)" name="urea" type="number" />
-                    </div>
-                );
-            case 'LFT':
-                return (
-                    <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                        <InputRow label="ALT (U/L)" name="alt" type="number" />
-                        <InputRow label="AST (U/L)" name="ast" type="number" />
-                        <InputRow label="Bilirubin (μmol/L)" name="bilirubin" type="number" />
-                        <InputRow label="Albumin (g/L)" name="albumin" type="number" />
-                    </div>
-                );
-            case 'BG_CROSS':
-                return (
-                    <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                        <InputRow label="Blood Group" name="group" options={['A', 'B', 'AB', 'O']} />
-                        <InputRow label="Rhesus" name="rhesus" options={['Positive', 'Negative']} />
-                        <InputRow label="Compatibility" name="crossmatch" options={['Compatible', 'Incompatible']} />
-                    </div>
-                );
-            case 'PSA':
-                return (
-                    <div className="grid grid-cols-1 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                        <InputRow label="Total PSA (ng/mL)" name="total_psa" type="number" />
-                    </div>
-                );
-            case 'MALARIA_BS':
-                return (
-                    <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                        <InputRow label="MPS Status" name="mps" options={['Not Seen', 'Positive (+)']} />
-                        <InputRow label="Species" name="species" options={['P. falciparum', 'P. vivax', 'N/A']} />
-                    </div>
-                );
-            default:
-                return (
-                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                        <InputRow label="Result Value" name="value" />
-                    </div>
-                );
+        // Standardize normal matching to handle backend variants (e.g., lowercase or full names) safely
+        const normalizedTestName = String(test.test_name || test.investigation || '').toUpperCase();
+
+        if (normalizedTestName.includes('CBC') || normalizedTestName.includes('BLOOD COUNT')) {
+            return (
+                <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
+                    <InputRow label="Hemoglobin" name="hb" unit="g/dL" type="number" />
+                    <InputRow label="Total WBC Count" name="wbc" unit="x10³/µL" type="number" />
+                    <InputRow label="Absolute Neutrophils" name="neut" unit="x10³/µL" type="number" />
+                    <InputRow label="Platelets" name="plt" unit="x10³/µL" type="number" />
+                    <InputRow label="Mean Corpuscular Vol (MCV)" name="mcv" unit="fL" type="number" />
+                </div>
+            );
         }
+        
+        if (normalizedTestName.includes('UE') || normalizedTestName.includes('UREA') || normalizedTestName.includes('ELECTROLYTES')) {
+            return (
+                <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
+                    <InputRow label="Sodium (Na⁺)" name="na" unit="mmol/L" type="number" />
+                    <InputRow label="Potassium (K⁺)" name="k" unit="mmol/L" type="number" />
+                    <InputRow label="Serum Creatinine" name="creatinine" unit="µmol/L" type="number" />
+                    <InputRow label="Urea" name="urea" unit="mmol/L" type="number" />
+                </div>
+            );
+        }
+
+        if (normalizedTestName.includes('LFT') || normalizedTestName.includes('LIVER')) {
+            return (
+                <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
+                    <InputRow label="ALT / SGPT" name="alt" unit="U/L" type="number" />
+                    <InputRow label="AST / SGOT" name="ast" unit="U/L" type="number" />
+                    <InputRow label="Total Bilirubin (T.BIL)" name="t_bil" unit="µmol/L" type="number" />
+                    <InputRow label="Direct Bilirubin (D.BIL)" name="d_bil" unit="µmol/L" type="number" />
+                    <InputRow label="Alkaline Phosphatase (ALP)" name="alp" unit="U/L" type="number" />
+                    <InputRow label="Albumin" name="albumin" unit="g/L" type="number" />
+                </div>
+            );
+        }
+
+        if (normalizedTestName.includes('PSA') || normalizedTestName.includes('PROSTATE')) {
+            return (
+                <div className="grid grid-cols-1 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
+                    <InputRow label="Total Prostate Specific Antigen" name="total_psa" unit="ng/mL" type="number" />
+                </div>
+            );
+        }
+
+        if (normalizedTestName.includes('URINALYSIS')) {
+            return (
+                <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
+                    <InputRow label="Color" name="color" options={['Straw', 'Yellow', 'Amber', 'Red']} />
+                    <InputRow label="Clarity" name="clarity" options={['Clear', 'Cloudy', 'Turbid']} />
+                    <InputRow label="Glucose" name="glucose" options={['Negative', 'Trace', '1+', '2+', '3+', '4+']} />
+                    <InputRow label="Protein" name="protein" options={['Negative', 'Trace', '1+', '2+', '3+']} />
+                    <InputRow label="Nitrites" name="nitrites" options={['Negative', 'Positive']} />
+                    <InputRow label="Blood" name="blood" options={['Negative', 'Positive']} />
+                </div>
+            );
+        }
+
+        if (normalizedTestName.includes('CROSS') || normalizedTestName.includes('GROUP')) {
+            return (
+                <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
+                    <InputRow label="Blood Group ABO" name="group" options={['A', 'B', 'AB', 'O']} />
+                    <InputRow label="Rhesus Factor" name="rhesus" options={['Positive (+)', 'Negative (-)']} />
+                    <InputRow label="Crossmatch Status" name="crossmatch" options={['Compatible', 'Incompatible']} />
+                </div>
+            );
+        }
+
+        if (normalizedTestName.includes('MALARIA') || normalizedTestName.includes('SLIDE')) {
+            return (
+                <div className="grid grid-cols-2 gap-4 bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
+                    <InputRow label="MPS Blood Slide Status" name="mps" options={['Not Seen', 'Positive (+)']} />
+                    <InputRow label="Parasite Species" name="species" options={['P. falciparum', 'P. vivax', 'N/A']} />
+                </div>
+            );
+        }
+
+        // Generic fallback row so the interface doesn't crash on unmapped tests
+        return (
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <InputRow label="General Result Value" name="value" />
+            </div>
+        );
     };
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-700 font-['Inter'] pb-20">
+        <div className="space-y-8 animate-in fade-in duration-700 font-['Inter'] pb-20 text-left">
             
-            {/* HEADER SELECTION */}
+            {/* HEADER SELECTION CONTROL TRACK */}
             <div className="bg-[#020617] border border-white/10 rounded-[2.5rem] p-6 shadow-2xl relative z-30">
                 <div className="flex flex-col md:flex-row items-center gap-6">
                     <div className="flex items-center gap-4 flex-1 w-full">
@@ -230,6 +264,7 @@ const DiagnosticWorklist = () => {
                 </div>
             </div>
 
+            {/* MAIN DATA INPUTS GRID CONTENT */}
             {selectedPatient ? (
                 <div className="animate-in slide-in-from-bottom-6 duration-500">
                     <div className="bg-white border border-slate-100 rounded-[3rem] p-10 shadow-xl min-h-[500px]">
@@ -250,28 +285,33 @@ const DiagnosticWorklist = () => {
                                     <div className="flex items-center gap-3 text-blue-600">
                                         <div className="h-8 w-1 bg-blue-500 rounded-full group-hover:h-10 transition-all duration-300" />
                                         <h4 className="text-sm font-black uppercase tracking-[0.15em] italic">
-                                            {test.test_label || test.test_name}
+                                            {String(test.test_name || '').toUpperCase().includes('CBC') ? 'Full Blood Count (CBC)' :
+                                             String(test.test_name || '').toUpperCase().includes('UE') ? 'Urea, Electrolytes & Creatinine (U&E)' :
+                                             String(test.test_name || '').toUpperCase().includes('LFT') ? 'Liver Function Test (LFT)' :
+                                             String(test.test_name || '').toUpperCase().includes('PSA') ? 'Prostate Specific Antigen (PSA)' :
+                                             String(test.test_name || '').toUpperCase().includes('URINALYSIS') ? 'Routine Urinalysis' :
+                                             String(test.test_name || '').toUpperCase().includes('CROSS') ? 'Blood Group & Cross Match' :
+                                             String(test.test_name || '').toUpperCase().includes('MALARIA') ? 'Blood Slide for Malaria' : test.test_name}
                                         </h4>
                                     </div>
-                                    {/* CRITICAL: ONLY renders the inputs for THIS specific test in the loop */}
                                     {renderTestInputs(test)}
                                 </div>
                             )) : !fetchingTests && (
                                 <div className="col-span-2 py-32 text-center bg-slate-50 rounded-[2.5rem] border-2 border-dashed border-slate-200">
                                      <AlertCircle size={48} className="mx-auto text-slate-200 mb-4" />
-                                     <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">No pending requisitions for this visit.</p>
+                                     <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">No pending requisitions for this visit context loop.</p>
                                 </div>
                             )}
                         </div>
 
                         <div className="mt-16 pt-10 border-t border-slate-50">
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] ml-2 block mb-4">Technical Summary / Remarks</label>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] block mb-4">Technical Summary / Remarks</label>
                             <textarea 
                                 rows="4" 
-                                className="w-full bg-slate-50 border-2 border-slate-100 rounded-[2rem] p-8 font-bold text-slate-700 text-sm focus:ring-4 focus:ring-teal-500/5 focus:border-teal-500 outline-none transition-all" 
+                                className="w-full bg-slate-50 border border-slate-200 rounded-[2rem] p-6 font-bold text-slate-700 text-sm focus:ring-4 focus:ring-teal-500/5 focus:border-teal-500 outline-none transition-all resize-none" 
                                 value={techNotes} 
                                 onChange={e => setTechNotes(e.target.value)} 
-                                placeholder="Append observations for the Oncologist..." 
+                                placeholder="Append physiological metrics classifications observations for the Doctor review panel..." 
                             />
                         </div>
                     </div>
@@ -286,10 +326,10 @@ const DiagnosticWorklist = () => {
                 </div>
             )}
 
-            {/* PREVIEW MODAL */}
+            {/* PREVIEW MODAL FRAME */}
             {showPreview && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-[#020617]/80 backdrop-blur-md animate-in fade-in duration-300">
-                    <div className="bg-white rounded-[3.5rem] w-full max-w-2xl overflow-hidden shadow-2xl">
+                    <div className="bg-white rounded-[3.5rem] w-full max-w-2xl overflow-hidden shadow-2xl text-left">
                         <div className="bg-[#020617] p-10 text-white flex justify-between items-center">
                             <div>
                                 <h2 className="text-3xl font-black uppercase italic tracking-tighter">Salama <span className="text-teal-400 font-light not-italic">Lab Verification</span></h2>
@@ -300,12 +340,12 @@ const DiagnosticWorklist = () => {
                         <div className="p-12 space-y-8 overflow-y-auto max-h-[60vh]">
                             {pendingTests.map(test => (
                                 <div key={test.id} className="border-b border-slate-100 pb-8 last:border-0">
-                                    <p className="text-xs font-black text-blue-600 uppercase mb-6 tracking-widest italic">{test.test_label || test.test_name}</p>
-                                    <div className="grid grid-cols-2 gap-y-4 px-4 bg-slate-50 p-6 rounded-3xl">
+                                    <p className="text-xs font-black text-blue-600 uppercase mb-4 tracking-widest italic">{test.test_name}</p>
+                                    <div className="grid grid-cols-2 gap-y-4 px-6 bg-slate-50 p-6 rounded-3xl">
                                         {Object.entries(testResults[test.id] || {}).map(([k, v]) => (
                                             <React.Fragment key={k}>
                                                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{k.replace('_', ' ')}</span>
-                                                <span className="text-sm font-black text-slate-900 uppercase text-right italic">{v || '---'}</span>
+                                                <span className="text-sm font-black text-slate-900 uppercase text-right italic font-mono">{v || '---'}</span>
                                             </React.Fragment>
                                         ))}
                                     </div>

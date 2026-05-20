@@ -210,17 +210,13 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class LabResultSerializer(serializers.ModelSerializer):
+    test_name_display = serializers.CharField(source='get_test_name_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
     patient_name = serializers.CharField(source='patient.name', read_only=True)
-    test_label = serializers.CharField(source='get_test_name_display', read_only=True)
-    status_label = serializers.CharField(source='get_status_display', read_only=True)
 
     class Meta:
         model = LabResult
-        fields = [
-            'id', 'patient', 'patient_name', 'visit', 'test_name', 
-            'test_label', 'parameters', 'technician_notes', 
-            'is_critical', 'status', 'status_label', 'created_at'
-        ]
+        fields = '__all__' 
 
 class BillSerializer(serializers.ModelSerializer):
     patient_name = serializers.ReadOnlyField(source='patient.name')

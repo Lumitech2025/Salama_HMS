@@ -383,11 +383,17 @@ class ClinicalNote(models.Model):
         ordering = ['-created_at']
 
     
+from django.db import models
+from django.conf import settings
+
+from django.db import models
+from django.conf import settings
+
 class LabResult(models.Model):
     TEST_CHOICES = [
         ('CBC', 'Full Blood Count (CBC)'),
         ('PSA', 'Prostate Specific Antigen (PSA)'),
-        ('UE', 'Urea & Electrolytes (U&E)'),
+        ('UE', 'Urea, Electrolytes & Creatinine (U&E)'),
         ('LFT', 'Liver Function Test (LFT)'),
         ('URINALYSIS', 'Urinalysis (Routine)'),
         ('BG_CROSS', 'Blood Group & Cross Match'),
@@ -403,21 +409,52 @@ class LabResult(models.Model):
     patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='lab_history')
     visit = models.ForeignKey('RegistrationRecord', on_delete=models.CASCADE, related_name='lab_orders', null=True)
     test_name = models.CharField(max_length=50, choices=TEST_CHOICES)
-    
-    # JSONField stores the specific breakdown (e.g., Color, pH, etc.)
-    parameters = models.JSONField(default=dict, help_text="Structured results based on test type")
-    
-    # Global summary and critical flags
-    technician_notes = models.TextField(blank=True, null=True)
-    is_critical = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    is_critical = models.BooleanField(default=False)
+    technician_notes = models.TextField(blank=True, null=True)
     
-    recorded_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.SET_NULL, 
-        null=True, 
-        limit_choices_to={'role': 'LAB_TECH'}
-    )
+    # --- 1. FULL BLOOD COUNT (CBC PANEL) METRICS ---
+    cbc_hb = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, verbose_name="Hb (g/dL)")
+    cbc_wbc = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, verbose_name="WBC (x10³/µL)")
+    cbc_neut = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, verbose_name="Neut (x10³/µL)")
+    cbc_plt = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True, verbose_name="Plt (x10³/µL)")
+    cbc_mcv = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, verbose_name="MCV (fL)")
+
+    # --- 2. UREA, ELECTROLYTES & CREATININE (U&E) ---
+    ue_na = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, verbose_name="Na+ (mmol/L)")
+    ue_k = models.DecimalField(max_digits=4, decimal_places=2, blank=True, null=True, verbose_name="K+ (mmol/L)")
+    ue_urea = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, verbose_name="Urea (mmol/L)")
+    ue_creatinine = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True, verbose_name="Cr (µmol/L)")
+
+    # --- 3. LIVER FUNCTION PANEL (LFT) ---
+    lft_alt = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, verbose_name="ALT (U/L)")
+    lft_ast = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, verbose_name="AST (U/L)")
+    lft_tbil = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, verbose_name="T.BIL (µmol/L)")
+    lft_dbil = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, verbose_name="D.BIL (µmol/L)")
+    lft_alp = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True, verbose_name="ALP (U/L)")
+    lft_albumin = models.DecimalField(max_digits=5, decimal_places=2, blank=True, null=True, verbose_name="ALB (g/L)")
+
+    # --- 4. ONCOLOGY SPECIFIC SERUM BIOMARKERS ---
+    psa_total = models.DecimalField(max_digits=6, decimal_places=2, blank=True, null=True, verbose_name="Total PSA (ng/mL)")
+
+    # --- 5. ROUTINE URINALYSIS PROPERTIES ---
+    urine_color = models.CharField(max_length=30, blank=True, null=True, choices=[('Straw', 'Straw'), ('Yellow', 'Yellow'), ('Amber', 'Amber'), ('Red', 'Red')])
+    urine_clarity = models.CharField(max_length=30, blank=True, null=True, choices=[('Clear', 'Clear'), ('Cloudy', 'Cloudy'), ('Turbid', 'Turbid')])
+    urine_glucose = models.CharField(max_length=20, blank=True, null=True, choices=[('Negative', 'Negative'), ('Trace', 'Trace'), ('1+', '1+'), ('2+', '2+'), ('3+', '3+'), ('4+', '4+')])
+    urine_protein = models.CharField(max_length=20, blank=True, null=True, choices=[('Negative', 'Negative'), ('Trace', 'Trace'), ('1+', '1+'), ('2+', '2+'), ('3+', '3+')])
+    urine_nitrites = models.CharField(max_length=20, blank=True, null=True, choices=[('Negative', 'Negative'), ('Positive', 'Positive')])
+    urine_blood = models.CharField(max_length=20, blank=True, null=True, choices=[('Negative', 'Negative'), ('Positive', 'Positive')])
+
+    # --- 6. HEMATOLOGICAL BLOOD TYPE CROSS MATCH ---
+    bg_abo = models.CharField(max_length=5, blank=True, null=True, verbose_name="Blood Group", choices=[('A', 'A'), ('B', 'B'), ('AB', 'AB'), ('O', 'O')])
+    bg_rhesus = models.CharField(max_length=15, blank=True, null=True, verbose_name="Rhesus Factor", choices=[('Positive', 'Positive (+)'), ('Negative', 'Negative (-)')])
+    bg_compatibility = models.CharField(max_length=20, blank=True, null=True, verbose_name="Crossmatch", choices=[('Compatible', 'Compatible'), ('Incompatible', 'Incompatible')])
+
+    # --- 7. INFECTIOUS PARASITOLOGY METRICS ---
+    malaria_mps = models.CharField(max_length=20, blank=True, null=True, verbose_name="MPS Status", choices=[('Not Seen', 'Not Seen'), ('Positive', 'Positive (+)')])
+    malaria_species = models.CharField(max_length=40, blank=True, null=True, verbose_name="Parasite Species", choices=[('P. falciparum', 'P. falciparum'), ('P. vivax', 'P. vivax'), ('N/A', 'N/A')])
+
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, limit_choices_to={'role': 'LAB_TECH'})
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -426,6 +463,7 @@ class LabResult(models.Model):
 
     def __str__(self):
         return f"{self.get_test_name_display()} - {self.patient.name}"
+    
     
 ## Finance & Revenue Cycle Models
 
@@ -895,3 +933,5 @@ class MarketingRequisition(models.Model):
 
     def __str__(self):
         return f"{self.title} - KES {self.requested_amount} ({self.status})"
+    
+

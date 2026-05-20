@@ -6,6 +6,7 @@ from django.urls import reverse
 from django.http import HttpResponse
 from django.utils.safestring import mark_safe
 
+
 import csv
 from .models import (RegistrationRecord,
     LabInventoryItem, Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
@@ -341,22 +342,48 @@ class StockAdjustmentAdmin(admin.ModelAdmin):
 # --- 7. LAB & DIAGNOSTICS ---
 @admin.register(LabResult)
 class LabResultAdmin(admin.ModelAdmin):
-    list_display = ('test_name_display', 'patient_link', 'visit_token', 'status_tag', 'is_critical', 'created_at')
+    list_display = ('test_name_display', 'patient_link', 'visit_token', 'formatted_metrics_inline', 'status_tag', 'is_critical', 'created_at')
     list_filter = ('status', 'is_critical', 'test_name', 'created_at')
-    search_fields = ('patient__name', 'test_name')
+    search_fields = ('patient__name', 'test_name', 'technician_notes')
     
+    # Custom fieldsets cleanly map fields into groups directly via Django's layout engine
     fieldsets = (
         ('Encounter Context', {
-            'fields': ('patient', 'visit', 'test_name', 'status')
+            'fields': ('patient', 'visit', 'test_name', 'status', 'is_critical')
         }),
-        ('Diagnostic Data', {
-            'fields': ('parameters', 'technician_notes', 'is_critical'),
-            'description': 'Input results in JSON format. Example: {"hb": "13.5", "wbc": "7.2"}'
+        ('Full Blood Count (CBC Panel Indicators)', {
+            'fields': (('cbc_hb', 'cbc_wbc'), ('cbc_neut', 'cbc_plt'), 'cbc_mcv'),
+            'classes': ('collapse',), 
         }),
-        ('Audit Trail', {
-            'fields': ('recorded_by', 'created_at'),
+        ('Urea, Electrolytes & Renal Clearance (U&E)', {
+            'fields': (('ue_na', 'ue_k'), ('ue_urea', 'ue_creatinine')),
+            'classes': ('collapse',),
+        }),
+        ('Liver Function Assays (LFT)', {
+            'fields': (('lft_alt', 'lft_ast'), ('lft_tbil', 'lft_dbil'), ('lft_alp', 'lft_albumin')),
+            'classes': ('collapse',),
+        }),
+        ('Prostate Specific Biomarkers (PSA)', {
+            'fields': ('psa_total',),
+            'classes': ('collapse',),
+        }),
+        ('Urinalysis Properties Matrix', {
+            'fields': (('urine_color', 'urine_clarity'), ('urine_glucose', 'urine_protein'), ('urine_nitrites', 'urine_blood')),
+            'classes': ('collapse',),
+        }),
+        ('ABO Blood Grouping & Cross Match', {
+            'fields': (('bg_abo', 'bg_rhesus'), 'bg_compatibility'),
+            'classes': ('collapse',),
+        }),
+        ('Parasitology Slide Index', {
+            'fields': (('malaria_mps', 'malaria_species'),),
+            'classes': ('collapse',),
+        }),
+        ('Technical Diagnostics Remarks', {
+            'fields': ('technician_notes', 'recorded_by'),
         }),
     )
+
     readonly_fields = ('created_at',)
 
     def test_name_display(self, obj):
@@ -365,27 +392,54 @@ class LabResultAdmin(admin.ModelAdmin):
 
     def patient_link(self, obj):
         if obj.patient:
-            return format_html('<a href="{}"><b>{}</b></a>', 
-                reverse("admin:core_patient_change", args=(obj.patient.id,)),
-                obj.patient.name
-            )
+            url = reverse("admin:core_patient_change", args=(obj.patient.id,))
+            return format_html('<a href="{}"><b>{}</b></a>', url, obj.patient.name)
         return "No Patient"
     patient_link.short_description = "Patient"
 
     def visit_token(self, obj):
         if obj.visit:
-            token = getattr(obj.visit, 'queue_id', getattr(obj.visit, 'token_id', 'N/A'))
-            return format_html('<span style="font-family: monospace; font-weight: bold; color: #2563eb;">#{}</span>', token)
+            token = getattr(obj.visit, 'token_id', getattr(obj.visit, 'queue_id', 'N/A'))
+            return format_html('<span style="font-family: monospace; font-weight: bold; color: #0d9488;">#{}</span>', token)
         return "-"
     visit_token.short_description = "Token"
 
     def status_tag(self, obj):
-        colors = {'PENDING': '#fd7e14', 'COMPLETED': '#28a745', 'CANCELLED': '#dc3545'}
-        bg_color = colors.get(obj.status, '#6c757d')
-        style = f"background: {bg_color}; color: white; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 900;"
+        colors = {'PENDING': '#f59e0b', 'COLLECTED': '#06b6d4', 'COMPLETED': '#0d9488'}
+        bg_color = colors.get(obj.status, '#64748b')
+        style = f"background: {bg_color}; color: white; padding: 4px 10px; border-radius: 6px; font-size: 10px; font-weight: 800;"
         return format_html('<span style="{}">{}</span>', style, obj.status)
-    
     status_tag.short_description = "Status"
+
+    def formatted_metrics_inline(self, obj):
+        """Safely outputs metric summary values with explicit empty value handlers to eliminate TypeErrors."""
+        try:
+            if obj.test_name == 'CBC':
+                hb = getattr(obj, 'cbc_hb', None) or '—'
+                neut = getattr(obj, 'cbc_neut', None) or '—'
+                plt = getattr(obj, 'cbc_plt', None) or '—'
+                return format_html('<span style="font-family: monospace;"><b>Hb:</b> {} g/dL | <b>ANC:</b> {} | <b>PLT:</b> {}</span>', hb, neut, plt)
+                
+            elif obj.test_name == 'UE':
+                cr = getattr(obj, 'ue_creatinine', None) or '—'
+                urea = getattr(obj, 'ue_urea', None) or '—'
+                return format_html('<span style="font-family: monospace;"><b>Cr:</b> {} µmol/L | <b>Urea:</b> {}</span>', cr, urea)
+                
+            elif obj.test_name == 'LFT':
+                alt = getattr(obj, 'lft_alt', None) or '—'
+                ast = getattr(obj, 'lft_ast', None) or '—'
+                alb = getattr(obj, 'lft_albumin', None) or '—'
+                return format_html('<span style="font-family: monospace;"><b>ALT:</b> {} U/L | <b>AST:</b> {} | <b>ALB:</b> {}</span>', alt, ast, alb)
+                
+            elif obj.test_name == 'PSA':
+                psa = getattr(obj, 'psa_total', None) or '—'
+                return format_html('<span style="font-family: monospace; font-weight: bold; color: #b91c1c;">PSA: {} ng/mL</span>', psa)
+        except Exception as e:
+            return format_html('<span style="color: #ef4444; font-style: italic;">Formatting Error</span>')
+        
+        return format_html('<span style="color: #94a3b8; font-style: italic;">{}</span>', "No metrics registered")
+        
+    formatted_metrics_inline.short_description = "Observed Findings Summary"
 
 @admin.register(PsychologyEnrollment)
 class PsychologyEnrollmentAdmin(admin.ModelAdmin):
