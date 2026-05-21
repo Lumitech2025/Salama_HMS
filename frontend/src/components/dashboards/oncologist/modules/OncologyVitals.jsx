@@ -6,6 +6,22 @@ import {
     CheckCircle2, Loader2, RefreshCcw, FlaskConical, MessageSquare, Save, Pill, ClipboardCheck
 } from 'lucide-react';
 
+// Aligned exactly to the Left-Hand Keys of your LabResult.TEST_CHOICES
+const AVAILABLE_LAB_TESTS = [
+    { id: 'CBC', label: 'Full Blood Count (CBC)' },
+    { id: 'PSA', label: 'Prostate Specific Antigen (PSA)' },
+    { id: 'UE', label: 'Urea, Electrolytes & Creatinine (U&E)' },
+    { id: 'LFT', label: 'Liver Function Test (LFT)' },
+    { id: 'URINALYSIS', label: 'Urinalysis (Routine)' },
+    { id: 'BG_CROSS', label: 'Blood Group & Cross Match' },
+    { id: 'MALARIA_BS', label: 'Blood Slide for Malaria' },
+];
+
+const INITIAL_LAB_STATE = {
+    CBC: false, PSA: false, URINALYSIS: false, BG_CROSS: false,
+    UE: false, LFT: false, MALARIA_BS: false
+};
+
 const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     const [queue, setQueue] = useState([]);
     const [selectedPatient, setSelectedPatient] = useState(selectedPatientFromParent || null);
@@ -14,15 +30,11 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     const [hasLabResults, setHasLabResults] = useState(false);
     const [doctorNote, setDoctorNote] = useState("");
     const [isSaving, setIsSaving] = useState(false);
-    
-    const [labRequests, setLabRequests] = useState({
-        CBC: false, PSA: false, URINALYSIS: false, BG_CROSS: false,
-        UE: false, LFT: false, MALARIA_BS: false
-    });
+    const [labRequests, setLabRequests] = useState(INITIAL_LAB_STATE);
 
     const fetchQueue = useCallback(async () => {
         try {
-            const res = await API.get('/queue/', {
+            const res = await API.get('/queue', {
                 params: { current_station: 'DOCTOR', status: 'WAITING' }
             });
             const data = res.data.results || res.data;
@@ -36,23 +48,18 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         if (!queueItem) return;
         setLoading(true);
         try {
+            // Note: your model uses visit pointing to RegistrationRecord
             const visitId = queueItem.visit_id || queueItem.visit;
             
-            // 1. Fetch Vitals and Lab status in parallel
             const [vitalsRes, labRes] = await Promise.all([
-                API.get(`/vitals/?visit=${visitId}`), 
-                API.get(`/lab-results/?visit=${visitId}`)
+                API.get(`/vitals?visit=${visitId}`), 
+                API.get(`/lab-results?visit=${visitId}`)
             ]);
 
             const vData = vitalsRes.data.results || vitalsRes.data;
-            // The serializer provides: oxygen_saturation_percentage, bmi, bsa, heart_rate, etc.
             const latestVitals = Array.isArray(vData) ? vData[0] : vData;
             
-            if (latestVitals) {
-                setVitals(latestVitals);
-            } else {
-                setVitals(null);
-            }
+            setVitals(latestVitals || null);
 
             const lData = labRes.data.results || labRes.data;
             setHasLabResults(lData && lData.some(r => r.status === 'COMPLETED'));
@@ -78,6 +85,8 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         if (item) {
             setSelectedPatient(item);
             fetchPatientData(item);
+            setLabRequests(INITIAL_LAB_STATE);
+            setDoctorNote("");
         }
     };
 
@@ -105,8 +114,8 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     };
 
     const handleReferToLab = async () => {
-        const selectedTests = Object.keys(labRequests).filter(k => labRequests[k]);
-        if (selectedTests.length === 0) {
+        const selectedKeys = Object.keys(labRequests).filter(k => labRequests[k]);
+        if (selectedKeys.length === 0) {
             alert("Select at least one investigation.");
             return;
         }
@@ -114,21 +123,31 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         setIsSaving(true);
         try {
             const visitId = selectedPatient.visit_id || selectedPatient.visit;
-            const labPromises = selectedTests.map(testKey => 
-                API.post('/lab-results/', {
+            
+            // Post distinct rows to LabResult endpoint matching database key expectations
+            const labPromises = selectedKeys.map(testKey => {
+                return API.post('/lab-results/', {
                     patient: selectedPatient.patient,
                     visit: visitId,
-                    test_name: testKey,
+                    test_name: testKey, // Sends direct DB choice keys: 'CBC', 'UE', 'MALARIA_BS' etc.
                     status: 'PENDING'
-                })
-            );
+                });
+            });
+            
             await Promise.all(labPromises);
+            
+            // Advance pipeline ticket station assignment
             await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'LAB' });
-            alert(`✅ Patient referred for ${selectedTests.length} tests.`);
+            
+            alert(`Patient referred for ${selectedKeys.length} tests.`);
+            setLabRequests(INITIAL_LAB_STATE);
             onTabSwitch('home'); 
         } catch (err) {
-            alert("Referral failed.");
-        } finally { setIsSaving(false); }
+            console.error("Lab referral breakdown details:", err.response?.data || err.message);
+            alert(`Referral failed: ${JSON.stringify(err.response?.data || "Server connection failure")}`);
+        } finally { 
+            setIsSaving(false); 
+        }
     };
 
     return (
@@ -171,7 +190,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                                     <div className="bg-blue-600 p-2 rounded-xl text-white"><Activity size={24} /></div>
                                     <h3 className="text-2xl font-black text-slate-900 uppercase italic tracking-tighter">Visit Vitals</h3>
                                 </div>
-                                {/* Correctly picking BMI from the backend vitals object */}
                                 <span className="bg-slate-900 text-white px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest">
                                     BMI: {vitals?.bmi || '--'}
                                 </span>
@@ -181,7 +199,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                                 <div className="py-20 text-center"><Loader2 className="animate-spin text-blue-600 mx-auto" size={40} /></div>
                             ) : (
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-                                    {/* Mapped to exactly match Serializer keys */}
                                     <VitalCard icon={<Heart className="text-rose-500"/>} label="BP" value={vitals ? `${vitals.systolic_bp}/${vitals.diastolic_bp}` : '--/--'} unit="mmHg" />
                                     <VitalCard icon={<Activity className="text-blue-500"/>} label="Pulse" value={vitals?.heart_rate || '--'} unit="bpm" />
                                     <VitalCard icon={<Thermometer className="text-orange-500"/>} label="Temp" value={vitals?.temperature || '--'} unit="°C" />
@@ -224,15 +241,7 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                             </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {[
-                                    { id: 'CBC', label: 'Full Blood Count (CBC)' },
-                                    { id: 'PSA', label: 'PSA (Prostate Specific Antigen)' },
-                                    { id: 'UE', label: 'Urea & Electrolyte Levels' },
-                                    { id: 'LFT', label: 'Liver Function Test (LFT)' },
-                                    { id: 'URINALYSIS', label: 'Urinalysis (Routine)' },
-                                    { id: 'BG_CROSS', label: 'Blood Group & Cross Match' },
-                                    { id: 'MALARIA_BS', label: 'Blood Slide (Malaria Parasite)' },
-                                ].map((test) => (
+                                {AVAILABLE_LAB_TESTS.map((test) => (
                                     <div 
                                         key={test.id} 
                                         onClick={() => toggleLabTest(test.id)}
@@ -256,7 +265,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
 
                     {/* RIGHT PANEL */}
                     <aside className="lg:col-span-4 space-y-6">
-                        {/* Correctly picking BSA from backend object */}
                         <section className="bg-gradient-to-br from-blue-600 to-indigo-700 p-8 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden">
                             <p className="text-[9px] font-black text-blue-100 uppercase tracking-[0.3em] mb-4">Body Surface Area</p>
                             <div className="text-6xl font-black tracking-tighter italic mb-2">

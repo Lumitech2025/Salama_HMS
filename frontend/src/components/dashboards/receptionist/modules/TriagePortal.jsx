@@ -36,7 +36,7 @@ const TriagePortal = () => {
     const fetchData = useCallback(async () => {
         try {
             // Fetching only patients waiting at Triage
-            const response = await API.get('/queue/', {
+            const response = await API.get('/queue', {
                 params: {
                     current_station: 'TRIAGE',
                     status: 'WAITING'
@@ -94,11 +94,11 @@ const TriagePortal = () => {
             };
 
             // 1. Save Vitals
-            await API.post('/vitals/', vitalsPayload);
+            await API.post('/vitals', vitalsPayload);
 
             // 2. Move to selected station using the new dynamic backend action
             // IMPORTANT: Sending 'target_station' so the backend knows where to push the patient
-            const moveResponse = await API.post(`/queue/${selectedPatient.queue_entry_id}/move_next/`, {
+            const moveResponse = await API.post(`/queue/${selectedPatient.queue_entry_id}/move_next`, {
                 target_station: nextStation 
             });
 

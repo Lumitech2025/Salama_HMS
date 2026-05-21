@@ -5,6 +5,9 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from .views import (
     InventoryItemViewSet,
     LabInventoryViewSet,
+    LabOrderViewSet,
+    LabReferenceViewSet,
+    LabTestRegistryViewSet,
     MarketingRequisitionViewSet,
     PatientViewSet, 
     ProtocolViewSet, 
@@ -26,11 +29,18 @@ from .views import (
     BereavementLogViewSet,
     OutreachCampaignViewSet, 
     ReferralPartnerViewSet, 
-    SocialMediaPostViewSet
+    SocialMediaPostViewSet,
+    ProtocolMasterViewSet
 )
 
-# Use a single dedicated router variable across the module context
-router = DefaultRouter()
+class OptionalSlashRouter(DefaultRouter):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # This allows endpoints to accept both formats natively
+        self.trailing_slash = '/?' 
+
+# Swap your old router initialization for this one:
+router = OptionalSlashRouter()
 
 # --- 1. Front Desk & Patient Registry ---
 router.register(r'appointments', AppointmentViewSet, basename='appointment')
@@ -57,6 +67,8 @@ router.register(r'inventory-items', InventoryItemViewSet, basename='inventory-it
 
 # --- 6. Diagnostics & Revenue Cycle ---
 router.register(r'lab-results', LabResultViewSet, basename='lab-result')
+router.register(r'lab-orders', LabOrderViewSet, basename='lab-order')
+router.register(r'lab-references', LabTestRegistryViewSet, basename='lab-reference')
 router.register(r'bills', BillViewSet, basename='bill')
 router.register(r'registrations', RegistrationRecordViewSet, basename='registration-records')
 router.register(r'vitals', VitalSignViewSet, basename='vitals')
@@ -72,8 +84,14 @@ router.register(r'referral-partners', ReferralPartnerViewSet, basename='referral
 router.register(r'social-media-posts', SocialMediaPostViewSet, basename='social-media-posts')
 router.register(r'marketing-requisitions', MarketingRequisitionViewSet, basename='marketing-requisitions')
 
+router.register(r'protocols', ProtocolMasterViewSet, basename='protocol-master')
+
 urlpatterns = [
+    # Include the main router paths
     path('', include(router.urls)), 
+
+    # Fallback paths to accept trailing slashes if any other component sends them
+    path('lab-references/', include(router.urls)),
 
     # Authentication Endpoints
     path('token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),

@@ -3,11 +3,11 @@ from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.db import transaction
 from .models import (
-    Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
+    LabReference, LabTestRegistry, Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue,
-    LabInventoryItem, Prescription, PrescriptionItem, 
+    LabInventoryItem, Prescription, PrescriptionItem, LabPanel,
     ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem, PsychologyEnrollment, SessionLog, BereavementLog, 
-    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisition
+    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisition,LabOrder, LabTestRegistry, ProtocolMaster, ProtocolDrug, DrugGuardrail
 )
 
 
@@ -218,6 +218,93 @@ class LabResultSerializer(serializers.ModelSerializer):
         model = LabResult
         fields = '__all__' 
 
+
+class LabOrderSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(source='patient.name', read_only=True)
+    token_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LabOrder
+        fields = [
+            'id', 'patient', 'patient_name', 'visit', 
+            'requested_tests', 'status', 'doctor_notes', 
+            'token_id', 'created_at'
+        ]
+
+    def get_token_id(self, obj):
+        # Safely links up with your existing queue tracking system identifier
+        if obj.visit and hasattr(obj.visit, 'queue_id'):
+            return obj.visit.queue_id
+        return f"REQ-{obj.id}"
+    
+class LabReferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LabReference
+        fields = [
+            'id', 
+            'name', 
+            'parent_panel',
+            'category',
+            'unit', 
+            'lower_range', 
+            'upper_range', 
+            'recommendation_below_minimum', 
+            'recommendation_above_maximum', 
+            'price'
+        ]
+
+    def validate(self, data):
+        """
+        Validate that the lower range constraint does not exceed the upper range.
+        """
+        lower = data.get('lower_range', 0)
+        upper = data.get('upper_range', 0)
+        
+        if lower and upper and lower > upper:
+            raise serializers.ValidationError({
+                "lower_range": "Lower reference baseline cannot be greater than the upper range constraint."
+            })
+        return data
+    
+
+
+class LabTestRegistrySerializer(serializers.ModelSerializer):
+    # Dynamically read and output the related panel name as plain text for React
+    parent_panel = serializers.CharField(source='parent_panel.name', read_only=True)
+    category = serializers.CharField(source='parent_panel.name', read_only=True)
+    
+    class Meta:
+        model = LabTestRegistry
+        fields = [
+            'id',
+            'parent_panel',
+            'category',
+            'name',
+            'unit',
+            'lower_range',
+            'upper_range',
+            'recommendation_below_minimum',
+            'recommendation_above_maximum',
+            'price'
+        ]
+        extra_kwargs = {
+            'lower_range': {'required': False, 'allow_null': True},
+            'upper_range': {'required': False, 'allow_null': True},
+            'price': {'required': False, 'default': 0}
+        }
+
+    def validate(self, data):
+        lower = data.get('lower_range')
+        upper = data.get('upper_range')
+        
+        if lower is not None and upper is not None:
+            if float(lower) > float(upper):
+                raise serializers.ValidationError({
+                    "lower_range": "Lower reference limit cannot exceed the upper reference limit."
+                })
+        return data
+    
+
 class BillSerializer(serializers.ModelSerializer):
     patient_name = serializers.ReadOnlyField(source='patient.name')
     class Meta:
@@ -351,3 +438,110 @@ class MarketingRequisitionSerializer(serializers.ModelSerializer):
     class Meta:
         model = MarketingRequisition
         fields = '__all__'
+
+
+class DrugGuardrailSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False)  # Included to track updates on existing rules
+
+    class Meta:
+        model = DrugGuardrail
+        fields = ['id', 'parameter', 'operator', 'value', 'action', 'action_value']
+
+
+class ProtocolDrugSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False)  # Included to track updates on existing drugs
+    rules = DrugGuardrailSerializer(many=True, required=False)
+
+    class Meta:
+        model = ProtocolDrug
+        fields = ['id', 'drug_name', 'base_dose', 'unit', 'route', 'administration_day', 'rules']
+
+
+class ProtocolMasterSerializer(serializers.ModelSerializer):
+    drugs = ProtocolDrugSerializer(many=True)
+
+    class Meta:
+        model = ProtocolMaster
+        fields = ['id', 'protocol_name', 'cancer_type', 'stages', 'biomarkers', 'clinical_signs', 'total_cycles', 'days_per_cycle', 'drugs']
+
+    def create(self, validated_data):
+        """
+        Intercepts creation payload to unroll nested drugs and dynamic guardrails
+        """
+        drugs_data = validated_data.pop('drugs', [])
+        protocol = ProtocolMaster.objects.create(**validated_data)
+
+        for drug_data in drugs_data:
+            rules_data = drug_data.pop('rules', [])
+            # Create the drug linked to the newly generated protocol master record
+            drug = ProtocolDrug.objects.create(protocol=protocol, **drug_data)
+            
+            for rule_data in rules_data:
+                # Create the custom guardrails linked directly to this drug entity
+                DrugGuardrail.objects.create(drug=drug, **rule_data)
+
+        return protocol
+
+    def update(self, instance, validated_data):
+        """
+        Handles full payload sync deletes, additions, and mutations on child objects
+        """
+        drugs_data = validated_data.pop('drugs', [])
+
+        # 1. Update Core Protocol Fields
+        instance.protocol_name = validated_data.get('protocol_name', instance.protocol_name)
+        instance.cancer_type = validated_data.get('cancer_type', instance.cancer_type)
+        instance.stages = validated_data.get('stages', instance.stages)
+        instance.biomarkers = validated_data.get('biomarkers', instance.biomarkers)
+        instance.clinical_signs = validated_data.get('clinical_signs', instance.clinical_signs)
+        instance.total_cycles = validated_data.get('total_cycles', instance.total_cycles)
+        instance.days_per_cycle = validated_data.get('days_per_cycle', instance.days_per_cycle)
+        instance.save()
+
+        # Track existing drug IDs to catch anything deleted on the frontend
+        keep_drugs = []
+
+        # 2. Reconcile Medications Layer
+        for drug_data in drugs_data:
+            drug_id = drug_data.get('id', None)
+            rules_data = drug_data.pop('rules', [])
+
+            if drug_id:
+                # Update existing medication row
+                drug_instance = ProtocolDrug.objects.get(id=drug_id, protocol=instance)
+                drug_instance.drug_name = drug_data.get('drug_name', drug_instance.drug_name)
+                drug_instance.base_dose = drug_data.get('base_dose', drug_instance.base_dose)
+                drug_instance.unit = drug_data.get('unit', drug_instance.unit)
+                drug_instance.route = drug_data.get('route', drug_instance.route)
+                drug_instance.administration_day = drug_data.get('administration_day', drug_instance.administration_day)
+                drug_instance.save()
+                keep_drugs.append(drug_instance.id)
+            else:
+                # New medication injected via React client
+                drug_instance = ProtocolDrug.objects.create(protocol=instance, **drug_data)
+                keep_drugs.append(drug_instance.id)
+
+            # Reconcile Guardrails Layer for this specific drug
+            keep_rules = []
+            for rule_data in rules_data:
+                rule_id = rule_data.get('id', None)
+                if rule_id:
+                    rule_instance = DrugGuardrail.objects.get(id=rule_id, drug=drug_instance)
+                    rule_instance.parameter = rule_data.get('parameter', rule_instance.parameter)
+                    rule_instance.operator = rule_data.get('operator', rule_instance.operator)
+                    rule_instance.value = rule_data.get('value', rule_instance.value)
+                    rule_instance.action = rule_data.get('action', rule_instance.action)
+                    rule_instance.action_value = rule_data.get('action_value', rule_instance.action_value)
+                    rule_instance.save()
+                    keep_rules.append(rule_instance.id)
+                else:
+                    new_rule = DrugGuardrail.objects.create(drug=drug_instance, **rule_data)
+                    keep_rules.append(new_rule.id)
+
+            # Purge any old guardrails removed from this drug during frontend editing
+            DrugGuardrail.objects.filter(drug=drug_instance).exclude(id__in=keep_rules).delete()
+
+        # Purge any old drugs removed from the protocol master entirely
+        ProtocolMaster.objects.get(id=instance.id).drugs.exclude(id__in=keep_drugs).delete()
+
+        return instance

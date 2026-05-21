@@ -35,8 +35,8 @@ const Registration = () => {
   const fetchData = useCallback(async () => {
     try {
       const [resList, resStats] = await Promise.all([
-        API.get('/registrations/'),
-        API.get('/registrations/analytics/')
+        API.get('/registrations'),
+        API.get('/registrations/analytics')
       ]);
       setLatestRegistrations((resList.data.results || resList.data).slice(0, 10));
       setAnalytics(resStats.data);
@@ -80,7 +80,7 @@ const Registration = () => {
     };
 
     try {
-      const response = await API.post('/registrations/', payload);
+      const response = await API.post('/registrations', payload);
       if (response.status === 201 || response.status === 200) {
         setRegStatus('success');
         setFormData(initialFormState); 

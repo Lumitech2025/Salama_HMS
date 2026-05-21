@@ -16,7 +16,7 @@ const PrescriptionQueue = ({ onTabSwitch }) => {
   // 1. Fetch live pharmacy queue
   const fetchQueue = useCallback(async () => {
     try {
-      const res = await API.get('/queue/?current_station=PHARMACY&status=AWAITING_MEDICATION');
+      const res = await API.get('/queue?current_station=PHARMACY&status=AWAITING_MEDICATION');
       setQueue(res.data.results || res.data || []);
     } catch (err) {
       console.error("Queue fetch error", err);
@@ -37,7 +37,7 @@ const PrescriptionQueue = ({ onTabSwitch }) => {
     setSelectedPatient(patientQueueItem);
     try {
       const patientId = patientQueueItem.patient;
-      const res = await API.get(`/prescriptions/?patient=${patientId}&status=PENDING`);
+      const res = await API.get(`/prescriptions?patient=${patientId}&status=PENDING`);
       const results = res.data.results || res.data;
       setPrescriptionData(results.length > 0 ? results[0] : null);
     } catch (err) {
@@ -57,7 +57,7 @@ const PrescriptionQueue = ({ onTabSwitch }) => {
       await API.patch(`/prescriptions/${prescriptionData.id}/`, { status: 'DISPENSED' });
       
       // Advance patient in the hospital queue
-      await API.patch(`/queue/${selectedPatient.id}/`, { 
+      await API.patch(`/queue${selectedPatient.id}/`, { 
         status: 'WAITING',
         current_station: 'BILLING' 
       });

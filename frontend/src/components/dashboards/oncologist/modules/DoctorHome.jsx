@@ -34,7 +34,7 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
             setAppointments(resAppts.data.results || resAppts.data || []);
 
             // 2. Fetch LIVE QUEUE (Station: DOCTOR)
-            const resQueue = await API.get('/queue/?current_station=DOCTOR').catch(() => ({ data: [] }));
+            const resQueue = await API.get('/queue?current_station=DOCTOR').catch(() => ({ data: [] }));
             const rawQueue = resQueue.data.results || resQueue.data || [];
             const activeQueue = rawQueue.filter(item => item.status === 'WAITING' || item.status === 'TRIAGED');
             setQueue(activeQueue);
@@ -72,7 +72,7 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
     const handleAttendPatient = async (pat) => {
         try {
             // Update Backend to mark as seen
-            await API.patch(`/queue/${pat.id}/`, { status: 'UNDER_CONSULTATION' });
+            await API.patch(`/queue${pat.id}/`, { status: 'UNDER_CONSULTATION' });
             
             // Optimistic UI updates
             setQueue(prev => prev.filter(item => item.id !== pat.id));

@@ -33,9 +33,9 @@ const ReceptionistDashboard = () => {
     setLoading(true);
     try {
       const [resQueue, resAppts, resStats] = await Promise.all([
-        API.get('/queue/'),
-        API.get('/appointments/'),
-        API.get('/queue/analytics/') 
+        API.get('/queue'),
+        API.get('/appointments'),
+        API.get('/queue/analytics') 
       ]);
 
       setLiveQueue(Array.isArray(resQueue.data) ? resQueue.data : (resQueue.data.results || []));

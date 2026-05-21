@@ -6,14 +6,14 @@ from django.urls import reverse
 from django.http import HttpResponse
 from django.utils.safestring import mark_safe
 
-
 import csv
-from .models import (RegistrationRecord,
+from .models import (LabOrder, RegistrationRecord,
     LabInventoryItem, Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue,
     Prescription, PrescriptionItem, ClinicalNote, ImagingRecord, PsychologyEnrollment, SessionLog, BereavementLog, 
-    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisition
+    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisition, LabTestRegistry, LabPanel, ProtocolMaster, ProtocolDrug, DrugGuardrail
 )
+
 
 
 User = get_user_model()
@@ -72,18 +72,10 @@ class QueueAdmin(admin.ModelAdmin):
 
 @admin.register(RegistrationRecord)
 class RegistrationRecordAdmin(admin.ModelAdmin):
-    # Updated list_display to include new KPIs
     list_display = ('queue_id', 'urgency_badge', 'patient', 'insurance', 'registered_at')
-    
-    # Updated filters to include new flags
-    list_filter = ('is_urgent', 'is_returning', 'gender', 'insurance', 'registered_at')
-    
     list_filter = ('is_urgent', 'insurance', 'registered_at')
     search_fields = ('queue_id', 'patient__name', 'id_number')
-
     readonly_fields = ('queue_id', 'registered_at')
-
-    
 
     def urgency_badge(self, obj):
         if obj.is_urgent:
@@ -95,10 +87,8 @@ class RegistrationRecordAdmin(admin.ModelAdmin):
             '<span style="background: #e9ecef; color: #6c757d; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 700;">{}</span>',
             "NORMAL"
         )
-    
     urgency_badge.short_description = "Priority"
 
-    # Tag for Returning vs New
     def returning_tag(self, obj):
         if obj.is_returning:
             return format_html('<span style="color: #28a745; font-weight: bold;">🔄 Returning</span>')
@@ -120,7 +110,6 @@ class RegistrationRecordAdmin(admin.ModelAdmin):
             color, "white" if obj.insurance != "CASH" else "black", obj.insurance
         )
     insurance_tag.short_description = "Billing Mode"
-
 
 
 # --- 2. PHARMACY & PRESCRIPTIONS ---
@@ -164,10 +153,8 @@ class DrugAdmin(admin.ModelAdmin):
 
 # --- 4. LONGITUDINAL EMR ---
 
-
 @admin.register(ClinicalNote)
 class ClinicalNoteAdmin(admin.ModelAdmin):
-    # Change 'doctor' to 'author'
     list_display = ('patient', 'note_type', 'author', 'created_at') 
     list_filter = ('note_type', 'created_at', 'author')
     search_fields = ('patient__name', 'content')
@@ -199,8 +186,6 @@ class LabResultInline(admin.TabularInline):
         if not obj.parameters or not isinstance(obj.parameters, dict):
             return "Results pending..."
         
-        # Build rows using simple concatenation and mark_safe to avoid format_html placeholder issues
-        from django.utils.safestring import mark_safe
         html_rows = []
         for key, value in obj.parameters.items():
             clean_key = key.replace("_", " ").upper()
@@ -211,7 +196,6 @@ class LabResultInline(admin.TabularInline):
                 f'</div>'
             )
         return mark_safe("".join(html_rows))
-    
     display_parameters.short_description = "Diagnostic Data"
 
     def status_badge(self, obj):
@@ -221,9 +205,6 @@ class LabResultInline(admin.TabularInline):
             'CANCELLED': ('#ef4444', 'Voided'),
         }
         bg_color, label = status_map.get(obj.status, ('#64748b', obj.status))
-        
-        # Using a simple f-string and mark_safe is safer than format_html for style tags
-        from django.utils.safestring import mark_safe
         return mark_safe(
             f'<span style="background: {bg_color}; color: white; padding: 3px 10px; border-radius: 20px; '
             f'font-size: 9px; font-weight: 900; text-transform: uppercase;">{label}</span>'
@@ -240,7 +221,6 @@ class ClinicalNoteInline(admin.TabularInline):
 
     def author_role(self, obj):
         if not obj.author: return "-"
-        # Checking groups - ensures we match your actual DB groups
         role = "STAFF"
         if obj.author.groups.filter(name__icontains='ONCOLOGIST').exists(): role = "ONCOLOGIST"
         elif obj.author.groups.filter(name__icontains='NURSE').exists(): role = "NURSE"
@@ -257,7 +237,6 @@ class ClinicalNoteInline(admin.TabularInline):
     def content_display(self, obj):
         if not obj.content:
             return mark_safe('<span style="color: #94a3b8; font-style: italic;">No narrative recorded</span>')
-        # Added a border-left for a "medical log" look
         return mark_safe(
             f'<div style="max-width: 450px; font-weight: 600; color: #1e293b; border-left: 3px solid #e2e8f0; '
             f'padding-left: 10px; line-height: 1.5;">{obj.content}</div>'
@@ -267,15 +246,12 @@ class ClinicalNoteInline(admin.TabularInline):
 class PrescriptionInline(admin.TabularInline):
     model = Prescription
     extra = 0
-    # We show a summary of drugs so the admin doesn't have to click into the prescription
     readonly_fields = ('prescribed_by', 'status_badge', 'medication_summary', 'created_at')
     fields = ('prescribed_by', 'status_badge', 'medication_summary', 'created_at')
     can_delete = False
-    show_change_link = True # This adds a link to go to your existing PrescriptionAdmin
+    show_change_link = True
 
     def medication_summary(self, obj):
-        """Pulls items from the PrescriptionItem model to show in the Patient view"""
-        # Note: adjust 'prescriptionitem_set' if you have a different related_name
         items = obj.prescriptionitem_set.all() 
         if not items: return "No items recorded"
         
@@ -296,12 +272,30 @@ class PrescriptionInline(admin.TabularInline):
         )
     status_badge.short_description = "Status"
 
+class LabOrderInline(admin.TabularInline):
+    model = LabOrder
+    extra = 0
+    fields = ('formatted_tests', 'status_badge', 'doctor_notes', 'created_at')
+    readonly_fields = ('formatted_tests', 'status_badge', 'doctor_notes', 'created_at')
+    can_delete = False
+    show_change_link = True
+
+    def formatted_tests(self, obj):
+        if not obj.requested_tests: return "-"
+        return ", ".join(obj.requested_tests)
+    formatted_tests.short_description = "Tests"
+
+    def status_badge(self, obj):
+        color = "#f59e0b" if obj.status == 'PENDING' else "#10b981"
+        return mark_safe(f'<b style="color: {color};">{obj.status}</b>')
+    status_badge.short_description = "Status"
+
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
     list_display = ['registry_no', 'name', 'gender', 'cancer_type', 'staging', 'created_at']
     search_fields = ('name', 'registry_no', 'phone')
     list_filter = ('gender', 'cancer_type', 'staging')
-    inlines = [VitalSignInline, LabResultInline, ClinicalNoteInline, PrescriptionInline]
+    inlines = [VitalSignInline, LabResultInline, ClinicalNoteInline, LabOrderInline, PrescriptionInline]
     
     fieldsets = (
         ('Core Identity', {'fields': ('name', 'registry_no', 'dob', 'gender', 'phone', 'email', 'blood_group')}),
@@ -328,7 +322,7 @@ class BillAdmin(admin.ModelAdmin):
     def mark_as_paid(self, request, queryset):
         queryset.update(is_paid=True, billing_officer=request.user)
 
-# --- 7. LAB & OTHERS ---
+# --- 7. LAB INVENTORY ---
 
 @admin.register(LabInventoryItem)
 class LabInventoryAdmin(admin.ModelAdmin):
@@ -339,14 +333,108 @@ class StockAdjustmentAdmin(admin.ModelAdmin):
     list_display = ('item', 'quantity_used', 'remaining_stock', 'technician', 'created_at')
 
 
-# --- 7. LAB & DIAGNOSTICS ---
+# --- 8. LAB DIAGNOSTICS & PARAMETERS (RESTRUCTURED) ---
+
+@admin.register(LabPanel)
+class LabPanelAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name')
+    search_fields = ('name',)
+
+
+@admin.register(LabTestRegistry)
+class LabTestRegistryAdmin(admin.ModelAdmin):
+    list_display = ('name', 'get_panel_name', 'get_range', 'price_kes', 'updated_at')
+    list_filter = ('parent_panel__name', 'unit')
+    search_fields = ('name', 'parent_panel__name', 'recommendation_below_minimum', 'recommendation_above_maximum')
+    
+    fieldsets = (
+        ('Core Matrix Profile', {
+            'fields': ('name', 'parent_panel', 'unit', 'price')
+        }),
+        ('Clinical Target Constraints', {
+            'fields': ('lower_range', 'upper_range')
+        }),
+        ('Automated Oncological Clinical Guidelines', {
+            'classes': ('collapse',),
+            'fields': ('recommendation_below_minimum', 'recommendation_above_maximum'),
+        }),
+    )
+
+    def get_panel_name(self, obj):
+        return obj.parent_panel.name if obj.parent_panel else "—"
+    get_panel_name.short_description = "Master Group Profile"
+    get_panel_name.admin_order_field = 'parent_panel__name'
+
+    def get_range(self, obj):
+        return f"{obj.lower_range} — {obj.upper_range} {obj.unit}"
+    get_range.short_description = "Reference Baseline"
+
+    def price_kes(self, obj):
+        return f"KES {obj.price:,}"
+    price_kes.short_description = "Charge Profile"
+
+
+@admin.register(LabOrder)
+class LabOrderAdmin(admin.ModelAdmin):
+    list_display = ('id', 'patient_link', 'visit_token', 'formatted_tests', 'status_badge', 'created_at')
+    list_filter = ('status', 'created_at')
+    search_fields = ('patient__name', 'visit__queue_id', 'id')
+    readonly_fields = ('created_at', 'updated_at')
+    
+    fieldsets = (
+        ('Order Framework Context', {
+            'fields': ('patient', 'visit', 'status')
+        }),
+        ('Diagnostic Directives', {
+            'fields': ('requested_tests', 'doctor_notes'),
+        }),
+        ('System Audit Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',),
+        }),
+    )
+
+    def patient_link(self, obj):
+        if obj.patient:
+            url = reverse("admin:core_patient_change", args=(obj.patient.id,))
+            return format_html('<a href="{}"><b>{}</b></a>', url, obj.patient.name)
+        return "No Patient"
+    patient_link.short_description = "Patient"
+
+    def visit_token(self, obj):
+        if obj.visit:
+            token = getattr(obj.visit, 'queue_id', 'N/A')
+            return format_html('<span style="font-family: monospace; font-weight: bold; color: #2563eb;">#{}</span>', token)
+        return "-"
+    visit_token.short_description = "Visit Token"
+
+    def status_badge(self, obj):
+        colors = {'PENDING': '#f59e0b', 'COMPLETED': '#10b981'}
+        bg_color = colors.get(obj.status, '#64748b')
+        style = f"background: {bg_color}; color: white; padding: 3px 10px; border-radius: 20px; font-size: 10px; font-weight: 800;"
+        return format_html('<span style="{}">{}</span>', style, obj.status)
+    status_badge.short_description = "Status"
+
+    def formatted_tests(self, obj):
+        if not obj.requested_tests:
+            return mark_safe('<span style="color: #94a3b8; font-style: italic;">No panels selected</span>')
+        
+        badges = []
+        for test in obj.requested_tests:
+            badges.append(
+                f'<span style="background: #e2e8f0; color: #1e293b; padding: 2px 6px; '
+                f'border-radius: 4px; font-weight: bold; font-size: 10px; margin-right: 4px;">{test}</span>'
+            )
+        return mark_safe("".join(badges))
+    formatted_tests.short_description = "Requested Panels"
+
+
 @admin.register(LabResult)
 class LabResultAdmin(admin.ModelAdmin):
     list_display = ('test_name_display', 'patient_link', 'visit_token', 'formatted_metrics_inline', 'status_tag', 'is_critical', 'created_at')
     list_filter = ('status', 'is_critical', 'test_name', 'created_at')
     search_fields = ('patient__name', 'test_name', 'technician_notes')
     
-    # Custom fieldsets cleanly map fields into groups directly via Django's layout engine
     fieldsets = (
         ('Encounter Context', {
             'fields': ('patient', 'visit', 'test_name', 'status', 'is_critical')
@@ -412,7 +500,6 @@ class LabResultAdmin(admin.ModelAdmin):
     status_tag.short_description = "Status"
 
     def formatted_metrics_inline(self, obj):
-        """Safely outputs metric summary values with explicit empty value handlers to eliminate TypeErrors."""
         try:
             if obj.test_name == 'CBC':
                 hb = getattr(obj, 'cbc_hb', None) or '—'
@@ -438,24 +525,18 @@ class LabResultAdmin(admin.ModelAdmin):
             return format_html('<span style="color: #ef4444; font-style: italic;">Formatting Error</span>')
         
         return format_html('<span style="color: #94a3b8; font-style: italic;">{}</span>', "No metrics registered")
-        
     formatted_metrics_inline.short_description = "Observed Findings Summary"
+
+
+# --- 9. SUPPORT, PSYCHOLOGY & CAMPAIGNS ---
 
 @admin.register(PsychologyEnrollment)
 class PsychologyEnrollmentAdmin(admin.ModelAdmin):
-    # What columns show up on the main list dashboard view
     list_display = ('medical_record_no', 'patient_name', 'current_stage', 'status', 'location_department', 'consent_form_signed', 'created_at')
-    
-    # Quick filter sidebar tools
     list_filter = ('current_stage', 'status', 'location_department', 'consent_form_signed')
-    
-    # Search bar indexing fields
     search_fields = ('patient_name', 'medical_record_no', 'diagnosis')
-    
-    # Organizes structural metadata into read-only tracking blocks
     readonly_fields = ('created_at', 'updated_at', 'enrolled_by')
     
-    # Form layout styling partitioning
     fieldsets = (
         ('Patient Identity & Intake Context', {
             'fields': ('patient_name', 'medical_record_no', 'diagnosis', 'initial_intake_note')
@@ -468,7 +549,7 @@ class PsychologyEnrollmentAdmin(admin.ModelAdmin):
         }),
         ('System Metadata Audit Logs', {
             'fields': ('enrolled_by', 'created_at', 'updated_at'),
-            'classes': ('collapse',), # Minimizes block unless clicked open
+            'classes': ('collapse',),
         }),
     )
 
@@ -488,18 +569,13 @@ class BereavementLogAdmin(admin.ModelAdmin):
     search_fields = ('primary_contact_name', 'contact_phone', 'enrollment__patient_name')
     readonly_fields = ('last_contact_date',)
 
+
 @admin.register(OutreachCampaign)
 class OutreachCampaignAdmin(admin.ModelAdmin):
-    # Columns to display in the main list view
     list_display = ('title', 'campaign_type', 'target_region_location', 'start_date', 'actual_turnout', 'patients_referred_to_salama', 'status')
-    
-    # Filter panels on the right side
     list_filter = ('campaign_type', 'status', 'start_date')
-    
-    # Search bar fields
     search_fields = ('title', 'target_region_location', 'notes_summary')
     
-    # Grouping details logically inside the form layout block
     fieldsets = (
         ('Campaign Core Metadata', {
             'fields': ('title', 'campaign_type', 'target_region_location', 'status')
@@ -529,7 +605,6 @@ class SocialMediaPostAdmin(admin.ModelAdmin):
     list_filter = ('target_platform', 'status', 'consent_verified', 'medical_signoff')
     search_fields = ('content',)
     
-    # Form layout styling definition arrays
     fieldsets = (
         ('Media Content Copy', {
             'fields': ('content', 'target_platform', 'status')
@@ -542,6 +617,7 @@ class SocialMediaPostAdmin(admin.ModelAdmin):
         }),
     )
 
+
 @admin.register(MarketingRequisition)
 class MarketingRequisitionAdmin(admin.ModelAdmin):
     list_display = ('title', 'category', 'campaign', 'requested_amount', 'status', 'created_at')
@@ -550,6 +626,91 @@ class MarketingRequisitionAdmin(admin.ModelAdmin):
 
 
 admin.site.register(Protocol)
-
 admin.site.register(ChemoSession)
 admin.site.register(Treatment)
+
+
+
+
+class DrugGuardrailInline(admin.StackedInline):
+    """
+    Allows editing cascading guardrails directly within the Medication panel
+    """
+    model = DrugGuardrail
+    extra = 1  # Provides 1 empty form slot by default for rapid additions
+    classes = ['collapse']  # Keeps the rule sets collapsible to avoid visual clutter
+    fieldsets = (
+        (None, {
+            'fields': (('parameter', 'operator', 'value'), ('action', 'action_value'))
+        }),
+    )
+
+
+class ProtocolDrugInline(admin.StackedInline):
+    """
+    Allows managing medications dynamically inside the main Protocol Master interface
+    """
+    model = ProtocolDrug
+    extra = 1
+    show_change_link = True  # Useful if you want to jump to this specific row's detail screen
+    fieldsets = (
+        (None, {
+            'fields': (('drug_name', 'base_dose', 'unit'), ('route', 'administration_day'))
+        }),
+    )
+
+
+@admin.register(ProtocolMaster)
+class ProtocolMasterAdmin(admin.ModelAdmin):
+    """
+    The Ultimate Engine Control Center Panel
+    """
+    # High-level overview table layout columns
+    list_display = ('protocol_name', 'cancer_type', 'total_cycles', 'days_per_cycle', 'created_at')
+    
+    # Left-side quick-filtering sidebar widgets
+    list_filter = ('cancer_type', 'created_at')
+    
+    # Omnibox target indexing fields
+    search_fields = ('protocol_name', 'cancer_type', 'clinical_signs')
+    
+    # Organizes the structural properties layout elegantly using bold headers
+    fieldsets = (
+        ('System Classification Core', {
+            'fields': (('protocol_name', 'cancer_type'),)
+        }),
+        ('Diagnostic Vectors & Flags', {
+            'fields': ('stages', 'biomarkers', 'clinical_signs'),
+            'description': 'Input arrays are maintained directly as valid JSON tracking strings.'
+        }),
+        ('Temporal Scheduling Parameters', {
+            'fields': (('total_cycles', 'days_per_cycle'),)
+        }),
+    )
+
+    inlines = [ProtocolDrugInline]
+
+
+# Also register the child objects directly in case admins need a standalone bird's-eye view of them
+@admin.register(ProtocolDrug)
+class ProtocolDrugAdmin(admin.ModelAdmin):
+    list_display = ('drug_name', 'protocol', 'base_dose', 'unit', 'route')
+    list_filter = ('route', 'unit')
+    search_fields = ('drug_name', 'protocol__protocol_name')
+    inlines = [DrugGuardrailInline]
+
+
+@admin.register(DrugGuardrail)
+class DrugGuardrailAdmin(admin.ModelAdmin):
+    list_display = ('get_drug_name', 'get_protocol_name', 'parameter', 'operator', 'value', 'action')
+    list_filter = ('parameter', 'action', 'operator')
+    search_fields = ('drug__drug_name', 'drug__protocol__protocol_name')
+
+    # Custom model field getters to show linked relational values in columns cleanly
+    def get_drug_name(self, obj):
+        return obj.drug.drug_name
+    get_drug_name.short_description = 'Medication Target'
+
+    def get_protocol_name(self, obj):
+        return obj.drug.protocol.protocol_name
+    get_protocol_name.short_description = 'Parent Protocol Code'

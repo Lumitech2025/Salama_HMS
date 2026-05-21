@@ -30,7 +30,7 @@ const QueueStatus = () => {
       if (activeStation !== 'ALL') params.current_station = activeStation;
       if (searchTerm) params.search = searchTerm;
       
-      const response = await API.get('/queue/', { params });
+      const response = await API.get('/queue', { params });
       const data = response.data.results || response.data;
       setQueue(Array.isArray(data) ? data : []);
     } catch (err) {
@@ -43,7 +43,7 @@ const QueueStatus = () => {
 
   const fetchAnalytics = useCallback(async () => {
     try {
-      const response = await API.get(`/queue/analytics/`, {
+      const response = await API.get(`/queue/analytics`, {
           params: { station: activeStation }
       });
       setAnalytics(response.data);

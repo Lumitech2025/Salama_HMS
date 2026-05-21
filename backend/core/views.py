@@ -6,23 +6,24 @@ from django.db.models import Avg, Count, F, Sum
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework_simplejwt.views import TokenObtainPairView
 from datetime import datetime, time
+from rest_framework.permissions import AllowAny
 
 # Import local models and serializers
 from .models import (
-    Patient, Protocol, Treatment, ChemoSession, Drug, 
-    LabResult, Bill, Appointment, VitalSign, Queue, 
+    LabPanel, Patient, Protocol, Treatment, ChemoSession, Drug, 
+    LabResult, LabOrder, Bill, Appointment, VitalSign, Queue, 
     LabInventoryItem, StockAdjustment, Prescription, 
     PrescriptionItem, ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem,PsychologyEnrollment, SessionLog, BereavementLog, 
-    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisition
+    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisition, LabReference, LabTestRegistry, ProtocolMaster, ProtocolDrug, DrugGuardrail
 )
 from .serializers import (
-    PatientSerializer, ProtocolSerializer, TreatmentSerializer, 
+    LabOrderSerializer, LabReferenceSerializer, PatientSerializer, ProtocolSerializer, TreatmentSerializer, 
     ChemoSessionSerializer, DrugSerializer, LabResultSerializer, 
     BillSerializer, SalamaTokenObtainPairSerializer, LabInventorySerializer, 
     StockAdjustmentSerializer, AppointmentSerializer, VitalSignSerializer, 
     QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer, RegistrationRecordSerializer, InventoryItemSerializer,PsychologyEnrollmentSerializer, 
     SessionLogSerializer, 
-    BereavementLogSerializer, OutreachCampaignSerializer, ReferralPartnerSerializer, SocialMediaPostSerializer, MarketingRequisitionSerializer
+    BereavementLogSerializer, OutreachCampaignSerializer, ReferralPartnerSerializer, SocialMediaPostSerializer, MarketingRequisitionSerializer, LabTestRegistrySerializer, ProtocolMasterSerializer
 )
 
 # --- 1. PERMISSION LOGIC ---
@@ -209,6 +210,22 @@ class BillViewSet(viewsets.ModelViewSet):
 
 # --- 7. INVENTORY & LAB ---
 
+class LabOrderViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that handles specific lab orders issued by physicians.
+    Allows filtering by visit registration ID and order completion status.
+    """
+    queryset = LabOrder.objects.all().order_by('-created_at')
+    serializer_class = LabOrderSerializer
+    permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['visit', 'status', 'patient']
+    search_fields = ['patient__name', 'visit__queue_id']
+
+    def perform_create(self, serializer):
+        # Fallback to make sure the clinician creating the order logs correctly if needed
+        serializer.save()
+
 class LabResultViewSet(viewsets.ModelViewSet):
     queryset = LabResult.objects.all().order_by('-created_at') 
     serializer_class = LabResultSerializer
@@ -230,6 +247,72 @@ class LabInventoryViewSet(viewsets.ModelViewSet):
             remaining_stock=item.stock, notes=request.data.get('notes', '')
         )
         return Response({'status': 'Stock adjusted', 'new_stock': item.stock})
+    
+class LabReferenceViewSet(viewsets.ModelViewSet):
+    queryset = LabReference.objects.all()
+    serializer_class = LabReferenceSerializer
+    
+    # Enables easy server-side filtering via search parameters if needed later
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'category']
+
+class LabTestRegistryViewSet(viewsets.ModelViewSet):
+    queryset = LabTestRegistry.objects.all().select_related('parent_panel')
+    serializer_class = LabTestRegistrySerializer
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'parent_panel__name']
+
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy()
+        
+        # 1. Extract the raw string panel indicator from React's payload variations
+        raw_panel_name = data.get('parent_panel') or data.get('main_panel_target') or data.get('category')
+        
+        if not raw_panel_name:
+            return Response(
+                {"parent_panel": ["This field is required to structure lab rules."]}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # 2. Get or Create the panel object dynamically so database constraints don't break
+        panel_obj, _ = LabPanel.objects.get_or_create(name=raw_panel_name.strip())
+        
+        # 3. Handle incoming key format corrections safely
+        if 'lower_range_constraint' in data:
+            data['lower_range'] = data['lower_range_constraint']
+        if 'upper_range_constraint' in data:
+            data['upper_range'] = data['upper_range_constraint']
+        if 'base_cost_charge' in data:
+            data['price'] = data['base_cost_charge']
+
+        # 4. Initialize serializer and explicitly save it with the resolved panel relation
+        serializer = self.get_serializer(data=data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Pass the verified model object reference into the perform_create step
+        serializer.save(parent_panel=panel_obj)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        # Extend the exact same safety pattern to PUT/PATCH calls during edits
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        data = request.data.copy()
+        
+        raw_panel_name = data.get('parent_panel') or data.get('main_panel_target') or data.get('category')
+        
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        if raw_panel_name:
+            panel_obj, _ = LabPanel.objects.get_or_create(name=raw_panel_name.strip())
+            serializer.save(parent_panel=panel_obj)
+        else:
+            serializer.save()
+            
+        return Response(serializer.data)
 
 class DrugViewSet(viewsets.ModelViewSet):
     queryset = Drug.objects.all().order_by('name')
@@ -375,3 +458,25 @@ class MarketingRequisitionViewSet(viewsets.ModelViewSet):
     queryset = MarketingRequisition.objects.all().order_by('-created_at')
     serializer_class = MarketingRequisitionSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+class ProtocolMasterViewSet(viewsets.ModelViewSet):
+    """
+    Unified Engine Controller for managing all aspects of Protocol Blueprints, 
+    including nested structures.
+    """
+    queryset = ProtocolMaster.objects.all().prefetch_related('drugs__rules')
+    serializer_class = ProtocolMasterSerializer
+
+    authentication_classes = [] 
+    permission_classes = [AllowAny]
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Enforces cascading cleanup upon delete requests
+        """
+        instance = self.get_object()
+        self.perform_destroy(instance)
+        return Response(
+            {"message": "Protocol Matrix cleanly deleted from engine space."}, 
+            status=status.HTTP_204_NO_CONTENT
+        )

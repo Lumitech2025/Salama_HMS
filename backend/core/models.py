@@ -382,12 +382,76 @@ class ClinicalNote(models.Model):
     class Meta:
         ordering = ['-created_at']
 
-    
 from django.db import models
-from django.conf import settings
+from django.contrib.auth.models import User
 
-from django.db import models
-from django.conf import settings
+# Add or modify this model in your models.py
+class LabOrder(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('COMPLETED', 'Completed'),
+    ]
+
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='lab_orders')
+    
+    # FIX: Pointing to 'RegistrationRecord' instead of 'Visit'
+    visit = models.ForeignKey('RegistrationRecord', on_delete=models.CASCADE, related_name='requested_labs', null=True, blank=True)
+    
+    # This will hold what the doctor selected, e.g., ["CBC", "UE", "LFT"]
+    requested_tests = models.JSONField(default=list, help_text="List of test codes requested by the doctor")
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    doctor_notes = models.TextField(blank=True, null=True, help_text="Notes from the ordering clinician")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Order #{self.id} for {self.patient.name} - {self.status}"
+
+
+# 1. Create a dedicated table for your parent groups
+class LabPanel(models.Model):
+    name = models.CharField(max_length=255, unique=True, verbose_name="Panel Name") # e.g., "Full Blood Count (CBC)"
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Lab Panel Group"
+        verbose_name_plural = "Lab Panel Groups"
+
+
+# 2. Update your registry model to reference it
+class LabTestRegistry(models.Model):
+    # Pass 'LabPanel' as the first positional argument
+    parent_panel = models.ForeignKey(
+        'LabPanel', 
+        on_delete=models.PROTECT, # Stops someone from deleting a panel if tests are attached
+        related_name='test_parameters',
+        verbose_name="Main Panel Target"
+    )
+    name = models.CharField(max_length=255, verbose_name="Sub Test Parameter Name")
+    unit = models.CharField(max_length=50, verbose_name="Accurate Unit Index")
+    lower_range = models.FloatField(default=0.0, blank=True, null=True)
+    upper_range = models.FloatField(default=0.0, blank=True, null=True)
+    recommendation_below_minimum = models.TextField(blank=True, default="")
+    recommendation_above_maximum = models.TextField(blank=True, default="")
+    price = models.IntegerField(default=0, verbose_name="Base Cost Charge (KES)")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Lab Reference Standard"
+        verbose_name_plural = "Lab Reference Standards"
+
+    def __str__(self):
+        return f"{self.name} ({self.parent_panel.name})"    
+
 
 class LabResult(models.Model):
     TEST_CHOICES = [
@@ -463,6 +527,27 @@ class LabResult(models.Model):
 
     def __str__(self):
         return f"{self.get_test_name_display()} - {self.patient.name}"
+    
+
+class LabReference(models.Model):
+    name = models.CharField(max_length=255, verbose_name="Sub Test Parameter Name")
+    category = models.CharField(max_length=255, verbose_name="Main Panel Target")
+    unit = models.CharField(max_length=50, verbose_name="Accurate Unit Index")
+    lower_range = models.FloatField(default=0.0, blank=True, null=True)
+    upper_range = models.FloatField(default=0.0, blank=True, null=True)
+    recommendation_below_minimum = models.TextField(blank=True, default="")
+    recommendation_above_maximum = models.TextField(blank=True, default="")
+    price = models.IntegerField(default=0, verbose_name="Base Cost Charge (KES)")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Lab Reference Standard"
+        verbose_name_plural = "Lab Reference Standards"
+
+    def __str__(self):
+        return f"{self.name} ({self.category})"
     
     
 ## Finance & Revenue Cycle Models
@@ -935,3 +1020,90 @@ class MarketingRequisition(models.Model):
         return f"{self.title} - KES {self.requested_amount} ({self.status})"
     
 
+class ProtocolMaster(models.Model):
+    """
+    Step 1 & Step 2: Main Protocol Archetype Blueprint
+    """
+    CANCER_TYPE_CHOICES = [
+        ('Breast Cancer', 'Breast Cancer'),
+        ('Colorectal Cancer', 'Colorectal Cancer'),
+        ('Prostate Cancer', 'Prostate Cancer'),
+        ('Lung Cancer', 'Lung Cancer'),
+    ]
+
+    protocol_name = models.CharField(max_length=100, unique=True, help_text="e.g., FOLFOX6, AC-T")
+    cancer_type = models.CharField(max_length=100, choices=CANCER_TYPE_CHOICES)
+    
+    # Storing arrays cleanly as JSON fields to preserve flexible tagging
+    stages = models.JSONField(default=list, help_text="e.g., ['Stage III', 'Stage IV']")
+    biomarkers = models.JSONField(default=list, help_text="e.g., ['KRAS Wild-Type', 'HER2 Negative']")
+    
+    clinical_signs = models.TextField(blank=True, null=True, help_text="Warnings/Nadir notes for clinicians")
+    total_cycles = models.PositiveIntegerField(default=6)
+    days_per_cycle = models.PositiveIntegerField(default=14)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.protocol_name} - {self.cancer_type}"
+
+
+class ProtocolDrug(models.Model):
+    """
+    Step 2: Individual Medication Payload Streams attached to a Protocol
+    """
+    UNIT_CHOICES = [
+        ('mg/m²', 'mg/m²'),
+        ('mg/kg', 'mg/kg'),
+        ('AUC', 'Target AUC'),
+        ('mg (Fixed)', 'mg (Fixed)'),
+    ]
+    ROUTE_CHOICES = [
+        ('IV Infusion', 'Intravenous Infusion'),
+        ('IV Push', 'IV Push'),
+        ('PO (Oral)', 'PO (Oral Pill)'),
+    ]
+
+    protocol = models.ForeignKey(ProtocolMaster, on_delete=models.CASCADE, related_name='drugs')
+    drug_name = models.CharField(max_length=150, help_text="e.g., Oxaliplatin, Doxorubicin")
+    base_dose = models.DecimalField(max_length=10, decimal_places=2, max_digits=10)
+    unit = models.CharField(max_length=20, choices=UNIT_CHOICES, default='mg/m²')
+    route = models.CharField(max_length=50, choices=ROUTE_CHOICES, default='IV Infusion')
+    administration_day = models.CharField(max_length=50, default='Day 1', help_text="e.g., Day 1, Days 1-2")
+
+    def __str__(self):
+        return f"{self.drug_name} ({self.base_dose} {self.unit}) inside {self.protocol.protocol_name}"
+
+
+class DrugGuardrail(models.Model):
+    """
+    Step 3: Infinite Chained Decision Rules mapped to a single medication profile
+    """
+    PARAMETER_CHOICES = [
+        ('CrCl (Renal)', 'CrCl (Renal Function)'),
+        ('Total Bilirubin', 'Total Bilirubin (Hepatic)'),
+        ('ANC (Neutrophils)', 'ANC (Absolute Neutrophils)'),
+        ('Platelets', 'Platelets (Hematological)'),
+    ]
+    OPERATOR_CHOICES = [
+        ('<', '<'),
+        ('<=', '<='),
+        ('>', '>'),
+        ('>=', '>='),
+    ]
+    ACTION_CHOICES = [
+        ('REDUCE_PCT', 'Reduce Dosage By'),
+        ('BLOCK', 'BLOCK REGIMEN / HALT'),
+    ]
+
+    drug = models.ForeignKey(ProtocolDrug, on_delete=models.CASCADE, related_name='rules')
+    parameter = models.CharField(max_length=50, choices=PARAMETER_CHOICES)
+    operator = models.CharField(max_length=5, choices=OPERATOR_CHOICES)
+    value = models.CharField(max_length=20, help_text="Laboratory limit threshold numerical limit value")
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES, default='REDUCE_PCT')
+    action_value = models.PositiveIntegerField(blank=True, null=True, help_text="Percentage to drop if action is REDUCE_PCT")
+
+    def __str__(self):
+        action_phrase = f"Drop {self.action_value}%" if self.action == 'REDUCE_PCT' else "HALT"
+        return f"Rule for {self.drug.drug_name}: IF {self.parameter} {self.operator} {self.value} ➔ {action_phrase}"

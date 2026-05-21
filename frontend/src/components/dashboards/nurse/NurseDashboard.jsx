@@ -38,15 +38,15 @@ const NurseDashboard = () => {
         setLoading(true);
         try {
             // 1. Fetch Triage Queue (Patients waiting for Nurse)
-            const queueRes = await API.get('/queue/', { params: { current_station: 'TRIAGE', status: 'WAITING' } });
+            const queueRes = await API.get('/queue', { params: { current_station: 'TRIAGE', status: 'WAITING' } });
             const queueData = queueRes.data.results || queueRes.data;
             setQueue(Array.isArray(queueData) ? queueData : []);
 
             // 2. Fetch Functional Stats
             const [labRes, criticalRes, vitalsRes] = await Promise.all([
-                API.get('/lab-results/', { params: { status: 'PENDING' } }),
-                API.get('/lab-results/', { params: { is_critical: true } }),
-                API.get('/vitals/') // In production, filter this by today's date on the backend
+                API.get('/lab-results', { params: { status: 'PENDING' } }),
+                API.get('/lab-results', { params: { is_critical: true } }),
+                API.get('/vitals') // In production, filter this by today's date on the backend
             ]);
             
             setStats({

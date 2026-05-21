@@ -24,11 +24,11 @@ const ClinicalEMR = ({ patient }) => {
             const patientId = patient.patient || patient.id;
             
             const [vitalsRes, labsRes, notesRes, scriptRes] = await Promise.all([
-                API.get(`/vitals/?patient=${patientId}`),
-                API.get(`/lab-results/?patient=${patientId}`),
-                API.get(`/clinical-notes/?patient=${patientId}`),
-                API.get(`/prescriptions/?patient=${patientId}`)
-            ]);
+                API.get(`/vitals?patient=${patientId}`),
+                API.get(`/lab-results?patient=${patientId}`),
+                API.get(`/clinical-notes?patient=${patientId}`),
+                API.get(`/prescriptions?patient=${patientId}`)
+            ])
 
             setHistoryData({
                 vitals: vitalsRes.data.results || vitalsRes.data || [],
