@@ -16,8 +16,8 @@ const OncologistSidebar = ({ activeModule, setActiveModule, onLogout }) => {
         { id: 'vitals', label: 'Vitals', icon: <Activity size={20} /> },
         { id: 'lab', label: 'Lab Results', icon: <FlaskConical size={20} /> },
         { id: 'history', label: 'Medical History', icon: <History size={20} /> },
-        { id: 'protocol-master', label: 'Protocol Master', icon: <BookOpen size={20} /> }, // Tab 1: The Brain/Training Engine
-        { id: 'prescriptions', label: 'Patient Dosing', icon: <Pill size={20} /> },     // Tab 2: The Execution Engine
+        { id: 'protocol-master', label: 'Protocol Master', icon: <BookOpen size={20} /> }, 
+        { id: 'prescriptions', label: 'Patient Dosing', icon: <Pill size={20} /> },     
     ];
 
     return (
@@ -56,7 +56,7 @@ const OncologistSidebar = ({ activeModule, setActiveModule, onLogout }) => {
                     className="flex items-center justify-start space-x-4 px-6 py-4 text-rose-500 hover:bg-rose-500/5 rounded-2xl transition-all w-full"
                 >
                     <LogOut size={18} />
-                    <span className="text-[11px] font-black uppercase tracking-[0.2em]">Terminate Session</span>
+                    <span className="text-[11px] font-black uppercase tracking-[0.2em]">Log Out</span>
                 </button>
             </div>
         </aside>

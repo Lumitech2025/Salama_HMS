@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
-  LayoutDashboard, Users, PieChart, Package, 
-  ShieldCheck, Beaker, Stethoscope, Pill, LogOut, Settings
+    LayoutDashboard, Users, PieChart, Package, 
+    ShieldCheck, Beaker, Stethoscope, Pill, LogOut 
 } from 'lucide-react';
 
 const AdminSidebar = ({ activeTab, setActiveTab, onLogout }) => {
@@ -27,23 +27,34 @@ const AdminSidebar = ({ activeTab, setActiveTab, onLogout }) => {
     }
   ];
 
+  // Defensive handle fallback layer
+  const handleLogoutClick = () => {
+    if (typeof onLogout === 'function') {
+        onLogout();
+    } else {
+        localStorage.clear();
+        sessionStorage.clear();
+        window.location.href = '/login';
+    }
+  };
+
   return (
-    <div className="w-72 bg-slate-950 min-h-screen p-6 flex flex-col border-r border-white/5">
-      <div className="flex items-center space-x-3 mb-10 px-2">
-        <div className="bg-white p-1.5 rounded-xl">
-           <div className="w-6 h-6 bg-slate-950 rounded-lg flex items-center justify-center">
-              <span className="text-white font-black text-xs italic">S</span>
-           </div>
-        </div>
-        <h2 className="text-xl font-black text-white italic tracking-tighter uppercase">
-          Salama <span className="text-teal-500">Admin</span>
-        </h2>
+    <aside className="w-80 bg-[#020617] h-screen flex flex-col p-8 border-r border-white/5 font-['Inter'] antialiased">
+      {/* Unified Brand Identity */}
+      <div className="mb-8 px-2">
+        <h1 className="text-3xl font-black text-white tracking-tighter uppercase italic">
+            SALAMA <span className="text-blue-500 not-italic font-light">HMS</span>
+        </h1>
+        <p className="text-[11px] text-slate-500 font-black uppercase tracking-[0.4em] mt-3">
+            Admin 
+        </p>
       </div>
 
-      <nav className="flex-1 space-y-8">
+      {/* Navigation - With sub-group labels mapped seamlessly */}
+      <nav className="flex-1 space-y-6 overflow-y-auto pr-1 no-scrollbar">
         {menuGroups.map((group, idx) => (
-          <div key={idx}>
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mb-4 px-4">
+          <div key={idx} className="space-y-2">
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] px-6 mb-1">
               {group.label}
             </p>
             <div className="space-y-1">
@@ -51,16 +62,16 @@ const AdminSidebar = ({ activeTab, setActiveTab, onLogout }) => {
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
-                  className={`w-full flex items-center space-x-4 px-4 py-3 rounded-2xl transition-all duration-300 group ${
+                  className={`w-full flex items-center justify-start px-6 py-4 rounded-2xl transition-all duration-300 ${
                     activeTab === item.id 
-                    ? 'bg-white text-slate-950 shadow-xl' 
+                    ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20 font-bold' 
                     : 'text-slate-400 hover:bg-white/5 hover:text-white'
                   }`}
                 >
-                  <span className={`${activeTab === item.id ? 'text-slate-950' : 'text-slate-500 group-hover:text-teal-500'}`}>
-                    {item.icon}
+                  <div className="mr-4 text-current">{item.icon}</div>
+                  <span className="text-[12px] font-bold tracking-widest uppercase truncate">
+                    {item.label}
                   </span>
-                  <span className="font-bold text-xs uppercase tracking-tight">{item.label}</span>
                 </button>
               ))}
             </div>
@@ -68,20 +79,20 @@ const AdminSidebar = ({ activeTab, setActiveTab, onLogout }) => {
         ))}
       </nav>
 
-      <div className="pt-6 border-t border-white/5 space-y-2">
-        <button className="w-full flex items-center space-x-4 px-4 py-3 rounded-2xl text-slate-500 hover:bg-white/5 hover:text-white transition-all">
-          <Settings size={18} />
-          <span className="font-bold text-xs uppercase tracking-tight">System Settings</span>
-        </button>
+      {/* Footer Actions */}
+      <div className="pt-8 border-t border-white/5 space-y-4">
+        <div className="px-6 text-left">
+            <p className="text-[9px] text-slate-600 font-mono">Version 1.0.0 (Salama Hospital)</p>
+        </div>
         <button 
-          onClick={onLogout}
-          className="w-full flex items-center space-x-4 px-4 py-3 rounded-2xl text-red-500/50 hover:bg-red-500/10 hover:text-red-500 transition-all"
+          onClick={handleLogoutClick}
+          className="flex items-center justify-start space-x-4 px-6 py-4 text-rose-500 hover:bg-rose-500/5 rounded-2xl transition-all w-full"
         >
           <LogOut size={18} />
-          <span className="font-bold text-xs uppercase tracking-tight">Term Sesson</span>
+          <span className="text-[11px] font-black uppercase tracking-[0.2em]">Log Out</span>
         </button>
       </div>
-    </div>
+    </aside>
   );
 };
 

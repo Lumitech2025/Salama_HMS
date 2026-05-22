@@ -50,14 +50,29 @@ const ProtocolMaster = () => {
   // Fetch all saved protocols from database when component loads
   const fetchProtocols = async () => {
     setIsLoading(true);
+    
+    // 🌟 1. Grab the correct token from localStorage
+    const token = localStorage.getItem('access_token'); 
+    
     try {
-      const response = await fetch(API_BASE_URL);
-      if (!response.ok) throw new Error('Network error loading database indices');
+      // 🌟 2. Add the headers block with your Bearer token
+      const response = await fetch(API_BASE_URL, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Network error loading database indices');
+      }
+
       const data = await response.json();
       setSavedProtocols(data);
     } catch (error) {
       console.error("Fetch Error:", error);
-      alert("Failed to load active backend protocols directory.");
+    
     } finally {
       setIsLoading(false);
     }
@@ -69,100 +84,124 @@ const ProtocolMaster = () => {
 
   // Hydrate form inputs with chosen saved blueprint record for full updates
   const handleLoadEditMode = (protocol) => {
-    setEditingProtocolId(protocol.id);
-    setFormData({
-      cancerType: protocol.cancerType,
-      stages: protocol.stages || [],
-      biomarkers: protocol.biomarkers || [],
-      clinicalSigns: protocol.clinicalSigns || '',
-      protocolName: protocol.protocolName,
-      totalCycles: protocol.totalCycles,
-      daysPerCycle: protocol.daysPerCycle,
-      // Pass existing database primary keys down so serializer handles overwrites/updates cleanly
-      drugs: protocol.drugs.map(drug => ({
-        id: drug.id,
-        drugName: drug.drugName,
-        baseDose: drug.baseDose,
-        unit: drug.unit,
-        route: drug.route,
-        administrationDay: drug.administrationDay,
-        rules: drug.rules.map(rule => ({
-          id: rule.id,
-          parameter: rule.parameter,
-          operator: rule.operator,
-          value: rule.value,
-          action: rule.action,
-          actionValue: rule.actionValue || ''
-        }))
+  setEditingProtocolId(protocol.id);
+  
+  setFormData({
+    protocolName: protocol.name || protocol.protocol_name || "",
+    cancerType: protocol.cancer_type || "",
+    stages: protocol.stages || [],
+    biomarkers: protocol.biomarkers || [],
+    clinicalSigns: protocol.clinical_signs || "",
+    totalCycles: protocol.total_cycles || "",
+    daysPerCycle: protocol.days_per_cycle || "",
+    
+    // 🌟 Add defensive fallback checks here:
+    drugs: (protocol.drugs || []).map(drug => ({
+      id: drug.id,
+      drugName: drug.drug_name || "",
+      baseDose: drug.base_dose || "",
+      unit: drug.unit || "",
+      route: drug.route || "",
+      administrationDay: drug.administration_day || "",
+      rules: (drug.rules || []).map(rule => ({
+        id: rule.id,
+        parameter: rule.parameter || "",
+        operator: rule.operator || "",
+        value: rule.value || "",
+        action: rule.action || "",
+        actionValue: rule.action_value || ""
       }))
-    });
+    }))
+  });
     setCurrentStep(1); // Reset workflow step back to start for validation editing
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Dispatch full relational configuration data package to Django engine
   const handleSubmitAll = async () => {
-  if (!formData.protocolName || !formData.cancerType) {
-    return alert("Protocol Identity and Malignancy Type must be populated to save.");
-  }
-
-  setIsLoading(true);
-  const targetUrl = editingProtocolId ? `${API_BASE_URL}${editingProtocolId}/` : API_BASE_URL;
-  const httpMethod = editingProtocolId ? 'PUT' : 'POST';
-
-  // 🔄 Transform payload to match Django snake_case database definitions
-  const backendPayload = {
-    protocol_name: formData.protocolName,
-    cancer_type: formData.cancerType,
-    stages: formData.stages,
-    biomarkers: formData.biomarkers,
-    clinical_signs: formData.clinicalSigns,
-    total_cycles: parseInt(formData.totalCycles),
-    days_per_cycle: parseInt(formData.daysPerCycle),
-    drugs: formData.drugs.map(drug => ({
-      id: drug.id && String(drug.id).length > 10 ? undefined : drug.id, 
-      drug_name: drug.drugName,
-      base_dose: drug.baseDose,
-      unit: drug.unit,
-      route: drug.route,
-      administration_day: drug.administrationDay,
-      rules: drug.rules.map(rule => ({
-        id: rule.id && String(rule.id).length > 10 ? undefined : rule.id,
-        parameter: rule.parameter,
-        operator: rule.operator,
-        value: rule.value,
-        action: rule.action,
-        action_value: rule.actionValue ? parseInt(rule.actionValue) : null
-      }))
-    }))
-  };
-
-  try {
-    const response = await fetch(targetUrl, {
-      method: httpMethod,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(backendPayload) // <-- Send the transformed payload instead
-    });
-
-    const responseData = await response.json();
-
-    if (!response.ok) {
-      console.error("Backend Error Logs:", responseData);
-      throw new Error(JSON.stringify(responseData));
+    if (!formData.protocolName || !formData.cancerType) {
+      return alert("Protocol Identity and Malignancy Type must be populated to save.");
     }
-    
-    alert(editingProtocolId ? "Protocol Architecture modified successfully!" : "New Protocol Blueprint trained into engine!");
-    handleClearForm();
-    fetchProtocols();
-  } catch (error) {
-    console.error("Submission Error:", error);
-    alert(`Failed to sync configuration: ${error.message}`);
-  } finally {
-    setIsLoading(false);
-  }
-};
+
+    setIsLoading(true);
+    const targetUrl = editingProtocolId ? `${API_BASE_URL}${editingProtocolId}/` : API_BASE_URL;
+    const httpMethod = editingProtocolId ? 'PUT' : 'POST';
+
+    // 🔄 Clean payload translation layer
+    const backendPayload = {
+      name: formData.protocolName,
+      protocol_name: formData.protocolName,
+      cancer_type: formData.cancerType,
+      description: `Regimen profile for ${formData.cancerType}`,
+      stages: formData.stages,
+      biomarkers: formData.biomarkers,
+      clinical_signs: formData.clinicalSigns,
+      total_cycles: parseInt(formData.totalCycles) || 0,
+      days_per_cycle: parseInt(formData.daysPerCycle) || 0,
+      
+      // Map drugs safely
+      drugs: formData.drugs.map(drug => {
+        const drugData = {
+          drug_name: drug.drugName,
+          base_dose: parseFloat(drug.baseDose) || 0,
+          unit: drug.unit,
+          route: drug.route,
+          administration_day: drug.administrationDay,
+          rules: drug.rules.map(rule => {
+            const ruleData = {
+              parameter: rule.parameter,
+              operator: rule.operator,
+              value: rule.value,
+              action: rule.action,
+              action_value: rule.actionValue ? parseInt(rule.actionValue) : null
+            };
+            // Only include integer primary keys if editing an existing entry
+            if (editingProtocolId && rule.id && String(rule.id).length <= 10) {
+              ruleData.id = parseInt(rule.id);
+            }
+            return ruleData;
+          })
+        };
+        // Only include integer primary keys if editing an existing entry
+        if (editingProtocolId && drug.id && String(drug.id).length <= 10) {
+          drugData.id = parseInt(drug.id);
+        }
+        return drugData;
+      })
+    };
+
+    const token = localStorage.getItem('access_token'); 
+
+    try {
+      const response = await fetch(targetUrl, {
+        method: httpMethod,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify(backendPayload) 
+      });
+
+      const responseData = await response.json();
+
+      // 🚨 CRITICAL STAGE GUARD: If it's not a 200 or 201, do NOT proceed!
+      if (!response.ok) {
+        console.error("❌ BACKEND VALIDATION FAILED:", responseData);
+        alert(`Database rejected save: ${JSON.stringify(responseData)}`);
+        return; // Break execution immediately
+      }
+      
+      // ✅ If we get here, it actually saved!
+      alert(editingProtocolId ? "Protocol Architecture modified successfully!" : "New Protocol Blueprint successfully written to Database!");
+      handleClearForm();
+      fetchProtocols();
+    } catch (error) {
+      console.error("Submission Error:", error);
+      alert(`Network Pipeline Failure: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleClearForm = () => {
     setEditingProtocolId(null);

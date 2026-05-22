@@ -1,81 +1,80 @@
 import React from 'react';
 import { 
-  LayoutGrid, 
-  FlaskConical, 
-  History, 
-  BookOpen, 
-  PackageSearch, 
-  LogOut, 
-  FlaskRound
+    LayoutGrid, 
+    FlaskConical, 
+    History, 
+    BookOpen, 
+    PackageSearch, 
+    LogOut 
 } from 'lucide-react';
 
-const LabSidebar = ({ activeTab, setActiveTab }) => {
-  const menuItems = [
-    { id: 'overview', label: 'Home', icon: LayoutGrid },
-    { id: 'diagnostics', label: 'Diagnostics', icon: FlaskConical },
-    { id: 'history', label: 'Patient History', icon: History },
-    { id: 'reference', label: 'Reference Desk', icon: BookOpen },
-    { id: 'inventory', label: 'Inventory', icon: PackageSearch },
-  ];
+const LabSidebar = ({ activeTab, setActiveTab, onLogout }) => {
+    const menuItems = [
+        { id: 'overview', label: 'Home', icon: <LayoutGrid size={18} /> },
+        { id: 'diagnostics', label: 'Diagnostics', icon: <FlaskConical size={18} /> },
+        { id: 'history', label: 'Patient History', icon: <History size={18} /> },
+        { id: 'reference', label: 'Reference Desk', icon: <BookOpen size={18} /> },
+        { id: 'inventory', label: 'Inventory', icon: <PackageSearch size={18} /> },
+    ];
 
-  return (
-    <div className="w-72 bg-slate-950 border-r border-white/5 flex flex-col h-screen sticky top-0">
-      {/* BRANDING */}
-      <div className="p-8 mb-4">
-        <div className="flex items-center gap-3">
-          <div className="bg-teal-500 p-2.5 rounded-xl shadow-lg shadow-teal-500/20">
-            <FlaskRound size={22} className="text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl font-black text-white tracking-tighter uppercase italic">
-              Salama <span className="text-teal-500 text-sm">LAB</span>
-            </h1>
-            <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.3em]">Precision Diagnostics</p>
-          </div>
-        </div>
-      </div>
+    // Defensive handle logout controller fallback layer
+    const handleLogoutClick = () => {
+        if (typeof onLogout === 'function') {
+            onLogout();
+        } else {
+            localStorage.clear();
+            sessionStorage.clear();
+            window.location.href = '/login';
+        }
+    };
 
-      {/* NAVIGATION */}
-      <nav className="flex-1 px-4 space-y-2">
-        {menuItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          
-          return (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-4 px-6 py-4 rounded-2xl transition-all duration-300 group relative ${
-                isActive 
-                  ? 'bg-teal-500 text-white shadow-xl shadow-teal-500/10' 
-                  : 'text-slate-500 hover:bg-white/5 hover:text-slate-200'
-              }`}
-            >
-              <Icon size={20} className={isActive ? 'animate-pulse' : 'group-hover:scale-110 transition-transform'} />
-              <span className="text-xs font-black uppercase tracking-widest leading-none">
-                {item.label}
-              </span>
-              
-              {isActive && (
-                <div className="absolute right-4 w-1.5 h-1.5 bg-white rounded-full" />
-              )}
-            </button>
-          );
-        })}
-      </nav>
+    return (
+        <aside className="w-80 bg-[#020617] h-screen flex flex-col p-8 border-r border-white/5 font-['Inter'] antialiased">
+            {/* Standardized Corporate Identity Branding */}
+            <div className="mb-8 px-2">
+                <h1 className="text-3xl font-black text-white tracking-tighter uppercase italic">
+                    SALAMA <span className="text-teal-400 not-italic font-light">LAB</span>
+                </h1>
+                <p className="text-[11px] text-slate-500 font-black uppercase tracking-[0.4em] mt-3">
+                    Precision Diagnostics
+                </p>
+            </div>
 
-      {/* FOOTER ACTION */}
-      <div className="p-6 border-t border-white/5">
-        <button 
-          onClick={() => window.location.href = '/login'}
-          className="w-full flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-500 hover:bg-red-500/10 hover:text-red-400 transition-all duration-300 group"
-        >
-          <LogOut size={20} className="group-hover:-translate-x-1 transition-transform" />
-          <span className="text-xs font-black uppercase tracking-widest">Sign Out</span>
-        </button>
-      </div>
-    </div>
-  );
+            {/* Navigation - Locked to layout-optimized text-12 sizing */}
+            <nav className="flex-1 space-y-2 overflow-y-auto pr-1">
+                {menuItems.map((item) => (
+                    <button
+                        key={item.id}
+                        onClick={() => setActiveTab(item.id)}
+                        className={`w-full flex items-center justify-start px-6 py-4 rounded-2xl transition-all duration-300 ${
+                            activeTab === item.id 
+                            ? 'bg-teal-600 text-white shadow-xl shadow-teal-600/20 font-bold' 
+                            : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                        }`}
+                    >
+                        <div className="mr-4 text-current">{item.icon}</div>
+                        <span className="text-[12px] font-bold tracking-widest uppercase truncate">
+                            {item.label}
+                        </span>
+                    </button>
+                ))}
+            </nav>
+
+            {/* Footer Actions */}
+            <div className="pt-8 border-t border-white/5 space-y-4">
+                <div className="px-6 text-left">
+                    <p className="text-[9px] text-slate-600 font-mono">Version 1.0.0 (Salama Lab)</p>
+                </div>
+                <button 
+                    onClick={handleLogoutClick}
+                    className="flex items-center justify-start space-x-4 px-6 py-4 text-rose-500 hover:bg-rose-500/5 rounded-2xl transition-all w-full"
+                >
+                    <LogOut size={18} />
+                    <span className="text-[11px] font-black uppercase tracking-[0.2em]">Log Out</span>
+                </button>
+            </div>
+        </aside>
+    );
 };
 
 export default LabSidebar;
