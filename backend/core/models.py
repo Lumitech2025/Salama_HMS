@@ -2,8 +2,10 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from datetime import date
+
 import math
 import random
+import datetime
 
 from authentication.models import User
 
@@ -54,6 +56,77 @@ class Patient(models.Model):
 
     def __str__(self):
         return f"{self.name} - ID: {self.registry_no}"
+
+class RegistrationRecord(models.Model):
+    GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
+    
+    name = models.CharField(max_length=255)
+    phone = models.CharField(max_length=20)
+    id_number = models.CharField(max_length=20) 
+    
+    age = models.PositiveIntegerField()
+    gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
+    insurance = models.CharField(max_length=100, default="CASH")
+    insurance_number = models.CharField(max_length=100, blank=True, null=True)
+    is_urgent = models.BooleanField(default=False)
+    is_returning = models.BooleanField(default=False)
+
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='registrations')
+    
+    queue_id = models.CharField(max_length=10, unique=True, editable=False)
+    health_record_number = models.CharField(max_length=30, unique=True, editable=False)
+    
+    registered_at = models.DateTimeField(auto_now_add=True)
+
+    # PASTE THE UPDATED SAVE METHOD HERE:
+    def save(self, *args, **kwargs):
+        # 1. Handle Queue ID Generation
+        if not self.queue_id:
+            last_record = RegistrationRecord.objects.all().order_by('id').last()
+            if not last_record:
+                self.queue_id = "Q001"
+            else:
+                last_id = int(last_record.queue_id[1:])
+                self.queue_id = f"Q{str(last_id + 1).zfill(3)}"
+                
+        # 2. Fallback check to auto-fill core model attributes if empty before finalizing save
+        if self.patient:
+            if not self.name:
+                self.name = self.patient.name
+            if not self.phone:
+                self.phone = self.patient.phone
+            if not self.gender:
+                self.gender = self.patient.gender
+
+        # 3. Handle Health Record Number Generation
+        if not self.health_record_number:
+            current_year = date.today().year
+            name_source = self.name if self.name else "SAL"
+            first_name_part = name_source.split(' ')[0]
+            prefix = first_name_part[:3].upper().ljust(3, 'X')
+            
+            last_matching = RegistrationRecord.objects.filter(
+                health_record_number__startswith=f"{prefix}_",
+                health_record_number__endswith=f"_{current_year}"
+            ).order_by('id').last()
+            
+            if not last_matching:
+                next_sequence = "001"
+            else:
+                try:
+                    parts = last_matching.health_record_number.split('_')
+                    last_num = int(parts[1])
+                    next_sequence = str(last_num + 1).zfill(3)
+                except (ValueError, IndexError):
+                    next_sequence = "001"
+            
+            self.health_record_number = f"{prefix}_{next_sequence}_{current_year}"
+            
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.queue_id} - {self.health_record_number} - {self.name}"
+    
 
 # --- Appointment & Triage Workflow ---
 
@@ -328,40 +401,8 @@ class Drug(models.Model):
         return date.today() >= self.expiry_date if self.expiry_date else False
     
 
-class RegistrationRecord(models.Model):
-    GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
-    
-    name = models.CharField(max_length=255)
-    phone = models.CharField(max_length=20)
-    id_number = models.CharField(max_length=20) 
-    
-    age = models.PositiveIntegerField()
-    gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
-    insurance = models.CharField(max_length=100, default="CASH")
-    insurance_number = models.CharField(max_length=100, blank=True, null=True)
-    is_urgent = models.BooleanField(default=False)
-    is_returning = models.BooleanField(default=False)
 
-    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='registrations')
     
-    queue_id = models.CharField(max_length=10, unique=True, editable=False)
-    
-    registered_at = models.DateTimeField(auto_now_add=True)
-
-    def save(self, *args, **kwargs):
-        if not self.queue_id:
-            # Logic for Q001 sequence
-            last_record = RegistrationRecord.objects.all().order_by('id').last()
-            if not last_record:
-                self.queue_id = "Q001"
-            else:
-                last_id = int(last_record.queue_id[1:])
-                self.queue_id = f"Q{str(last_id + 1).zfill(3)}"
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.queue_id} - {self.name}"
-
 class ClinicalNote(models.Model):
     NOTE_TYPES = [
         ('TRIAGE', 'Triage Assessment'),

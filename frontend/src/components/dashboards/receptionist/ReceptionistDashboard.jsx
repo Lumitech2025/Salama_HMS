@@ -3,7 +3,7 @@ import API from '../../../api/api';
 import { 
   Calendar, Clock, UserPlus, Activity, List, 
   ArrowRight, RefreshCcw, TrendingUp, Users, 
-  CheckCircle2, AlertCircle, Loader2, HeartPulse, Search
+  CheckCircle2, AlertCircle, Loader2, HeartPulse, Search, FileText
 } from 'lucide-react';
 
 // Import modules
@@ -50,7 +50,7 @@ const ReceptionistDashboard = () => {
     } catch (err) {
       console.error("Dashboard Sync Error:", err);
     } finally {
-      setLoading(false);
+      loading(false);
     }
   }, [activeTab]);
 
@@ -135,7 +135,6 @@ const ReceptionistDashboard = () => {
                       </div>
                       <div>
                         <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Patient Live Tracking</h3>
-
                       </div>
                     </div>
 
@@ -143,6 +142,7 @@ const ReceptionistDashboard = () => {
                       <thead>
                         <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-50">
                           <th className="px-8 py-6">Queue ID</th>
+                          <th className="px-8 py-6">Record Number</th>
                           <th className="px-8 py-6">Patient</th>
                           <th className="px-8 py-6 text-center">Current Station</th>
                           <th className="px-8 py-6 text-right">Status</th>
@@ -155,6 +155,13 @@ const ReceptionistDashboard = () => {
                                 <span className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-teal-600 shadow-sm italic">
                                     #{item.token_id}
                                 </span>
+                            </td>
+                            {/* NEW: Health Record Number Column Injection */}
+                            <td className="px-8 py-7">
+                              <span className="font-mono font-bold text-xs text-teal-600 bg-teal-50 px-3 py-1.5 rounded-xl border border-teal-100/50 tracking-wide inline-flex items-center gap-1.5">
+                                <FileText size={12} className="text-teal-500" />
+                                {item.health_record_number || item.visit_details?.health_record_number || '---_000_2026'}
+                              </span>
                             </td>
                             <td className="px-8 py-7">
                               <p className="font-black text-slate-900 text-base uppercase tracking-tight leading-none mb-1">{item.patient_name}</p>
@@ -183,7 +190,6 @@ const ReceptionistDashboard = () => {
                       </div>
                       <div>
                         <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase italic">Confirmed Appointments</h3>
-
                       </div>
                     </div>
                     <table className="w-full text-left">

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api'; 
 import { 
   Save, Loader2, UserPlus, AlertCircle, CheckCircle2, 
-  Users, Calendar, RefreshCw, AlertTriangle
+  Users, Calendar, RefreshCw, AlertTriangle, FileText
 } from 'lucide-react';
 
 const Registration = () => {
@@ -31,6 +31,13 @@ const Registration = () => {
   };
 
   const [formData, setFormData] = useState(initialFormState);
+
+  // Client-side visual preview helper calculation matching your Django logic
+  const getLiveHrnPreview = () => {
+    if (!formData.firstName.trim()) return '---_001_2026';
+    const prefix = formData.firstName.trim().slice(0, 3).toUpperCase().padEnd(3, 'X');
+    return `${prefix}_001_2026`;
+  };
 
   const fetchData = useCallback(async () => {
     try {
@@ -63,10 +70,7 @@ const Registration = () => {
     e.preventDefault();
     setIsSubmitting(true);
     
-    // Check if patient exists or create one (Logic depends on your backend)
-    // For now, let's ensure the payload is clean:
     const payload = {
-      // Concatenate names for the backend 'name' field
       first_name: formData.firstName.trim(),
       last_name: formData.lastName.trim(), 
       id_number: formData.id_number,
@@ -84,7 +88,7 @@ const Registration = () => {
       if (response.status === 201 || response.status === 200) {
         setRegStatus('success');
         setFormData(initialFormState); 
-        fetchData(); // Refresh analytics and log
+        fetchData(); 
       }
     } catch (error) {
       setRegStatus('error');
@@ -170,8 +174,18 @@ const Registration = () => {
 
             <FormInput label="Insurance No." name="insurance_number" value={formData.insurance_number} onChange={handleChange} />
 
+            {/* LIVE AUTOMATED RECORD PREVIEW BOX */}
+            <div className="space-y-2">
+              <label className="text-[9px] font-black text-teal-600 uppercase tracking-widest ml-2 flex items-center gap-1.5">
+                <FileText size={10} /> Health Record Number
+              </label>
+              <div className="w-full bg-teal-50/50 border border-teal-100/50 text-teal-700 rounded-2xl p-4 text-sm font-mono font-bold tracking-wider select-none">
+                {getLiveHrnPreview()}
+              </div>
+            </div>
+
             {/* FLOW CONTROL TOGGLES */}
-            <div className="md:col-span-2 flex items-center gap-8 p-4 bg-slate-50 rounded-[2rem] border border-slate-100">
+            <div className="md:col-span-3 flex items-center gap-8 p-4 bg-slate-50 rounded-[2rem] border border-slate-100">
                 <label className="flex items-center gap-3 cursor-pointer group">
                     <input 
                       type="checkbox" 
@@ -209,6 +223,7 @@ const Registration = () => {
             <thead>
               <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] bg-white">
                 <th className="px-10 py-5">Queue ID</th>
+                <th className="px-10 py-5">Record Number</th>
                 <th className="px-10 py-5">Patient Name</th>
                 <th className="px-10 py-5">Classification</th>
                 <th className="px-10 py-5">Insurance</th>
@@ -222,6 +237,12 @@ const Registration = () => {
                       <span className={`px-3 py-1 rounded-lg font-mono font-bold text-xs ${r.is_urgent ? 'bg-rose-500 text-white' : 'bg-slate-900 text-white'}`}>
                         {r.queue_id}
                       </span>
+                  </td>
+                  {/* Newly Integrated Health Record Number Column */}
+                  <td className="px-10 py-6">
+                    <span className="font-mono font-bold text-xs text-teal-600 bg-teal-50 px-3 py-1.5 rounded-xl border border-teal-100/50 tracking-wide">
+                      {r.health_record_number || '---_000_2026'}
+                    </span>
                   </td>
                   <td className="px-10 py-6">
                     <p className="font-black text-slate-900 text-sm uppercase">{r.name}</p>

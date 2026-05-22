@@ -84,43 +84,50 @@ class RegistrationRecordSerializer(serializers.ModelSerializer):
     gender = serializers.CharField(write_only=True, required=False)
     age = serializers.IntegerField(write_only=True) 
 
-
     class Meta:
         model = RegistrationRecord
         fields = [
-            'id', 'queue_id', 'name', 'patient', 'id_number', 'first_name', 
+            'id', 'queue_id', 'name', 'health_record_number', 'patient', 'id_number', 'first_name', 
             'last_name', 'phone', 'gender', 'age', 'insurance', 
             'insurance_number', 'is_urgent', 'is_returning', 'registered_at'
         ]
         read_only_fields = ['patient', 'queue_id', 'registered_at']
 
     def create(self, validated_data):
-        # 1. Extract details needed for the Master Patient Index
+        # 1. Extract details passed from the frontend registration form
         id_num = validated_data.pop('id_number')
         f_name = validated_data.pop('first_name')
         l_name = validated_data.pop('last_name')
-        phone = validated_data.pop('phone', '')
-        gender = validated_data.pop('gender', 'M')
+        phone_num = validated_data.pop('phone', '')
+        gender_choice = validated_data.pop('gender', 'M')
         
-        # 2. Peek at the age but DON'T pop it yet so it remains for the RegistrationRecord
+        # Keep age in validated_data so RegistrationRecord snapshots it
         patient_age = validated_data.get('age') 
 
         with transaction.atomic():
-            # 3. Create/Update the Master Patient record
+            # 2. Map all extracted registration values directly onto the Master Patient Index row
             patient, created = Patient.objects.update_or_create(
                 registry_no=id_num,
-                defaults={'name': f"{f_name} {l_name}".strip()}
+                defaults={
+                    'name': f"{f_name} {l_name}".strip(),
+                    'phone': phone_num,
+                    'gender': gender_choice,
+                    'insurance_type': validated_data.get('insurance', 'CASH'),
+                    'insurance_no': validated_data.get('insurance_number', '')
+                }
             )
 
-            # 4. Create the Visit Encounter
-            # validated_data still contains 'age', so the NOT NULL constraint is satisfied
+            # 3. Create the unique visit record linked to that patient profile
             registration = RegistrationRecord.objects.create(
                 patient=patient, 
-                id_number=id_num, # Store for history
+                id_number=id_num,
+                phone=phone_num,
+                gender=gender_choice,
+                name=f"{f_name} {l_name}".strip(),
                 **validated_data
             )
             
-            # 5. Push to Triage Queue
+            # 4. Route to the live queue
             Queue.objects.create(
                 patient=patient,
                 visit=registration,
