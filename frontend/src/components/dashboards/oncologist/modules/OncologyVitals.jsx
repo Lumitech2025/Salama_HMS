@@ -6,7 +6,6 @@ import {
     CheckCircle2, Loader2, RefreshCcw, FlaskConical, MessageSquare, Save, Pill, ClipboardCheck
 } from 'lucide-react';
 
-// Aligned exactly to the Left-Hand Keys of your LabResult.TEST_CHOICES
 const AVAILABLE_LAB_TESTS = [
     { id: 'CBC', label: 'Full Blood Count (CBC)' },
     { id: 'PSA', label: 'Prostate Specific Antigen (PSA)' },
@@ -48,7 +47,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         if (!queueItem) return;
         setLoading(true);
         try {
-            // Note: your model uses visit pointing to RegistrationRecord
             const visitId = queueItem.visit_id || queueItem.visit;
             
             const [vitalsRes, labRes] = await Promise.all([
@@ -113,9 +111,17 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         }
     };
 
+    /**
+     * ALIGNED WITH LABORDER MODEL & SERIALIZER
+     * Packages checked keys back into string arrays matching target options
+     */
     const handleReferToLab = async () => {
-        const selectedKeys = Object.keys(labRequests).filter(k => labRequests[k]);
-        if (selectedKeys.length === 0) {
+        // Map checked internal object states to canonical frontend descriptive labels
+        const selectedTests = AVAILABLE_LAB_TESTS
+            .filter(test => labRequests[test.id])
+            .map(test => test.label);
+
+        if (selectedTests.length === 0) {
             alert("Select at least one investigation.");
             return;
         }
@@ -124,44 +130,63 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         try {
             const visitId = selectedPatient.visit_id || selectedPatient.visit;
             
-            // Post distinct rows to LabResult endpoint matching database key expectations
-            const labPromises = selectedKeys.map(testKey => {
-                return API.post('/lab-results/', {
-                    patient: selectedPatient.patient,
-                    visit: visitId,
-                    test_name: testKey, // Sends direct DB choice keys: 'CBC', 'UE', 'MALARIA_BS' etc.
-                    status: 'PENDING'
-                });
+            // Send single atomic request object structure handled by LabOrderViewSet
+            await API.post('/lab-orders/', {
+                patient: selectedPatient.patient,
+                visit: visitId,
+                requested_tests: selectedTests, // Clean Array mapping intercepted by Serializer
+                status: 'PENDING',
+                doctor_notes: doctorNote || "" // Passes running clinical logs down directly
             });
             
-            await Promise.all(labPromises);
-            
-            // Advance pipeline ticket station assignment
+            // Advance tracker through workflow sequence
             await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'LAB' });
             
-            alert(`Patient referred for ${selectedKeys.length} tests.`);
+            alert(`Success: Patient routed to Lab for ${selectedTests.length} investigation(s).`);
             setLabRequests(INITIAL_LAB_STATE);
             onTabSwitch('home'); 
         } catch (err) {
-            console.error("Lab referral breakdown details:", err.response?.data || err.message);
-            alert(`Referral failed: ${JSON.stringify(err.response?.data || "Server connection failure")}`);
+            console.error("Lab referral failure:", err.response?.data || err.message);
+            alert(`Referral failed: ${JSON.stringify(err.response?.data || "Check network connections or endpoint schemas")}`);
         } finally { 
             setIsSaving(false); 
         }
     };
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-700 font-['Inter'] pb-20">
+        <div className="space-y-6 animate-in face-in duration-700 font-['Inter'] pb-20 max-w-[1600px] mx-auto px-4">
             
+            {/* 1. ACTIVE PATIENT PROFILE BANNER */}
+            {selectedPatient && (
+                <div className="bg-gradient-to-r from-slate-900 to-slate-950 border border-slate-800 rounded-[2rem] p-6 shadow-xl flex items-center justify-between">
+                    <div className="flex items-center gap-5">
+                        <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center font-black text-white text-xl shadow-lg shadow-blue-900/40">
+                            {selectedPatient.patient_name?.charAt(0) || <User size={24} />}
+                        </div>
+                        <div>
+                            <span className="text-[10px] bg-blue-500/10 text-blue-400 font-black px-2.5 py-1 rounded-md uppercase tracking-wider">Active Consultation</span>
+                            <h2 className="text-2xl font-black tracking-tight text-white mt-1">{selectedPatient.patient_name}</h2>
+                            <p className="text-xs font-semibold text-slate-400 mt-0.5">Token ID: <span className="text-slate-200">#{selectedPatient.token_id}</span></p>
+                        </div>
+                    </div>
+                    {vitals?.bmi && (
+                        <div className="bg-blue-600/10 border border-blue-500/20 px-6 py-3 rounded-2xl text-right">
+                            <p className="text-[10px] font-black uppercase text-blue-400 tracking-widest">Calculated BMI</p>
+                            <p className="text-2xl font-black text-white tracking-tight mt-0.5">{vitals.bmi}</p>
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* SELECTION HUB */}
-            <div className="bg-[#020617] border border-white/5 rounded-[2.5rem] p-8 shadow-2xl">
+            <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-sm">
                 <div className="flex flex-col md:flex-row items-center gap-6">
                     <div className="flex items-center gap-4 flex-1 w-full">
-                        <div className="p-4 bg-blue-500/10 rounded-2xl text-blue-500"><User size={24} /></div>
+                        <div className="p-3.5 bg-slate-100 rounded-xl text-slate-700"><User size={20} /></div>
                         <div className="flex-1 relative">
-                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 ml-1">Oncology Patient Selection</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-0.5">Switch Patient Queue Entry</p>
                             <select 
-                                className="w-full bg-slate-900 border-none rounded-2xl p-4 font-black text-white text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none"
+                                className="w-full bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 font-semibold text-slate-800 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white cursor-pointer appearance-none transition-all"
                                 onChange={(e) => handlePatientChange(e.target.value)}
                                 value={selectedPatient?.id || ''}
                             >
@@ -170,84 +195,84 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                                     <option key={p.id} value={p.id}>{p.patient_name} — #{p.token_id}</option>
                                 ))}
                             </select>
-                            <ChevronDown className="absolute right-4 top-10 text-slate-500 pointer-events-none" size={18} />
+                            <ChevronDown className="absolute right-4 top-9 text-slate-400 pointer-events-none" size={16} />
                         </div>
-                        <button onClick={fetchQueue} className="p-4 hover:bg-white/5 rounded-2xl transition-all self-end mb-1">
-                            <RefreshCcw size={20} className="text-slate-500" />
+                        <button onClick={fetchQueue} className="p-3.5 bg-slate-50 border border-slate-200/60 hover:bg-slate-100 rounded-xl transition-all self-end shadow-sm">
+                            <RefreshCcw size={18} className="text-slate-600" />
                         </button>
                     </div>
                 </div>
             </div>
 
             {selectedPatient ? (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in slide-in-from-bottom-8 duration-500">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in slide-in-from-bottom-6 duration-500">
                     
                     <main className="lg:col-span-8 space-y-6">
                         {/* VISITS VITALS CARD */}
-                        <div className="bg-white border border-slate-100 rounded-[3.5rem] p-10 shadow-xl relative overflow-hidden">
-                            <div className="flex items-center justify-between mb-10">
-                                <div className="flex items-center gap-4">
-                                    <div className="bg-blue-600 p-2 rounded-xl text-white"><Activity size={24} /></div>
-                                    <h3 className="text-2xl font-black text-slate-900 uppercase italic tracking-tighter">Visit Vitals</h3>
+                        <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md relative overflow-hidden">
+                            <div className="flex items-center justify-between mb-8">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-blue-600 p-2.5 rounded-xl text-white shadow-sm shadow-blue-500/20"><Activity size={20} /></div>
+                                    <h3 className="text-xl font-bold tracking-tight text-slate-900">Vitals</h3>
                                 </div>
-                                <span className="bg-slate-900 text-white px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest">
+                                <span className="bg-emerald-500/10 text-emerald-600 px-4 py-2 rounded-xl text-xs font-black tracking-wide border border-emerald-500/20">
                                     BMI: {vitals?.bmi || '--'}
                                 </span>
                             </div>
 
                             {loading ? (
-                                <div className="py-20 text-center"><Loader2 className="animate-spin text-blue-600 mx-auto" size={40} /></div>
+                                <div className="py-20 text-center"><Loader2 className="animate-spin text-blue-600 mx-auto" size={32} /></div>
                             ) : (
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-                                    <VitalCard icon={<Heart className="text-rose-500"/>} label="BP" value={vitals ? `${vitals.systolic_bp}/${vitals.diastolic_bp}` : '--/--'} unit="mmHg" />
-                                    <VitalCard icon={<Activity className="text-blue-500"/>} label="Pulse" value={vitals?.heart_rate || '--'} unit="bpm" />
-                                    <VitalCard icon={<Thermometer className="text-orange-500"/>} label="Temp" value={vitals?.temperature || '--'} unit="°C" />
-                                    <VitalCard icon={<Wind className="text-teal-500"/>} label="SpO2" value={vitals?.oxygen_saturation_percentage || '--'} unit="%" />
-                                    <VitalCard icon={<Scale className="text-indigo-500"/>} label="Weight" value={vitals?.weight || '--'} unit="kg" />
-                                    <VitalCard icon={<Activity className="text-slate-500"/>} label="Height" value={vitals?.height || '--'} unit="cm" />
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                    <VitalCard icon={<Heart size={18} className="text-rose-500"/>} label="Blood Pressure" value={vitals ? `${vitals.systolic_bp}/${vitals.diastolic_bp}` : '--/--'} unit="mmHg" />
+                                    <VitalCard icon={<Activity size={18} className="text-blue-500"/>} label="Pulse Rate" value={vitals?.heart_rate || '--'} unit="bpm" />
+                                    <VitalCard icon={<Thermometer size={18} className="text-orange-500"/>} label="Temperature" value={vitals?.temperature || '--'} unit="°C" />
+                                    <VitalCard icon={<Wind size={18} className="text-teal-500"/>} label="SpO2 Saturation" value={vitals?.oxygen_saturation_percentage || '--'} unit="%" />
+                                    <VitalCard icon={<Scale size={18} className="text-indigo-500"/>} label="Weight Metric" value={vitals?.weight || '--'} unit="kg" />
+                                    <VitalCard icon={<Activity size={18} className="text-slate-500"/>} label="Patient Height" value={vitals?.height || '--'} unit="cm" />
                                 </div>
                             )}
                         </div>
 
-                        {/* DOCTOR NOTES */}
-                        <div className="bg-[#020617] rounded-[3rem] p-10 shadow-2xl relative overflow-hidden">
-                            <div className="flex items-center justify-between mb-6">
+                        {/* NOTES */}
+                        <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
+                            <div className="flex items-center justify-between mb-5">
                                 <div className="flex items-center gap-3">
-                                    <MessageSquare className="text-blue-400" size={20} />
-                                    <h4 className="text-xs font-black text-white uppercase tracking-[0.2em]">Consultation Findings</h4>
+                                    <div className="bg-slate-900 p-2.5 rounded-xl text-white"><MessageSquare size={18} /></div>
+                                    <h4 className="text-md font-bold text-slate-900">Notes</h4>
                                 </div>
                                 <button 
                                     onClick={handleSaveNotes}
                                     disabled={isSaving || !doctorNote}
-                                    className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase hover:bg-blue-500 transition-all disabled:opacity-50"
+                                    className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 transition-all disabled:opacity-50 shadow-sm"
                                 >
                                     {isSaving ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>} Save Notes
                                 </button>
                             </div>
                             <textarea 
-                                className="w-full bg-slate-900 border border-white/10 rounded-[2rem] p-8 text-slate-200 font-medium text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5 text-slate-800 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all resize-none"
                                 rows="4"
-                                placeholder="Enter clinical assessment findings..."
+                                placeholder="Enter clinical assessment findings and diagnostics summary..."
                                 value={doctorNote}
                                 onChange={(e) => setDoctorNote(e.target.value)}
                             />
                         </div>
 
                         {/* LAB REQUESTS */}
-                        <div className="bg-white border border-slate-100 rounded-[3rem] p-10 shadow-xl">
-                            <div className="flex items-center gap-4 mb-8">
-                                <FlaskConical className="text-indigo-600" size={28} />
-                                <h3 className="text-xl font-black text-slate-900 uppercase italic">Lab Investigations</h3>
+                        <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="bg-indigo-600 p-2.5 rounded-xl text-white shadow-sm shadow-indigo-500/20"><FlaskConical size={18} /></div>
+                                <h3 className="text-md font-bold text-slate-900">Lab Investigations Requisition</h3>
                             </div>
                             
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 {AVAILABLE_LAB_TESTS.map((test) => (
                                     <div 
                                         key={test.id} 
                                         onClick={() => toggleLabTest(test.id)}
-                                        className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all cursor-pointer ${labRequests[test.id] ? 'bg-indigo-50 border-indigo-500 shadow-md shadow-indigo-100' : 'bg-slate-50 border-transparent hover:border-slate-200'}`}
+                                        className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all cursor-pointer ${labRequests[test.id] ? 'bg-indigo-50/60 border-indigo-500 shadow-sm' : 'bg-slate-50 border-transparent hover:border-slate-200'}`}
                                     >
-                                        <span className={`text-[11px] font-black uppercase ${labRequests[test.id] ? 'text-indigo-700' : 'text-slate-500'}`}>{test.label}</span>
+                                        <span className={`text-xs font-bold ${labRequests[test.id] ? 'text-indigo-900' : 'text-slate-600'}`}>{test.label}</span>
                                         {labRequests[test.id] ? <CheckCircle2 size={18} className="text-indigo-600" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-300" />}
                                     </div>
                                 ))}
@@ -256,51 +281,68 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                             <button 
                                 onClick={handleReferToLab}
                                 disabled={isSaving}
-                                className="w-full mt-8 bg-indigo-600 text-white py-5 rounded-2xl font-black uppercase tracking-[0.2em] text-xs hover:bg-[#020617] transition-all flex items-center justify-center gap-3 shadow-lg shadow-indigo-200"
+                                className="w-full mt-6 bg-indigo-600 hover:bg-indigo-700 text-white py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2.5 shadow-lg shadow-indigo-100"
                             >
-                                {isSaving ? <Loader2 className="animate-spin" size={20} /> : <ClipboardCheck size={20} />} Submit Requisition to Lab
+                                {isSaving ? <Loader2 className="animate-spin" size={18} /> : <ClipboardCheck size={18} />} Submit Requisition to Lab
                             </button>
+                        </div>
+
+                        {/* PRESCRIPTION HUB */}
+                        <div className="bg-slate-950 border border-slate-900 rounded-[2.5rem] p-8 shadow-xl">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                                <div>
+                                    <h3 className="text-md font-bold text-white flex items-center gap-2">
+                                        <Pill size={18} className="text-emerald-400" /> Medical Prescription Plan
+                                    </h3>
+                                    <p className="text-xs font-medium text-slate-400 mt-1">Deploy cytotoxic treatments, supportive regimens, or oncology therapy orders.</p>
+                                </div>
+                                <button 
+                                    onClick={() => onTabSwitch('prescriptions')}
+                                    className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-lg shadow-emerald-900/20 whitespace-nowrap"
+                                >
+                                    Issue Patient Prescription
+                                </button>
+                            </div>
                         </div>
                     </main>
 
                     {/* RIGHT PANEL */}
                     <aside className="lg:col-span-4 space-y-6">
-                        <section className="bg-gradient-to-br from-blue-600 to-indigo-700 p-8 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden">
-                            <p className="text-[9px] font-black text-blue-100 uppercase tracking-[0.3em] mb-4">Body Surface Area</p>
-                            <div className="text-6xl font-black tracking-tighter italic mb-2">
-                                {vitals?.bsa || '0.00'}<span className="text-xl font-light not-italic ml-1">m²</span>
+                        <section className="bg-gradient-to-br from-blue-600 to-indigo-700 p-6 rounded-[2rem] text-white shadow-xl relative overflow-hidden">
+                            <p className="text-[10px] font-black text-blue-100 uppercase tracking-widest mb-3">Body Surface Area (BSA)</p>
+                            <div className="text-5xl font-black tracking-tight mb-1 flex items-baseline">
+                                {vitals?.bsa || '0.00'}
+                                <span className="text-lg font-normal ml-1 opacity-80">m²</span>
                             </div>
-                            <p className="text-[8px] opacity-60 uppercase font-bold tracking-widest">Required for cytotoxic dosing</p>
-                            <Calculator size={100} className="absolute -right-4 -bottom-4 text-white/10" />
+                            <p className="text-[10px] opacity-75 font-semibold tracking-wide">Critical index value required for safe cytotoxic dosing setup</p>
+                            <Calculator size={80} className="absolute -right-4 -bottom-4 text-white/10 pointer-events-none" />
                         </section>
 
-                        <div className="bg-[#020617] text-white p-8 rounded-[3rem] shadow-2xl border border-white/5">
-                            <h3 className="text-xs font-black uppercase tracking-[0.2em] text-blue-400 mb-8 flex items-center gap-2 border-b border-white/5 pb-4">
-                                <CheckCircle2 size={16}/> Case Finalization
+                        <div className="bg-white border border-slate-100 text-slate-900 p-6 rounded-[2rem] shadow-md">
+                            <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
+                                <CheckCircle2 size={14} className="text-blue-500"/> Pipeline Utilities
                             </h3>
-                            <div className="space-y-4">
-                                {hasLabResults && (
+                            <div className="space-y-3">
+                                {hasLabResults ? (
                                     <button 
                                         onClick={() => onTabSwitch('lab')}
-                                        className="w-full bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 py-5 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all flex items-center justify-center gap-3"
+                                        className="w-full bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 py-4 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2"
                                     >
-                                        <FlaskConical size={18} /> Review Lab Results
+                                        <FlaskConical size={16} /> Review Lab Results
                                     </button>
+                                ) : (
+                                    <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 text-center">
+                                        <p className="text-xs font-medium text-slate-400">No active lab results ready for inspection</p>
+                                    </div>
                                 )}
-                                <button 
-                                    onClick={() => onTabSwitch('prescriptions')}
-                                    className="w-full bg-white text-slate-900 py-5 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-blue-400 hover:text-white transition-all shadow-xl flex items-center justify-center gap-3"
-                                >
-                                    <Pill size={18} /> Issue Prescription
-                                </button>
                             </div>
                         </div>
                     </aside>
                 </div>
             ) : (
-                <div className="bg-white border border-dashed border-slate-200 rounded-[3rem] p-32 text-center shadow-sm">
-                    <Activity size={64} className="mx-auto text-slate-200 mb-6 animate-pulse" />
-                    <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] mt-4 italic">Select a patient from the queue hub above to load clinical data.</p>
+                <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2.5rem] p-24 text-center shadow-sm">
+                    <Activity size={48} className="mx-auto text-slate-300 mb-4 animate-pulse" />
+                    <p className="text-slate-500 font-bold tracking-wide text-xs">Select a patient from the active workspace dropdown above to load telemetry metadata records.</p>
                 </div>
             )}
         </div>
@@ -308,14 +350,14 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
 };
 
 const VitalCard = ({ icon, label, value, unit }) => (
-    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 group hover:border-blue-500 transition-all duration-300 shadow-sm">
-        <div className="flex items-center gap-2 mb-2 text-slate-400 group-hover:text-blue-600 transition-colors">
+    <div className="bg-slate-50 p-4.5 rounded-xl border border-slate-200/60 group hover:border-blue-500 hover:bg-white transition-all duration-200 shadow-sm">
+        <div className="flex items-center gap-1.5 mb-2 text-slate-400 group-hover:text-blue-600 transition-colors">
             {icon}
-            <span className="text-[8px] font-black uppercase tracking-widest">{label}</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider">{label}</span>
         </div>
         <div className="flex items-baseline gap-1">
-            <span className="text-xl font-black text-slate-900 group-hover:text-blue-600 transition-colors">{value}</span>
-            <span className="text-[9px] font-bold text-slate-400 uppercase">{unit}</span>
+            <span className="text-lg font-black text-slate-900 group-hover:text-blue-600 tracking-tight transition-colors">{value}</span>
+            <span className="text-[10px] font-semibold text-slate-400 lowercase">{unit}</span>
         </div>
     </div>
 );

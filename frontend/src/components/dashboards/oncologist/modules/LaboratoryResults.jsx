@@ -1,347 +1,393 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import API from '@/api/api';
+import React, { useState, useEffect } from 'react';
 import { 
-    Beaker, AlertCircle, FileSpreadsheet, MessageSquare, Loader2, Save, 
-    CheckCircle2, ChevronRight, ChevronDown, Calendar, Send, Plus
+  Search, 
+  User, 
+  FlaskConical, 
+  Scale, 
+  Activity, 
+  FileText, 
+  Clock, 
+  RefreshCw, 
+  ChevronRight,
+  AlertCircle
 } from 'lucide-react';
 
-const AVAILABLE_INVESTIGATIONS = [
-    { id: 'cbc', name: 'Full Blood Count (CBC)' },
-    { id: 'ue', name: 'Urea, Electrolytes & Creatinine (U&E)' },
-    { id: 'lft', name: 'Liver Function Test (LFT)' },
-    { id: 'psa', name: 'Prostate Specific Antigen (PSA)' },
-    { id: 'urinalysis', name: 'Urinalysis (Routine)' },
-    { id: 'blood_group', name: 'Blood Group & Cross Match' },
-    { id: 'malaria', name: 'Blood Slide (Malaria Parasite)' }
-];
-
 const LaboratoryResults = () => {
-    const [queue, setQueue] = useState([]);
-    const [selectedPatient, setSelectedPatient] = useState(null);
-    const [results, setResults] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [fetchingQueue, setFetchingQueue] = useState(true);
-    const [doctorNotes, setDoctorNote] = useState("");
-    const [isSaving, setIsSaving] = useState(false);
+  // Core Component View States
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Core Data Stores matching your DRF architecture patterns
+  const [labOrdersList, setLabOrdersList] = useState([]);
+  const [selectedPatientData, setSelectedPatientData] = useState(null);
+  const [patientVitals, setPatientVitals] = useState(null);
+  
+  // Filtering and Searching Query State
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const API_BASE = 'http://127.0.0.1:8000/api';
+
+  // Secure Header Resolution Token Lookup Strategy
+  const getHeaders = () => {
+    const token = localStorage.getItem('token') || localStorage.getItem('access_token');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  };
+
+  // Pull records from your verified successful "/api/lab-orders/" route
+  const fetchLabOrdersData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/lab-orders/`, { 
+        method: 'GET', 
+        headers: getHeaders() 
+      });
+      
+      if (!res.ok) throw new Error(`Server tracking returned status code: ${res.status}`);
+      
+      const data = await res.json();
+      // Handle either direct array representations or paginated data payloads
+      const ordersArray = Array.isArray(data) ? data : data.results || [];
+      setLabOrdersList(ordersArray);
+
+      // Hot reload the active patient mapping matrices if a refresh occurs while selected
+      if (selectedPatientData?.patient) {
+        const updatedOrders = ordersArray.filter(order => {
+          const pt = order.patient_details || order.patient;
+          const ptId = pt?.id || (typeof order.patient === 'number' ? order.patient : null);
+          return ptId === selectedPatientData.patient.id;
+        });
+        setSelectedPatientData(prev => prev ? { ...prev, orders: updatedOrders } : null);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLabOrdersData();
+  }, []);
+
+  // WORKFLOW STEP 1: Process and group un-duplicated patients who have actual lab orders
+  const getDistinctPatientsFromHistory = () => {
+    const seenPatients = new Set();
+    const uniquePatients = [];
+
+    labOrdersList.forEach(order => {
+      // Unpack nested serializer representation objects safely with fallback logic
+      const pt = order.patient_details || order.patient;
+      const ptId = pt?.id || (typeof order.patient === 'number' ? order.patient : null);
+
+      if (ptId && !seenPatients.has(ptId)) {
+        seenPatients.add(ptId);
+        uniquePatients.push({
+          id: ptId,
+          name: pt?.name || pt?.full_name || order.patient_name || `Patient ID Reference: #${ptId}`,
+          registry_no: pt?.health_record_number || pt?.registry_no || order.health_record_number || order.token_id || `HRN-${ptId}`,
+          age: pt?.age || order.patient_age || order.age || '—',
+          gender: pt?.gender || order.patient_gender || order.gender || '—'
+        });
+      }
+    });
+
+    return uniquePatients;
+  };
+
+  // WORKFLOW STEP 2 & 3: Gather patient metrics and cross-reference order history maps
+  const handleSelectPatient = async (patient) => {
+    setError(null);
+    setPatientVitals(null); // Clear previous vitals to avoid calculations bleeding together
+
+    // Find all lab records linked directly to this selected patient
+    const associatedOrders = labOrdersList.filter(order => {
+      const pt = order.patient_details || order.patient;
+      const ptId = pt?.id || (typeof order.patient === 'number' ? order.patient : null);
+      return ptId === patient.id;
+    });
+
+    setSelectedPatientData({
+      patient: patient,
+      orders: associatedOrders
+    });
+
+    // Query vital-signs endpoint for Height/Weight parameter tracking
+    try {
+      const vitalsRes = await fetch(`${API_BASE}/vital-signs/?patient=${patient.id}`, { 
+        method: 'GET', 
+        headers: getHeaders() 
+      });
+      if (vitalsRes.ok) {
+        const vitalsData = await vitalsRes.json();
+        const latestVitals = Array.isArray(vitalsData) ? vitalsData[0] : vitalsData.results?.[0] || null;
+        setPatientVitals(latestVitals);
+      } else {
+        console.warn(`Vitals lookup failed with status code: ${vitalsRes.status}`);
+      }
+    } catch (err) {
+      console.warn("Unable to sync vital-signs calculation vectors seamlessly:", err);
+    }
+  };
+
+  // WORKFLOW STEP 2 FORMULAS: Robust telemetry extracts for BMI & BSA metrics
+  const calculateBMI = () => {
+    // 1. Direct model tracking payload fallbacks
+    if (patientVitals?.bmi) return Number(patientVitals.bmi).toFixed(1);
+    if (selectedPatientData?.patient?.bmi) return Number(selectedPatientData.patient.bmi).toFixed(1);
+
+    // 2. Dynamic parameter resolution from active weights/heights
+    const currentWeight = patientVitals?.weight || patientVitals?.weight_kg || selectedPatientData?.patient?.weight || null;
+    const currentHeight = patientVitals?.height || patientVitals?.height_cm || selectedPatientData?.patient?.height || null;
+
+    if (!currentWeight || !currentHeight) return '—';
     
-    const [selectedTests, setSelectedTests] = useState([]);
-    const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+    const heightInMeters = currentHeight / 100;
+    const bmi = currentWeight / (heightInMeters * heightInMeters);
+    return isNaN(bmi) || !isFinite(bmi) ? '—' : bmi.toFixed(1);
+  };
 
-    // 1. Fetch active pipeline queue on mount
-    const fetchQueue = useCallback(async () => {
-        setFetchingQueue(true);
-        try {
-            const response = await API.get('/queue', { params: { status: 'WAITING' } });
-            const queueData = response.data.results || response.data || [];
-            setQueue(queueData);
-            
-            if (queueData.length > 0 && !selectedPatient) {
-                setSelectedPatient(queueData[0]);
-            }
-        } catch (err) {
-            console.error("Queue tracking pipeline fetch error", err);
-        } finally {
-            setFetchingQueue(false);
-        }
-    }, [selectedPatient]);
+  const calculateBSA = () => {
+    // 1. Direct payload parameter checks
+    if (patientVitals?.bsa) return `${Number(patientVitals.bsa).toFixed(2)} m²`;
+    if (selectedPatientData?.patient?.bsa) return `${Number(selectedPatientData.patient.bsa).toFixed(2)} m²`;
 
-    // 2. Fetch completed lab results matching active scope choice
-    const fetchLabResults = useCallback(async (patientObj) => {
-        if (!patientObj) return;
-        setLoading(true);
-        try {
-            // Check cross-compatible layout tracking
-            const visitId = patientObj.visit || patientObj.visit_id;
-            const res = await API.get(`/lab-results/`, { params: { visit: visitId } });
-            
-            const rawResults = res.data.results || res.data || [];
-            // Match completed statuses
-            const completedResults = rawResults.filter(r => String(r.status).toUpperCase() === 'COMPLETED');
-            setResults(completedResults);
-        } catch (err) {
-            console.error("Lab results parsing breakdown error", err);
-            setResults([]);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
+    // 2. Dynamic resolution extraction using the Mosteller standard calculation matrix
+    const currentWeight = patientVitals?.weight || patientVitals?.weight_kg || selectedPatientData?.patient?.weight || null;
+    const currentHeight = patientVitals?.height || patientVitals?.height_cm || selectedPatientData?.patient?.height || null;
 
-    useEffect(() => {
-        fetchQueue();
-    }, []);
+    if (!currentWeight || !currentHeight) return '—';
+    
+    const bsa = Math.sqrt((currentWeight * currentHeight) / 3600);
+    return isNaN(bsa) || !isFinite(bsa) ? '—' : `${bsa.toFixed(2)} m²`;
+  };
 
-    useEffect(() => {
-        if (selectedPatient) {
-            fetchLabResults(selectedPatient);
-            setDoctorNote("");
-            setSelectedTests([]); 
-        }
-    }, [selectedPatient, fetchLabResults]);
+  // Search filter computations
+  const distinctPatients = getDistinctPatientsFromHistory();
+  const filteredPatients = distinctPatients.filter(p => {
+    const query = searchQuery.toLowerCase();
+    return p.name.toLowerCase().includes(query) || p.registry_no.toString().toLowerCase().includes(query);
+  });
 
-    const handlePatientChange = (e) => {
-        const patientId = parseInt(e.target.value);
-        const match = queue.find(p => p.id === patientId);
-        if (match) setSelectedPatient(match);
-    };
-
-    const handleToggleTest = (testName) => {
-        setSelectedTests(prev => 
-            prev.includes(testName) ? prev.filter(t => t !== testName) : [...prev, testName]
-        );
-    };
-
-    const handleDispatchLabOrder = async () => {
-        if (selectedTests.length === 0) {
-            alert("Please pick at least one test profile before compiling data downstream.");
-            return;
-        }
-        setIsSubmittingOrder(true);
-        try {
-            const visitId = selectedPatient.visit || selectedPatient.visit_id;
-            const patientId = selectedPatient.patient || selectedPatient.patient_id || selectedPatient.id;
-
-            const promises = selectedTests.map(testName => {
-                return API.post(`/lab-orders/`, {
-                    patient: patientId,
-                    visit: visitId,
-                    test_name: testName,
-                    status: 'PENDING',
-                    doctor_notes: doctorNotes || "Ordered from Diagnostic Assessment Desk Pipeline"
-                });
-            });
-
-            await Promise.all(promises);
-            alert(`🚀 ${selectedTests.length} Laboratory Requisitions dispatched successfully.`);
-            setSelectedTests([]);
-            fetchLabResults(selectedPatient); 
-        } catch (err) {
-            console.error("Dispatch transaction failure", err);
-            alert("Failed to submit laboratory test directives. Confirm structural backend constraints.");
-        } finally {
-            setIsSubmittingOrder(false);
-        }
-    };
-
-    const handleSaveNotes = async () => {
-        if (!doctorNotes || !selectedPatient) return;
-        setIsSaving(true);
-        try {
-            const visitId = selectedPatient.visit || selectedPatient.visit_id;
-            await API.post(`/clinical-notes/`, {
-                patient: selectedPatient.patient || selectedPatient.patient_id || selectedPatient.id,
-                visit: visitId,
-                note_type: 'LAB_REPORT', 
-                content: doctorNotes
-            });
-            alert("✅ Diagnostic interpretation saved to patient history.");
-        } catch (err) {
-            alert("Failed to save clinical notes parameter.");
-        } finally {
-            setIsSaving(false);
-        }
-    };
-
-    const renderParameters = (params) => {
-        if (!params || Object.keys(params).length === 0) return <span className="text-slate-400 italic text-[11px]">No structural param metrics compiled.</span>;
-        
-        return (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 mt-2">
-                {Object.entries(params).map(([key, value]) => (
-                    <div key={key} className="flex justify-between border-b border-slate-100 py-2 items-center">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">{key.replace(/_/g, ' ')}:</span>
-                        <span className="text-xs font-mono font-black text-slate-800 uppercase bg-slate-100 px-2.5 py-0.5 rounded-md">{value}</span>
-                    </div>
-                ))}
-            </div>
-        );
-    };
-
-    const formatDate = (dateString) => {
-        if (!dateString) return "Recent Assessment";
-        const date = new Date(dateString);
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    };
-
-    const criticalResult = results.find(r => r.is_critical);
-
-    return (
-        <div className="space-y-8 animate-in fade-in duration-500 font-['Inter'] pb-20 text-left">
-            <div className="bg-[#020617] border border-white/10 rounded-[2.5rem] p-6 shadow-2xl relative z-30">
-                <div className="flex flex-col md:flex-row items-center gap-6">
-                    <div className="flex items-center gap-4 flex-1 w-full">
-                        <div className="p-4 bg-blue-500/10 rounded-2xl text-blue-400 shadow-inner"><Beaker size={24} /></div>
-                        <div className="flex-1 relative">
-                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 ml-1">Active Medical Scope Switcher</p>
-                            {fetchingQueue ? (
-                                <div className="w-full bg-slate-900 rounded-2xl p-4 text-slate-400 font-bold text-xs flex items-center gap-3"><Loader2 size={14} className="animate-spin text-blue-500" /> Compiling live case trackers...</div>
-                            ) : (
-                                <div className="relative">
-                                    <select 
-                                        className="w-full bg-slate-900 border-none rounded-2xl p-4 font-black text-white text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer appearance-none shadow-xl pr-12"
-                                        onChange={handlePatientChange}
-                                        value={selectedPatient?.id || ''}
-                                    >
-                                        <option value="" disabled>Select patient identity from workflow records...</option>
-                                        {queue.map(p => (
-                                            <option key={p.id} value={p.id}>{p.patient_name || p.name} — #{p.token_id || p.id}</option>
-                                        ))}
-                                    </select>
-                                    <ChevronDown className="absolute right-4 top-4.5 text-slate-500 pointer-events-none" size={18} />
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    <button className="flex items-center gap-2 bg-white/5 text-white border border-white/10 px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-white/10 transition-all shadow-xl h-full mt-auto">
-                        <FileSpreadsheet size={16} className="text-teal-400"/> Longitudinal View
-                    </button>
-                </div>
-            </div>
-
-            {criticalResult && (
-                <div className="bg-rose-50 border-2 border-rose-100 p-6 rounded-[2rem] flex items-center gap-6 animate-pulse">
-                    <div className="bg-rose-500 p-3 rounded-2xl text-white shadow-lg shadow-rose-200">
-                        <AlertCircle size={24} />
-                    </div>
-                    <div>
-                        <h4 className="font-black text-rose-900 uppercase text-sm tracking-tight">Critical Biological Alert</h4>
-                        <p className="text-rose-700 text-xs font-bold uppercase">Abnormal findings flagged in system profile tests. Direct immediate clinical intervention parameters.</p>
-                    </div>
-                </div>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-                <div className="lg:col-span-8 space-y-6">
-                    {loading ? (
-                        <div className="bg-white rounded-[2.5rem] p-32 flex flex-col items-center justify-center border border-slate-100 shadow-sm">
-                            <Loader2 className="animate-spin text-blue-500 mb-4" size={40} />
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Parsing database parameter tables...</p>
-                        </div>
-                    ) : results.length > 0 ? (
-                        <div className="space-y-4">
-                            {results.map((lab) => (
-                                <div key={lab.id} className="bg-white rounded-[2rem] border border-slate-100 p-8 shadow-sm hover:shadow-md transition-all group">
-                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-slate-50 pb-4">
-                                        <div className="flex items-center gap-4">
-                                            <div className="p-3 bg-[#020617] rounded-xl text-teal-400 shadow-md">
-                                                <Beaker size={20}/>
-                                            </div>
-                                            <div>
-                                                <h3 className="font-black text-slate-900 uppercase text-lg tracking-tight leading-none mb-2">{lab.test_name || lab.test_label}</h3>
-                                                <div className="flex items-center gap-1.5 text-slate-400 font-bold text-[10px] uppercase tracking-wider">
-                                                    <Calendar size={12} className="text-blue-500" />
-                                                    <span>{formatDate(lab.created_at || lab.updated_at)}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <span className={`px-5 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border-2 ${
-                                            lab.is_critical ? 'bg-rose-500 text-white border-rose-400 shadow-lg' : 'bg-teal-50 text-teal-600 border-teal-100'
-                                        }`}>
-                                            {lab.is_critical ? 'Critical Outlier' : 'Verified Lab Signature'}
-                                        </span>
-                                    </div>
-
-                                    <div className="bg-slate-50/50 rounded-2xl p-6 border border-slate-100">
-                                        <p className="text-[10px] font-black text-slate-400 uppercase mb-4 flex items-center gap-2">
-                                            <ChevronRight size={12} className="text-blue-500"/> Parameter Analysis Breakdown
-                                        </p>
-                                        {renderParameters(lab.parameters)}
-                                    </div>
-
-                                    {lab.technician_notes && (
-                                        <div className="mt-6 flex items-start gap-3 bg-blue-50/40 p-5 rounded-2xl border border-blue-100">
-                                            <MessageSquare size={14} className="text-blue-500 mt-1 flex-shrink-0" />
-                                            <div>
-                                                <span className="text-[9px] font-black text-blue-500 uppercase tracking-wider block mb-1">Laboratory Narrative Remarks:</span>
-                                                <p className="text-xs font-medium text-slate-700 italic">"{lab.technician_notes}"</p>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="bg-white border border-slate-100 rounded-[3rem] p-10 shadow-xl animate-in fade-in duration-300">
-                            <div className="text-center max-w-md mx-auto mb-10">
-                                <Beaker size={54} className="mx-auto text-slate-200 mb-4" />
-                                <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tighter">No Active Results Registered</h3>
-                                <p className="text-slate-400 text-xs font-medium mt-2">
-                                    No completed diagnostic data was found for this specific encounter. Use the requisition panel below to request a work-up profile.
-                                </p>
-                            </div>
-
-                            <div className="border-t border-slate-100 pt-8">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-4 ml-2">
-                                    Select Tests to Send down to Lab Pipeline:
-                                </label>
-                                
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {AVAILABLE_INVESTIGATIONS.map((test) => {
-                                        const isChecked = selectedTests.includes(test.name);
-                                        return (
-                                            <button
-                                                key={test.id}
-                                                type="button"
-                                                onClick={() => handleToggleTest(test.name)}
-                                                className={`p-4 rounded-2xl border text-left font-black text-xs uppercase tracking-wide transition-all flex items-center justify-between group ${
-                                                    isChecked 
-                                                    ? 'bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-600/10' 
-                                                    : 'bg-slate-50 border-slate-100 text-slate-700 hover:border-slate-300 hover:bg-slate-100/50'
-                                                }`}
-                                            >
-                                                <span>{test.name}</span>
-                                                <div className={`p-1 rounded-md transition-all ${isChecked ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-400 group-hover:text-slate-600'}`}>
-                                                    <Plus size={14} className={`transform transition-transform ${isChecked ? 'rotate-45' : ''}`} />
-                                                </div>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-
-                                <div className="mt-8 flex justify-end">
-                                    <button
-                                        type="button"
-                                        onClick={handleDispatchLabOrder}
-                                        disabled={isSubmittingOrder || selectedTests.length === 0}
-                                        className="bg-blue-600 hover:bg-blue-500 text-white px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-3 transition-all disabled:opacity-40 shadow-xl shadow-blue-600/10 w-full sm:w-auto justify-center"
-                                    >
-                                        {isSubmittingOrder ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-                                        Submit Requisition to Lab
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <div className="lg:col-span-4 sticky top-8">
-                    <div className="bg-[#020617] rounded-[3.5rem] p-8 shadow-2xl border border-white/5">
-                        <div className="flex items-center gap-3 mb-6">
-                            <CheckCircle2 className="text-blue-400" size={20} />
-                            <h4 className="text-xs font-black text-white uppercase tracking-[0.2em]">Doctor's Interpretation</h4>
-                        </div>
-                        
-                        <textarea 
-                            className="w-full bg-slate-900 border border-white/10 rounded-[2rem] p-6 text-slate-200 text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all font-medium resize-none min-h-[250px]"
-                            rows="12"
-                            placeholder={results.length > 0 ? "Interpret these metrics for clinical review/chemotherapy adjustments..." : "Add directives or specific notes to accompany this lab order packet..."}
-                            value={doctorNotes}
-                            onChange={(e) => setDoctorNote(e.target.value)}
-                        />
-                        
-                        <button 
-                            onClick={handleSaveNotes}
-                            disabled={isSaving || !doctorNotes || !selectedPatient}
-                            className="w-full mt-6 bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-blue-500 transition-all flex items-center justify-center gap-3 shadow-xl disabled:opacity-30"
-                        >
-                            {isSaving ? <Loader2 className="animate-spin" size={16}/> : <Save size={16}/>}
-                            Authorize Findings
-                        </button>
-                    </div>
-                </div>
-            </div>
+  return (
+    <div className="p-6 bg-slate-50 min-h-screen text-slate-800 font-sans">
+      
+      {/* Top Controls Banner */}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-xl font-bold text-slate-950 flex items-center gap-2">
+            <FlaskConical className="h-6 w-6 text-indigo-600" />
+            Lab Results Portal
+          </h1>
         </div>
-    );
+        <button 
+          onClick={fetchLabOrdersData}
+          className="flex items-center gap-1.5 bg-white border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 text-xs font-semibold shadow-sm transition-all"
+        >
+          <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin text-indigo-600" : "h-3.5 w-3.5"} /> Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 text-red-500" />
+          <span>Error parsing database payload: {error}</span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+        
+        {/* WORKFLOW STEP 1: DISTINCT PATIENT EXPLORER AND FILTER COLUMN */}
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 xl:col-span-1">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
+            <Clock className="h-4 w-4 text-indigo-500" /> 1. Select Patient (Had Lab Tests)
+          </h2>
+          
+          <div className="relative mb-3">
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by name or HRN..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 pr-3 py-1.5 w-full border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/50"
+            />
+          </div>
+
+          <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+            {loading && filteredPatients.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-400 animate-pulse">Scanning backend lab histories...</div>
+            ) : filteredPatients.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-6 border border-dashed border-slate-200 rounded-lg">No historical lab orders located in system dataset.</p>
+            ) : (
+              filteredPatients.map((pt) => {
+                const isSelected = selectedPatientData?.patient?.id === pt.id;
+                return (
+                  <div
+                    key={pt.id}
+                    onClick={() => handleSelectPatient(pt)}
+                    className={`p-3 rounded-lg border cursor-pointer transition-all flex items-center justify-between ${
+                      isSelected 
+                        ? 'border-indigo-600 bg-indigo-50/40 shadow-sm' 
+                        : 'border-slate-100 hover:border-slate-300 bg-slate-50/50'
+                    }`}
+                  >
+                    <div className="truncate mr-2">
+                      <div className="font-bold text-xs text-slate-900 truncate">{pt.name}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5 font-mono">HRN: {pt.registry_no}</div>
+                    </div>
+                    <ChevronRight className={`h-4 w-4 transition-transform ${isSelected ? 'text-indigo-600 translate-x-0.5' : 'text-slate-300'}`} />
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* COMPONENT CONTENT CORE WORKSPACE VIEW */}
+        <div className="xl:col-span-3 space-y-6">
+          {selectedPatientData ? (
+            <>
+              {/* WORKFLOW STEP 2: PATIENT SUMMARY COMPONENT (NAME, HRN, AGE, GENDER, BMI, BSA) */}
+              <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-1.5">
+                  <User className="h-4 w-4 text-indigo-500" /> 2. Selected Patient Demographics
+                </h2>
+                
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 col-span-2 sm:col-span-3 md:col-span-2">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Patient Full Name</span>
+                    <span className="text-sm font-bold text-slate-900 truncate block mt-0.5 uppercase">{selectedPatientData.patient.name}</span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Health Rec No (HRN)</span>
+                    <span className="text-sm font-mono font-bold text-indigo-700 block mt-0.5">{selectedPatientData.patient.registry_no}</span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Age</span>
+                    <span className="text-sm font-bold text-slate-900 block mt-0.5">
+                      {selectedPatientData.patient.age !== '—' && selectedPatientData.patient.age !== 'N/A' ? `${selectedPatientData.patient.age} Yrs` : '—'}
+                    </span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Gender</span>
+                    <span className="text-sm font-bold text-slate-900 block mt-0.5 uppercase">
+                      {selectedPatientData.patient.gender === 'M' || selectedPatientData.patient.gender === 'MALE' ? 'Male' : selectedPatientData.patient.gender === 'F' || selectedPatientData.patient.gender === 'FEMALE' ? 'Female' : selectedPatientData.patient.gender}
+                    </span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Calculated BMI</span>
+                    <span className="text-sm font-bold text-slate-900 flex items-center gap-1 mt-0.5">
+                      <Scale className="h-3.5 w-3.5 text-slate-400" /> {calculateBMI()}
+                    </span>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Surface Area (BSA)</span>
+                    <span className="text-sm font-bold text-slate-900 flex items-center gap-1 mt-0.5">
+                      <Activity className="h-3.5 w-3.5 text-slate-400" /> {calculateBSA()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* WORKFLOW STEPS 3 & 4: LAB MATRIX */}
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-4 bg-slate-50/50 border-b border-slate-100">
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <FileText className="h-4 w-4 text-indigo-500" /> 3 & 4. Associated Diagnostic Test Results Sheet
+                  </h2>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-left text-xs">
+                    <thead className="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
+                      <tr>
+                        <th className="p-3 pl-5">Test / Parameter Name</th>
+                        <th className="p-3">Observed Result</th>
+                        <th className="p-3 text-red-700 bg-red-50/20">Critical High Range</th>
+                        <th className="p-3 text-blue-700 bg-blue-50/20">Critical Low Range</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {selectedPatientData.orders.length === 0 ? (
+                        <tr>
+                          <td colSpan="4" className="p-6 text-center text-slate-400 italic bg-slate-50/20">
+                            No active laboratory assessments found logged for this client profile.
+                          </td>
+                        </tr>
+                      ) : (
+                        selectedPatientData.orders.map((order) => {
+                          // Extract lab result sets across variations of nested DRF array properties
+                          const investigationParameters = order.investigation_parameters || order.results_details || order.requested_tests || order.parameters || [];
+
+                          // Normalized parameter mapping loop strategy
+                          const processedParameters = investigationParameters.length > 0 ? investigationParameters : [{
+                            parameter_name: order.test_name || order.investigation_name || 'Laboratory Assessment Panel',
+                            observed_value: order.result_summary || order.result || order.observed_value || 'Pending Verification',
+                            critical_high: order.critical_high || order.high_range || '—',
+                            critical_low: order.critical_low || order.low_range || '—'
+                          }];
+
+                          return processedParameters.map((param, index) => {
+                            const isStringOnly = typeof param === 'string';
+                            
+                            const testName = isStringOnly ? param : (param.parameter_name || param.name || param.investigation_name || 'Laboratory Parameter');
+                            const displayResult = isStringOnly ? (order.result || 'Pending Verification') : (param.observed_value || param.measured_value || param.result || 'Pending Verification');
+                            const criticalHigh = isStringOnly ? (order.critical_high || '—') : (param.critical_high || param.high_range || '—');
+                            const criticalLow = isStringOnly ? (order.critical_low || '—') : (param.critical_low || param.low_range || '—');
+
+                            const isPending = displayResult === 'Pending Verification' || displayResult === 'PENDING' || displayResult === 'Processing';
+
+                            return (
+                              <tr key={`${order.id}-${index}`} className="hover:bg-slate-50/40 transition-colors">
+                                <td className="p-3 pl-5 font-semibold text-slate-700">
+                                  <div className="uppercase tracking-tight">{testName}</div>
+                                  <div className="text-[10px] text-slate-400 font-normal mt-0.5">Order Ref Code: #{order.id}</div>
+                                </td>
+                                
+                                <td className="p-3">
+                                  <span className={`px-2 py-0.5 rounded font-mono text-xs font-bold border ${
+                                    isPending
+                                      ? 'bg-amber-50 text-amber-700 border-amber-100'
+                                      : 'bg-emerald-50 text-emerald-800 border-emerald-100'
+                                  }`}>
+                                    {displayResult}
+                                  </span>
+                                </td>
+                                
+                                <td className="p-3 font-mono font-semibold text-red-600 bg-red-50/5">
+                                  {criticalHigh}
+                                </td>
+                                
+                                <td className="p-3 font-mono font-semibold text-blue-600 bg-blue-50/5">
+                                  {criticalLow}
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col justify-center items-center h-[350px] bg-white rounded-xl border border-dashed border-slate-200 text-center p-6 text-slate-400">
+              <FlaskConical className="h-8 w-8 text-slate-300 stroke-[1.5] mb-2 animate-pulse" />
+              <p className="text-xs font-semibold">No Patient Worksheet Loaded</p>
+              <p className="text-[11px] max-w-xs mt-0.5">Please choose a patient layout from the diagnostic history list on the left side to compile active metrics structures.</p>
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
 };
 
 export default LaboratoryResults;

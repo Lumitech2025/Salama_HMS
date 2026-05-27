@@ -16,6 +16,9 @@ const AppointmentCalendar = ({ onStatusUpdated }) => {
   // Search & Contact States
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
+  
+  // Track reminder button loading states per appointment ID
+  const [sendingReminderId, setSendingReminderId] = useState(null);
 
   const [formData, setFormData] = useState({ 
     patientName: '', 
@@ -42,7 +45,7 @@ const AppointmentCalendar = ({ onStatusUpdated }) => {
           setIsSearching(false);
         }
       } else {
-        setSearchResults([]);
+        searchResults([]);
       }
     }, 500);
     return () => clearTimeout(delayDebounceFn);
@@ -95,7 +98,6 @@ const AppointmentCalendar = ({ onStatusUpdated }) => {
         status: 'PENDING',
         patient: visitType === 'SUBSEQUENT' ? formData.patientId : null,
         manual_patient_name: visitType === 'NEW' ? formData.patientName : "",
-        // These fields will be stored for the notification engine
         phone_number: formData.phone,
         email_address: formData.email
     };
@@ -115,8 +117,21 @@ const AppointmentCalendar = ({ onStatusUpdated }) => {
     } finally { setIsSubmitting(false); }
   };
 
-  const handleSendReminder = (appt) => {
-    alert(`Reminder queueing for ${appt.patient_name || appt.manual_patient_name}. Functional integration with HTTP SMS & Email coming soon.`);
+  // 2. Functional Notification Dispatch Logic
+  const handleSendReminder = async (appt) => {
+    const patientName = appt.patient_name || appt.manual_patient_name;
+    
+    setSendingReminderId(appt.id);
+    try {
+      // POST command hitting the specific item's reminder action route
+      await API.post(`/appointments/${appt.id}/send_reminder/`);
+      alert(`Success: Automated SMS and Email queue reminders dispatched for ${patientName}.`);
+    } catch (err) {
+      console.error("Reminder dispatch failed:", err);
+      alert(`Failed to send communication metrics to server. Verify server notification configuration settings.`);
+    } finally {
+      setSendingReminderId(null);
+    }
   };
 
   return (
@@ -192,8 +207,7 @@ const AppointmentCalendar = ({ onStatusUpdated }) => {
                     <select name="practitioner" value={formData.practitioner} onChange={handleInputChange}
                         className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-6 text-sm font-semibold text-slate-900 outline-none">
                         <option value="">Select Specialist</option>
-                        <option value="3">Edwin Mwiti (Oncologist)</option>
-                        <option value="2">Victoria Kagwiria (Lab Technician)</option>
+                        <option value="2">Edwin Mwiti (Oncologist)</option>
                     </select>
                 </div>
             </div>
@@ -262,11 +276,17 @@ const AppointmentCalendar = ({ onStatusUpdated }) => {
                                   <td className="px-10 py-6 text-xs text-slate-500 font-semibold italic">{appt.reason || "Consultation"}</td>
                                   <td className="px-10 py-6 text-right">
                                       <div className="flex items-center justify-end gap-3">
-                                          {/* Reminder Trigger Button */}
-                                          <button onClick={() => handleSendReminder(appt)} 
-                                            className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm border border-indigo-100"
+                                          {/* Functional Reminder Trigger Button */}
+                                          <button 
+                                            disabled={sendingReminderId === appt.id}
+                                            onClick={() => handleSendReminder(appt)} 
+                                            className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm border border-indigo-100 disabled:opacity-50"
                                             title="Send Message Reminder">
-                                              <Send size={14} />
+                                              {sendingReminderId === appt.id ? (
+                                                <Loader2 size={14} className="animate-spin" />
+                                              ) : (
+                                                <Send size={14} />
+                                              )}
                                           </button>
 
                                           <select value={appt.status} onChange={(e) => handleStatusChange(appt.id, e.target.value)}

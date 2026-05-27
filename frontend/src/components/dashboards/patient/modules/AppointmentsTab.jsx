@@ -1,18 +1,24 @@
 import React, { useState } from 'react';
 import API from '@/api/api';
-import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, Plus, Loader2, CheckCircle2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight, Plus, Loader2, CheckCircle2, User } from 'lucide-react';
 
-const AppointmentsTab = ({ appointments, patientData, refreshTrigger }) => {
+const AppointmentsTab = ({ appointments = [], patientData, refreshTrigger }) => {
   const [submitting, setSubmitting] = useState(false);
   const [currentDate, setCurrentDate] = useState(new Date());
   
+  // Setup default state structure mapping seamlessly to our DRF Serializer
   const [formData, setFormData] = useState({
-    date: new Date().toISOString().split('T')[0],
-    time: '08:30:00',
-    appointment_type: 'CONSULTATION',
+    appointment_date: new Date().toISOString().split('T')[0],
+    appointment_time: '08:30:00',
+    visit_type: patientData?.id ? 'SUBSEQUENT' : 'NEW',
     status: 'PENDING',
-    notes: 'Self-booked oncology follow-up check.',
-    patient: patientData?.id || 1
+    reason: 'Self-booked oncology follow-up check.',
+    patient: patientData?.id || null,
+    
+    // Fallback registration blocks for new entrants
+    manual_patient_name: '',
+    phone_number: '',
+    email_address: ''
   });
 
   // --- CALENDAR LOGIC ENGINE ---
@@ -37,26 +43,40 @@ const AppointmentsTab = ({ appointments, patientData, refreshTrigger }) => {
 
   const handleDateSelect = (day) => {
     const selected = new Date(currentDate.getFullYear(), currentDate.getMonth(), day + 1);
-    setFormData({ ...formData, date: selected.toISOString().split('T')[0] });
+    setFormData({ ...formData, appointment_date: selected.toISOString().split('T')[0] });
   };
 
   const handleBookingSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
+    
+    // Clean data payload structure to pass serialization vetting rules safely
+    const payload = { ...formData };
+    if (payload.patient) {
+      delete payload.manual_patient_name;
+      delete payload.phone_number;
+      delete payload.email_address;
+    }
+
     try {
-      await API.post('/appointments/', formData);
-      alert("Appointment successfully requested! Pending triage desk validation.");
+      await API.post('/appointments/', payload);
+      alert("Appointment successfully requested! Confirmation notification is processing.");
+      
       setFormData({
-        date: new Date().toISOString().split('T')[0],
-        time: '08:30:00',
-        appointment_type: 'CONSULTATION',
+        appointment_date: new Date().toISOString().split('T')[0],
+        appointment_time: '08:30:00',
+        visit_type: patientData?.id ? 'SUBSEQUENT' : 'NEW',
         status: 'PENDING',
-        notes: 'Self-booked oncology follow-up check.',
-        patient: patientData?.id || 1
+        reason: 'Self-booked oncology follow-up check.',
+        patient: patientData?.id || null,
+        manual_patient_name: '',
+        phone_number: '',
+        email_address: ''
       });
-      refreshTrigger();
+      if (refreshTrigger) refreshTrigger();
     } catch (err) {
-      alert("Error submitting request payload.");
+      console.error(err);
+      alert("Error submitting request payload. Verify required fields.");
     } finally {
       setSubmitting(false);
     }
@@ -90,8 +110,8 @@ const AppointmentsTab = ({ appointments, patientData, refreshTrigger }) => {
             {blanksArray.map(b => <div key={`b-${b}`} className="p-3"></div>)}
             {daysArray.map(day => {
               const checkString = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              const isSelected = formData.date === checkString;
-              const hasClinic = appointments.some(a => a.date === checkString);
+              const isSelected = formData.appointment_date === checkString;
+              const hasClinic = appointments.some(a => a.appointment_date === checkString);
 
               return (
                 <button
@@ -121,33 +141,83 @@ const AppointmentsTab = ({ appointments, patientData, refreshTrigger }) => {
           </h4>
           
           <form onSubmit={handleBookingSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-medium text-slate-500">
+            
+            {/* DYNAMIC NEW ENTRANT REGISTRATION BLOCK */}
+            {!patientData?.id && (
+              <div className="sm:col-span-2 p-4 border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-3 mb-2">
+                <p className="text-[11px] font-bold text-teal-600 uppercase tracking-wider flex items-center gap-1">
+                  <User size={12} /> Unregistered Profile (New Entrant Info)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Full Name</label>
+                    <input
+                      type="text" required={!patientData?.id}
+                      placeholder="John Doe"
+                      value={formData.manual_patient_name}
+                      onChange={e => setFormData({ ...formData, manual_patient_name: e.target.value })}
+                      className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Phone Number</label>
+                    <input
+                      type="text" required={!patientData?.id}
+                      placeholder="e.g. +254700000000"
+                      value={formData.phone_number}
+                      onChange={e => setFormData({ ...formData, phone_number: e.target.value })}
+                      className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Email Address</label>
+                    <input
+                      type="email" required={!patientData?.id}
+                      placeholder="name@example.com"
+                      value={formData.email_address}
+                      onChange={e => setFormData({ ...formData, email_address: e.target.value })}
+                      className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none focus:border-teal-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Specialty Clinic Unit</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Visit Framework</label>
               <select
-                name="appointment_type" value={formData.appointment_type}
-                onChange={e => setFormData({ ...formData, appointment_type: e.target.value })}
+                name="visit_type" value={formData.visit_type}
+                onChange={e => setFormData({ ...formData, visit_type: e.target.value })}
                 className="w-full bg-slate-50/70 border border-slate-100 rounded-xl p-3 text-xs text-slate-800 focus:outline-none"
               >
-                <option value="CONSULTATION">Oncology Consultation Review</option>
-                <option value="CHEMOTHERAPY">Chemotherapy Delivery Phase</option>
-                <option value="LABORATORY">Biopsy Lab Collection</option>
-                <option value="RADIOLOGY">Radiology / CT Scan</option>
+                <option value="NEW">New Clinical Visit Intake</option>
+                <option value="SUBSEQUENT">Subsequent Routine Check</option>
               </select>
             </div>
 
             <div className="space-y-1">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Target Time Block</label>
               <input
-                type="time" required name="time" value={formData.time}
-                onChange={e => setFormData({ ...formData, time: e.target.value })}
+                type="time" required name="appointment_time" value={formData.appointment_time}
+                onChange={e => setFormData({ ...formData, appointment_time: e.target.value })}
                 className="w-full bg-slate-50/70 border border-slate-100 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none"
+              />
+            </div>
+
+            <div className="sm:col-span-2 space-y-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Reason for Visit Consultation</label>
+              <textarea
+                rows={2}
+                value={formData.reason}
+                onChange={e => setFormData({ ...formData, reason: e.target.value })}
+                className="w-full bg-slate-50/70 border border-slate-100 rounded-xl p-3 text-xs text-slate-800 focus:outline-none"
               />
             </div>
 
             <div className="sm:col-span-2 space-y-1">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Selected Execution Date</label>
               <input
-                type="date" readOnly value={formData.date}
+                type="date" readOnly value={formData.appointment_date}
                 className="w-full bg-slate-100 border border-slate-100 rounded-xl p-3 text-xs font-mono font-bold text-slate-600 focus:outline-none cursor-not-allowed"
               />
             </div>
@@ -173,8 +243,9 @@ const AppointmentsTab = ({ appointments, patientData, refreshTrigger }) => {
             {appointments.length > 0 ? appointments.map((app, idx) => (
               <div key={idx} className="p-4 bg-slate-50/50 border border-slate-100 rounded-2xl flex items-center justify-between text-xs font-medium text-slate-600 animate-in fade-in duration-150">
                 <div className="space-y-1">
-                  <p className="font-bold text-slate-800 text-xs uppercase tracking-tight">{app.appointment_type?.replace('_', ' ') || 'Consultation Check'}</p>
-                  <p className="text-[10px] font-mono text-slate-400">{app.date} • {app.time?.slice(0, 5)}</p>
+                  <p className="font-bold text-slate-800 text-xs uppercase tracking-tight">{app.visit_type?.replace('_', ' ') || 'Consultation Check'} Visit</p>
+                  <p className="text-[10px] font-mono text-slate-400">{app.appointment_date} • {app.appointment_time?.slice(0, 5)}</p>
+                  <p className="text-[11px] text-slate-500 italic line-clamp-1">"{app.reason}"</p>
                 </div>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase border ${
                   app.status === 'COMPLETED'

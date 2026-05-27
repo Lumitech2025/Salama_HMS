@@ -14,6 +14,11 @@ from pathlib import Path
 
 from datetime import timedelta
 
+import os
+from dotenv import load_dotenv  
+
+
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,7 +33,7 @@ SECRET_KEY = 'django-insecure-t#*d$%t-la_njd8y2uc1^x*sj+^=c*(z-m!kz8*4!35s@sb0zd
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['192.168.100.108', 'localhost', '127.0.0.1']
 
 
 # Application definition
@@ -130,9 +135,21 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173", 
-    "http://127.0.0.1:5173",
+
 ]
+
+CORS_ALLOW_ALL_ORIGINS = True
+
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "authorization", 
+    "content-type",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+]
+
+
 
 
 REST_FRAMEWORK = {
@@ -146,15 +163,41 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    # Extend access token life to 24 hours for development
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=24),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
+    'ACCESS_TOKEN_LIFETIME': timedelta(days=1),     
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),    
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': False,
     'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY,
-    'AUTH_HEADER_TYPES': ('Bearer',),
+    'SIGNING_KEY': SECRET_KEY,                      
+    'AUTH_HEADER_TYPES': ('Bearer',),                
 }
+
+
+
+# ==========================================
+# SALAMA HMS NOTIFICATION GATEWAY CONFIG
+# ==========================================
+
+env_path = BASE_DIR / '.env'
+load_dotenv(dotenv_path=env_path)
+
+# --- Core Email Architecture Config (SMTP Configuration) ---
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+
+# Pulling values cleanly from your .env file
+EMAIL_HOST_USER = 'collinsmwiti98@gmail.com'
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD')
+
+# The formal outbound header mask for patient communications
+DEFAULT_FROM_EMAIL = f"Salama Cancer Care <{EMAIL_HOST_USER}>"
+
+# --- SMS Infrastructure Configuration (HttpSMS Gateway) ---
+# Pulled safely from your local .env to keep your public GitHub repo secure
+HTTPSMS_API_KEY = os.environ.get('HTTPSMS_API_KEY')
+
 
 JAZZMIN_SETTINGS = {
     "site_title": "Salama HMS",

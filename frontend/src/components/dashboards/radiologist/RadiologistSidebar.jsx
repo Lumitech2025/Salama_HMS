@@ -11,7 +11,7 @@ const RadiologistSidebar = ({ activeTab, setActiveTab }) => {
     const menuItems = [
         { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={20} /> },
         { id: 'imaging-queue', label: 'Imaging Queue', icon: <Scan size={20} /> }, 
-        { id: 'reports', label: 'Diagnostic Reports', icon: <FileText size={20} /> }, 
+        { id: 'reports', label: 'Diagnostics', icon: <FileText size={20} /> }, 
     ];
 
     const handleLogout = () => {

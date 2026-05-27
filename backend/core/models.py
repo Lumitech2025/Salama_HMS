@@ -2,6 +2,11 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from datetime import date
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.db import models
+from django.contrib.postgres.fields import ArrayField 
+from datetime import datetime
 
 import math
 import random
@@ -59,6 +64,7 @@ class Patient(models.Model):
 
 class RegistrationRecord(models.Model):
     GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
+    PAYMENT_MODE_CHOICES = [('CASH', 'Cash'), ('INSURANCE', 'Insurance')]
     
     name = models.CharField(max_length=255)
     phone = models.CharField(max_length=20)
@@ -66,30 +72,34 @@ class RegistrationRecord(models.Model):
     
     age = models.PositiveIntegerField()
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
-    insurance = models.CharField(max_length=100, default="CASH")
+    
+    payment_mode = models.CharField(max_length=15, choices=PAYMENT_MODE_CHOICES, default="CASH")
+    
+    insurance_company = models.ForeignKey(
+        'InsuranceCompany', 
+        on_delete=models.SET_NULL, 
+        blank=True, 
+        null=True, 
+        related_name='registrations'
+    )
     insurance_number = models.CharField(max_length=100, blank=True, null=True)
+    
     is_urgent = models.BooleanField(default=False)
     is_returning = models.BooleanField(default=False)
 
     patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='registrations')
     
-    queue_id = models.CharField(max_length=10, unique=True, editable=False)
+    queue_id = models.CharField(max_length=15, unique=True, editable=False)
     health_record_number = models.CharField(max_length=30, unique=True, editable=False)
     
     registered_at = models.DateTimeField(auto_now_add=True)
 
-    # PASTE THE UPDATED SAVE METHOD HERE:
     def save(self, *args, **kwargs):
-        # 1. Handle Queue ID Generation
-        if not self.queue_id:
-            last_record = RegistrationRecord.objects.all().order_by('id').last()
-            if not last_record:
-                self.queue_id = "Q001"
-            else:
-                last_id = int(last_record.queue_id[1:])
-                self.queue_id = f"Q{str(last_id + 1).zfill(3)}"
-                
-        # 2. Fallback check to auto-fill core model attributes if empty before finalizing save
+        # Cache current timestamp via timezone utility to guarantee uniformity across fields
+        now_dt = timezone.now()
+        short_year = str(now_dt.year)[-2:] # E.g., "26"
+
+        # 1. Fallback sync calculations from patient master metadata
         if self.patient:
             if not self.name:
                 self.name = self.patient.name
@@ -98,29 +108,35 @@ class RegistrationRecord(models.Model):
             if not self.gender:
                 self.gender = self.patient.gender
 
-        # 3. Handle Health Record Number Generation
+        # 2. Robust Queue ID Generation (E.g., Q26-001)
+        if not self.queue_id:
+            last_record = RegistrationRecord.objects.all().order_by('id').last()
+            if not last_record or not last_record.queue_id:
+                self.queue_id = f"Q{short_year}-001"
+            else:
+                try:
+                    # Safely split format to locate chronological integer tail
+                    last_sequence_part = last_record.queue_id.split('-')[-1]
+                    next_id = int(last_sequence_part) + 1
+                except (ValueError, IndexError):
+                    next_id = RegistrationRecord.objects.count() + 1
+                
+                self.queue_id = f"Q{short_year}-{str(next_id).zfill(3)}"
+                
+        # 3. 🚀 FIXED: Robust Health Record Number Generation safely bypassing native import bugs
         if not self.health_record_number:
-            current_year = date.today().year
-            name_source = self.name if self.name else "SAL"
-            first_name_part = name_source.split(' ')[0]
-            prefix = first_name_part[:3].upper().ljust(3, 'X')
-            
-            last_matching = RegistrationRecord.objects.filter(
-                health_record_number__startswith=f"{prefix}_",
-                health_record_number__endswith=f"_{current_year}"
-            ).order_by('id').last()
-            
-            if not last_matching:
+            last_hrn_record = RegistrationRecord.objects.all().order_by('id').last()
+            if not last_hrn_record or not last_hrn_record.health_record_number:
                 next_sequence = "001"
             else:
                 try:
-                    parts = last_matching.health_record_number.split('_')
-                    last_num = int(parts[1])
-                    next_sequence = str(last_num + 1).zfill(3)
+                    # Parse string pattern matching 'SCC-[Sequence]/[Year]'
+                    last_sequence_part = last_hrn_record.health_record_number.split('-')[1].split('/')[0]
+                    next_sequence = str(int(last_sequence_part) + 1).zfill(3)
                 except (ValueError, IndexError):
-                    next_sequence = "001"
+                    next_sequence = str(RegistrationRecord.objects.count() + 1).zfill(3)
             
-            self.health_record_number = f"{prefix}_{next_sequence}_{current_year}"
+            self.health_record_number = f"SCC-{next_sequence}/{short_year}"
             
         super().save(*args, **kwargs)
 
@@ -143,7 +159,11 @@ class Appointment(models.Model):
     ]
 
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, null=True, blank=True, related_name='appointments')
+    
+    # New Entrant Preliminary Fallback Fields
     manual_patient_name = models.CharField(max_length=255, blank=True, help_text="For preliminary registration")
+    manual_patient_phone = models.CharField(max_length=20, blank=True, help_text="For preliminary notification updates")
+    manual_patient_email = models.EmailField(blank=True, null=True, help_text="For preliminary notification updates")
     
     practitioner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -333,14 +353,31 @@ class LabInventoryItem(models.Model):
     ]
 
     name = models.CharField(max_length=200)
-    category = models.CharField(max_length=100, default="General")
+    category = models.CharField(max_length=100, choices=CATEGORY_CHOICES, default="General")
     stock = models.IntegerField(default=0)
-    min_stock = models.IntegerField(default=5)  # Min. Threshold
+    min_stock = models.IntegerField(default=5)
     unit = models.CharField(max_length=50, default="Units")
+    
+    # REQUIRED FOR FINANCE: Base cost tracking for auto-calculating totals
+    buying_price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.stock} {self.unit} remaining)"
+    
+class PharmacyStockCatalogItem(models.Model):
+    """
+    Tracks central pharmacy medicine stock elements and purchasing costs 
+    for procurement indents, keeping patient prescriptions decoupled from finance.
+    """
+    drug_name = models.CharField(max_length=255, unique=True)
+    formulation = models.CharField(max_length=100, help_text="e.g., Tablets, Vials, Syrup")
+    current_stock = models.IntegerField(default=0)
+    buying_price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.drug_name} - KES {self.buying_price}"
 
 class StockAdjustment(models.Model):
     item = models.ForeignKey(LabInventoryItem, on_delete=models.CASCADE, related_name='adjustments')
@@ -350,8 +387,6 @@ class StockAdjustment(models.Model):
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-
-    
 
 class Prescription(models.Model):
     STATUS_CHOICES = [('PENDING', 'Pending'), ('DISPENSED', 'Dispensed'), ('CANCELLED', 'Cancelled')]
@@ -423,26 +458,41 @@ class ClinicalNote(models.Model):
     class Meta:
         ordering = ['-created_at']
 
-from django.db import models
-from django.contrib.auth.models import User
 
-# Add or modify this model in your models.py
 class LabOrder(models.Model):
     STATUS_CHOICES = [
-        ('PENDING', 'Pending'),
-        ('COMPLETED', 'Completed'),
+        ('PENDING', 'Pending Processing'),
+        ('COMPLETED', 'Results Ready'),
     ]
 
+    # Explicit canonical choices for the 7 standard available profiles
+    # These match your exact frontend naming convention
+    TEST_CHOICES = [
+        ('CBC', 'Full Blood Count (CBC)'),
+        ('UE', 'Urea, Electrolytes & Creatinine (U&E)'),
+        ('LFT', 'Liver Function Test (LFT)'),
+        ('PSA', 'Prostate Specific Antigen (PSA)'),
+        ('URINE', 'Urinalysis (Routine)'),
+        ('BG_CROSS', 'Blood Group & Cross Match'),
+        ('BS_MP', 'Blood Slide (Malaria Parasite)'),
+    ]
+
+    # Relational Database Connections
     patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='lab_orders')
-    
-    # FIX: Pointing to 'RegistrationRecord' instead of 'Visit'
     visit = models.ForeignKey('RegistrationRecord', on_delete=models.CASCADE, related_name='requested_labs', null=True, blank=True)
     
-    # This will hold what the doctor selected, e.g., ["CBC", "UE", "LFT"]
-    requested_tests = models.JSONField(default=list, help_text="List of test codes requested by the doctor")
-    
+    # Simple explicit mapping using standard text choices inside an array structure 
+    # Or simple boolean markers for each of the 7 tests. Boolean flags are easiest for calculations!
+    has_cbc = models.BooleanField(default=False, verbose_name="Full Blood Count (CBC)")
+    has_ue = models.BooleanField(default=False, verbose_name="Urea, Electrolytes & Creatinine (U&E)")
+    has_lft = models.BooleanField(default=False, verbose_name="Liver Function Test (LFT)")
+    has_psa = models.BooleanField(default=False, verbose_name="Prostate Specific Antigen (PSA)")
+    has_urine = models.BooleanField(default=False, verbose_name="Urinalysis (Routine)")
+    has_bg_cross = models.BooleanField(default=False, verbose_name="Blood Group & Cross Match")
+    has_bs_mp = models.BooleanField(default=False, verbose_name="Blood Slide (Malaria Parasite)")
+
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
-    doctor_notes = models.TextField(blank=True, null=True, help_text="Notes from the ordering clinician")
+    doctor_notes = models.TextField(blank=True, null=True, help_text="Notes/Clinical indications from the ordering clinician")
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -450,13 +500,47 @@ class LabOrder(models.Model):
     class Meta:
         ordering = ['-created_at']
 
+    # --- Relational Helpers For the 4 Users ---
+
+    @property
+    def patient_name(self):
+        """Used by Doctor, Tech, Patient, Billing"""
+        return self.patient.name
+
+    @property
+    def health_record_number(self):
+        """Used by Doctor, Tech, Patient, Billing"""
+        return getattr(self.patient, 'health_record_number', 'N/A')
+
+    @property
+    def queue_id(self):
+        """
+        Dynamically extracts token tracking identifier from active session sequence
+        Used by Lab Tech to sort work queues, and Billing Officer to find active session invoices.
+        """
+        if self.visit:
+            return getattr(self.visit, 'token_id', f"Q{self.visit.id}")
+        return "N/A"
+
+    @property
+    def selected_test_list(self):
+        """Returns string representations matching frontend tracking matrices"""
+        tests = []
+        if self.has_cbc: tests.append("Full Blood Count (CBC)")
+        if self.has_ue: tests.append("Urea, Electrolytes & Creatinine (U&E)")
+        if self.has_lft: tests.append("Liver Function Test (LFT)")
+        if self.has_psa: tests.append("Prostate Specific Antigen (PSA)")
+        if self.has_urine: tests.append("Urinalysis (Routine)")
+        if self.has_bg_cross: tests.append("Blood Group & Cross Match")
+        if self.has_bs_mp: tests.append("Blood Slide (Malaria Parasite)")
+        return tests
+
     def __str__(self):
-        return f"Order #{self.id} for {self.patient.name} - {self.status}"
+        return f"Order #{self.id} | Token: {self.queue_id} | {self.patient_name} - {self.status}"
 
 
-# 1. Create a dedicated table for your parent groups
 class LabPanel(models.Model):
-    name = models.CharField(max_length=255, unique=True, verbose_name="Panel Name") # e.g., "Full Blood Count (CBC)"
+    name = models.CharField(max_length=255, unique=True, verbose_name="Panel Name") # e.g., "CBC", "UE", "LFT"
 
     def __str__(self):
         return self.name
@@ -466,16 +550,14 @@ class LabPanel(models.Model):
         verbose_name_plural = "Lab Panel Groups"
 
 
-# 2. Update your registry model to reference it
 class LabTestRegistry(models.Model):
-    # Pass 'LabPanel' as the first positional argument
     parent_panel = models.ForeignKey(
         'LabPanel', 
-        on_delete=models.PROTECT, # Stops someone from deleting a panel if tests are attached
+        on_delete=models.PROTECT, 
         related_name='test_parameters',
         verbose_name="Main Panel Target"
     )
-    name = models.CharField(max_length=255, verbose_name="Sub Test Parameter Name")
+    name = models.CharField(max_length=255, verbose_name="Sub Test Parameter Name") # e.g., "Hb", "Creatinine"
     unit = models.CharField(max_length=50, verbose_name="Accurate Unit Index")
     lower_range = models.FloatField(default=0.0, blank=True, null=True)
     upper_range = models.FloatField(default=0.0, blank=True, null=True)
@@ -511,6 +593,16 @@ class LabResult(models.Model):
         ('COMPLETED', 'Result Ready'),
     ]
 
+    # LINK BACK TO THE ORDER SYSTEM:
+    lab_order = models.ForeignKey(
+        'LabOrder', 
+        on_delete=models.CASCADE, 
+        related_name='results', 
+        null=True, 
+        blank=True,
+        help_text="The originating clinical instruction record"
+    )
+    
     patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='lab_history')
     visit = models.ForeignKey('RegistrationRecord', on_delete=models.CASCADE, related_name='lab_orders', null=True)
     test_name = models.CharField(max_length=50, choices=TEST_CHOICES)
@@ -559,7 +651,7 @@ class LabResult(models.Model):
     malaria_mps = models.CharField(max_length=20, blank=True, null=True, verbose_name="MPS Status", choices=[('Not Seen', 'Not Seen'), ('Positive', 'Positive (+)')])
     malaria_species = models.CharField(max_length=40, blank=True, null=True, verbose_name="Parasite Species", choices=[('P. falciparum', 'P. falciparum'), ('P. vivax', 'P. vivax'), ('N/A', 'N/A')])
 
-    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, limit_choices_to={'role': 'LAB_TECH'})
+    recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, limit_choices_to={'role': 'LAB_TECH'})
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -567,9 +659,39 @@ class LabResult(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"{self.get_test_name_display()} - {self.patient.name}"
-    
+        return f"{self.get_test_name_display()} - {self.patient.name} ({self.status})"
 
+    def evaluate_ranges(self):
+        """
+        Dynamically analyzes wide-table field entry data against constraints 
+        mapped inside the LabTestRegistry standard library profiles.
+        """
+        alerts = []
+        # Find matching parameters registered under the active parent group code name
+        registry_entries = LabTestRegistry.objects.filter(parent_panel__name=self.test_name)
+        
+        # Field mapping dictionary to map registry configurations to database wide-columns
+        mapping = {
+            'hb': 'cbc_hb', 'wbc': 'cbc_wbc', 'neut': 'cbc_neut', 'plt': 'cbc_plt', 'mcv': 'cbc_mcv',
+            'na+': 'ue_na', 'k+': 'ue_k', 'urea': 'ue_urea', 'creatinine': 'ue_creatinine',
+            'alt': 'lft_alt', 'ast': 'lft_ast', 't.bil': 'lft_tbil', 'd.bil': 'lft_dbil', 'alp': 'lft_alp', 'alb': 'lft_albumin',
+            'total psa': 'psa_total'
+        }
+
+        for entry in registry_entries:
+            lookup_field = mapping.get(entry.name.lower())
+            if lookup_field:
+                val = getattr(self, lookup_field, None)
+                if val is not None:
+                    float_val = float(val)
+                    if entry.upper_range and float_val > entry.upper_range:
+                        alerts.append(f"⚠️ {entry.name} High ({float_val} > {entry.upper_range}). Recommendation: {entry.recommendation_above_maximum}")
+                    elif entry.lower_range and float_val < entry.lower_range:
+                        alerts.append(f"⚠️ {entry.name} Low ({float_val} < {entry.lower_range}). Recommendation: {entry.recommendation_below_minimum}")
+        return alerts
+
+
+# Standalone diagnostic library profile for reference standard legacy usage
 class LabReference(models.Model):
     name = models.CharField(max_length=255, verbose_name="Sub Test Parameter Name")
     category = models.CharField(max_length=255, verbose_name="Main Panel Target")
@@ -596,9 +718,7 @@ class LabReference(models.Model):
 class Requisition(models.Model):
     DEPARTMENT_CHOICES = [
         ('LAB', 'Laboratory'),
-        ('NURSING', 'Nursing'),
         ('PHARMACY', 'Pharmacy'),
-        ('RADIOLOGY', 'Radiology'),
         ('MARKETING', 'Marketing'),
         ('ADMIN', 'General Admin'),
     ]
@@ -611,35 +731,62 @@ class Requisition(models.Model):
     ]
 
     department = models.CharField(max_length=20, choices=DEPARTMENT_CHOICES)
-    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    reason = models.TextField(help_text="Clinical or operational justification for the request")
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='finance_requisitions')
+    reason = models.TextField(help_text="Clinical, operational, or campaign-specific justification")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     total_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    is_viewed_by_finance = models.BooleanField(default=False) # For the notification badge
+    is_viewed_by_finance = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
 
     def __str__(self):
-        return f"REQ-{self.id} ({self.department})"
+        return f"REQ-{self.id} [{self.department}] - {self.status}"
+
+    def update_total_cost(self):
+        """Updates and caches the parent total cost based on child line links or extensions."""
+        if self.department == 'MARKETING' and hasattr(self, 'marketing_meta'):
+            self.total_cost = self.marketing_meta.requested_amount
+        else:
+            self.total_cost = sum(item.line_total for item in self.items.all())
+            
+        Requisition.objects.filter(id=self.id).update(total_cost=self.total_cost)
 
 class RequisitionItem(models.Model):
     requisition = models.ForeignKey(Requisition, related_name='items', on_delete=models.CASCADE)
-    # Linking to inventory to pull the latest buying_price
-    item = models.ForeignKey('LabInventoryItem', on_delete=models.PROTECT)
+    
+    # Precise point references matching your actual domain layout arrays
+    lab_item = models.ForeignKey(LabInventoryItem, on_delete=models.PROTECT, null=True, blank=True, related_name='requisition_lines')
+    pharmacy_item = models.ForeignKey(PharmacyStockCatalogItem, on_delete=models.PROTECT, null=True, blank=True, related_name='requisition_lines')
+    
+    # Generic item details field to handle random unindexed office/admin supplies
+    non_inventory_title = models.CharField(max_length=255, null=True, blank=True, help_text="For miscellaneous line items not in the inventory logs")
+    
     quantity = models.PositiveIntegerField(default=1)
-    # This captures the cost at the moment of request
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Locked price point history snapshot")
     line_total = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
 
     def save(self, *args, **kwargs):
-        # Automatically calculate cost based on current inventory price
-        self.line_total = self.item.buying_price * self.quantity
+        # Auto-extract true values based on context mapping configurations
+        if self.lab_item:
+            self.unit_price = self.lab_item.buying_price
+        elif self.pharmacy_item:
+            self.unit_price = self.pharmacy_item.buying_price
+            
+        self.line_total = self.unit_price * self.quantity
         super().save(*args, **kwargs)
-        # Update the parent requisition total
-        self.requisition.total_cost = sum(item.line_total for item in self.requisition.items.all())
-        self.requisition.save()
+        self.requisition.update_total_cost()
+
+    def delete(self, *args, **kwargs):
+        requisition = self.requisition
+        super().delete(*args, **kwargs)
+        requisition.update_total_cost()
 
 
-# --- 1. SUPPLIER & VENDOR MANAGEMENT ---
+# --- SUPPLIER & VENDOR MANAGEMENT ---
 class Supplier(models.Model):
     CATEGORY_CHOICES = [
         ('PHARMA', 'Pharmaceuticals & Oncology Drugs'),
@@ -736,21 +883,44 @@ class MainStoreBatch(models.Model):
     def valuation(self):
         return self.current_quantity * self.buying_price
 
+from django.db import models
 
 class InsuranceCompany(models.Model):
     """
     Main registry for Insurance Providers (Payers).
     """
+    PAYER_TYPE_CHOICES = [
+        ('COMMERCIAL', 'Private Commercial Insurance'),
+        ('STATUTORY', 'State/Statutory Payer (e.g., SHA)'),
+        ('CORPORATE_DIRECT', 'Corporate Direct Self-Funded'),
+        ('SUBSIDIZED', 'Low-Tier Subsidized/NGO'),
+    ]
+
     name = models.CharField(max_length=255, unique=True)
-    contact_person = models.CharField(max_length=100)
-    email = models.EmailField()
-    phone = models.CharField(max_length=20)
-    portal_link = models.URLField(
-        blank=True, 
-        help_text="Link to the insurer's online claims submission portal"
-    )
+    payer_code = models.CharField(max_length=50, unique=True, help_text="System code e.g. JUB-MED-01")
+    payer_type = models.CharField(max_length=30, choices=PAYER_TYPE_CHOICES, default='COMMERCIAL')
+    kra_pin = models.CharField(max_length=15, blank=True, null=True, help_text="Required for corporate financial auditing")
+    api_endpoint = models.URLField(blank=True, null=True, help_text="Link to eligibility sync verification API")
     
-    # Financial Aggregates for the KPI Cards
+    # Structural Addresses
+    physical_address = models.TextField(blank=True, null=True)
+    postal_address = models.CharField(max_length=255, blank=True, null=True)
+    
+    # Detailed Relationship Contacts
+    contact_person = models.CharField(max_length=100)
+    contact_role = models.CharField(max_length=100, blank=True, null=True, help_text="e.g. Senior Relationship Manager")
+    email = models.EmailField(help_text="Primary email for claims dispatch and routing")
+    phone = models.CharField(max_length=20, help_text="Escalation hotline number")
+    
+    # Contract Management & SLA Timelines
+    contract_start_date = models.DateField(blank=True, null=True)
+    contract_end_date = models.DateField(blank=True, null=True)
+    claim_submission_window = models.PositiveIntegerField(default=45, help_text="Maximum claim submission window in days")
+    corporate_discount_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, help_text="Percentage discount off tariff")
+    price_list_tariff = models.CharField(max_length=100, default="Standard Cash", help_text="Assigned base price tariff matrix")
+    sla_document = models.FileField(upload_to='insurance_contracts/', blank=True, null=True, help_text="Uploaded PDF active SLA contract")
+
+    # Financial Aggregates for KPI Cards
     total_billed = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
     total_remitted = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
     
@@ -759,11 +929,57 @@ class InsuranceCompany(models.Model):
 
     @property
     def aging_debt(self):
-        """Calculates money still sitting with this insurer."""
         return self.total_billed - self.total_remitted
 
     def __str__(self):
         return self.name
+
+
+class InsuranceScheme(models.Model):
+    """
+    Sub-products and schemes belonging to an Insurance Provider.
+    Enforces precise billing boundary checkpoints at point-of-sale invoicing.
+    """
+    CLASSIFICATION_CHOICES = [
+        ('CORPORATE', 'Corporate Tier'),
+        ('INDIVIDUAL', 'Individual Retail'),
+        ('MANAGED_CARE', 'Managed Care / Capitation'),
+    ]
+
+    SHIF_COORDINATION_CHOICES = [
+        ('DEDUCT', 'Automatically Deduct SHA Allocation First'),
+        ('NONE', 'Pure Private (No SHA Cut)'),
+    ]
+
+    BIOMETRIC_AUTH_CHOICES = [
+        ('M-TIBA', 'M-TIBA / CarePay'),
+        ('COMPULINK', 'Compulink Card'),
+        ('MEDVANTAGE', 'Medvantage System'),
+        ('PORTAL_ONLY', 'None (Web Portal Only)'),
+    ]
+
+    company = models.ForeignKey(InsuranceCompany, on_delete=models.CASCADE, related_name='schemes')
+    name = models.CharField(max_length=255, help_text="e.g. Jubilee JCare Johari Plan A")
+    classification = models.CharField(max_length=30, choices=CLASSIFICATION_CHOICES, default='CORPORATE')
+    
+    # Financial Rules & Co-Pays
+    preauth_threshold = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, help_text="Invoicing amount triggering mandatory pre-auth token code")
+    copay_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, help_text="Fixed standard client copay contribution amount")
+    consultation_cap = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True, help_text="Maximum GP/Specialist payment allowance before patient balance triggers")
+    
+    # Refactored Statutory Controls & Ward Limit Rules
+    shif_coordination = models.CharField(max_length=20, choices=SHIF_COORDINATION_CHOICES, default='DEDUCT')
+    daily_bed_rate_limit = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True, help_text="Maximum currency allowance per 24 hours for room board")
+    biometric_auth_type = models.CharField(max_length=20, choices=BIOMETRIC_AUTH_CHOICES, default='PORTAL_ONLY')
+
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('company', 'name')
+
+    def __str__(self):
+        return f"{self.company.name} - {self.name}"
 
 
 class InsuranceClaim(models.Model):
@@ -776,37 +992,42 @@ class InsuranceClaim(models.Model):
         ('ADJUDICATION', 'Under Review/In Process'),
         ('DISPUTED', 'Disputed/Rejected'),
         ('REMITTED', 'Paid/Remitted'),
+        ('PARTIALLY_REMITTED', 'Partially Settled / Shortfall'),
     ]
     
     insurance_company = models.ForeignKey(InsuranceCompany, on_delete=models.CASCADE)
-    patient = models.ForeignKey('Patient', on_delete=models.CASCADE)
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='insurance_claims')
     
-    # Oncology specific tracking
     claim_number = models.CharField(max_length=100, unique=True)
-    pre_auth_code = models.CharField(
-        max_length=100, 
-        help_text="The code provided by the insurer before the chemo/radio cycle started"
-    )
+    pre_auth_code = models.CharField(max_length=100, blank=True, null=True)
+    pre_auth_approved_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     
-    # Money
-    total_amount = models.DecimalField(max_digits=12, decimal_places=2)
-    amount_paid = models.DecimalField(
-        max_digits=12, 
-        decimal_places=2, 
-        default=0.00, 
-        help_text="Amount actually remitted by the insurer"
-    )
+    # Financial Breakdown
+    total_amount_billed = models.DecimalField(max_digits=12, decimal_places=2, default=0.00,help_text="Original invoice value sent to insurer")
+    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Amount actually remitted")
+    shortfall_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Deductions or disallowed amounts")
     
     date_submitted = models.DateField(auto_now_add=True)
     status = models.CharField(max_length=20, choices=CLAIM_STATUS, default='DRAFT')
     
-    # Conflict resolution
-    rejection_reason = models.TextField(blank=True, help_text="Notes from the insurer if rejected")
+    rejection_reason = models.TextField(blank=True)
+    remittance_reference = models.CharField(max_length=100, blank=True, null=True, help_text="EFT transaction / Cheque code from batch upload")
     reconciled_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"CLAIM-{self.claim_number} ({self.patient.name})"
+ 
+class ClaimDispatchBatch(models.Model):
+    """Tracks a bundle of multiple patients' claims compiled and mailed to an insurer."""
+    batch_reference = models.CharField(max_length=50, unique=True)
+    insurance_company = models.ForeignKey('InsuranceCompany', on_delete=models.CASCADE)
+    date_dispatched = models.DateField(auto_now_add=True)
+    total_batch_value = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    is_acknowledged = models.BooleanField(default=False)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
 
+    def __str__(self):
+        return f"Dispatch Batch {self.batch_reference} -> {self.insurance_company.name}"
 
 class RemittanceBatch(models.Model):
     """
@@ -1027,7 +1248,7 @@ class SocialMediaPost(models.Model):
         return f"{self.target_platform} Post - {self.status} ({self.created_at.date()})"
     
 
-class MarketingRequisition(models.Model):
+class MarketingRequisitionExtension(models.Model):
     CATEGORY_CHOICES = [
         ('POSTERS_PRINTING', 'Posters & Printing Materials'),
         ('SOCIAL_ADS', 'Social Media Advertising (Meta/Google)'),
@@ -1036,29 +1257,18 @@ class MarketingRequisition(models.Model):
         ('MISC_SUPPLIES', 'Miscellaneous Camp Supplies'),
     ]
 
-    STATUS_CHOICES = [
-        ('PENDING', 'Awaiting Finance Review'),
-        ('APPROVED', 'Funds Disbursed'),
-        ('REJECTED', 'Requisition Declined'),
-    ]
-
-    title = models.CharField(max_length=255)
+    requisition = models.OneToOneField(Requisition, on_delete=models.CASCADE, related_name='marketing_meta')
     category = models.CharField(max_length=50, choices=CATEGORY_CHOICES)
-    campaign = models.ForeignKey(
-        OutreachCampaign, 
-        on_delete=models.CASCADE, 
-        related_name='requisitions',
-        help_text="Link this budget request to an active outreach program line"
-    )
+    campaign = models.ForeignKey('OutreachCampaign', on_delete=models.CASCADE, related_name='marketing_links')
     requested_amount = models.DecimalField(max_digits=12, decimal_places=2)
-    justification_notes = models.TextField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
-    
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Push total directly to parent cache to keep frontend table dynamic arrays synced
+        self.requisition.update_total_cost()
 
     def __str__(self):
-        return f"{self.title} - KES {self.requested_amount} ({self.status})"
+        return f"Meta for REQ-{self.requisition.id} Campaign: {self.campaign.name}"
     
 
 class ProtocolMaster(models.Model):
@@ -1148,3 +1358,39 @@ class DrugGuardrail(models.Model):
     def __str__(self):
         action_phrase = f"Drop {self.action_value}%" if self.action == 'REDUCE_PCT' else "HALT"
         return f"Rule for {self.drug.drug_name}: IF {self.parameter} {self.operator} {self.value} ➔ {action_phrase}"
+    
+
+
+@receiver(post_save, sender=LabOrder)
+def auto_generate_lab_results(sender, instance, created, **kwargs):
+    """
+    Listens to newly stored clinician orders and instantly updates the
+    LabResult processing queues to map clinical workloads seamlessly.
+    """
+    if created:
+        # 🔴 FIX: Safe fallback if requested_tests isn't a direct DB field,
+        # or change 'test_names' / 'tests' to whatever field name is on your LabOrder model
+        requested_tests = getattr(instance, 'requested_tests', None)
+        
+        # If it's a JSON string or comma-separated string, parse it. 
+        # If it's already a list or iterable, we can loop over it directly.
+        if requested_tests:
+            # Check against your database valid TEST_CHOICES keys before mounting rows
+            valid_codes = [choice[0] for choice in LabResult.TEST_CHOICES]
+            
+            for code in requested_tests:
+                # If your frontend passes descriptive labels like "Full Blood Count (CBC)",
+                # make sure to extract or match the clean choice key (e.g., 'CBC')
+                clean_code = code
+                if '(' in code and ')' in code:
+                    # Extracts 'CBC' from 'Full Blood Count (CBC)'
+                    clean_code = code.split('(')[-1].split(')')[0]
+
+                if clean_code in valid_codes:
+                    LabResult.objects.get_or_create(
+                        lab_order=instance,
+                        patient=instance.patient,
+                        visit=instance.visit,
+                        test_name=clean_code,
+                        status='PENDING'
+                    )

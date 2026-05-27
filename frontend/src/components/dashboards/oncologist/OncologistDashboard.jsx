@@ -60,7 +60,7 @@ const OncologistDashboard = () => {
                         </div>
                     </div>
 
-                    {/* Patient Context Bar (Hidden on Home AND Protocol Master pages) */}
+                    {/* Patient Context Bar (Hidden on Home, Lab, AND Protocol Master pages if desired, or left contextual) */}
                     {selectedPatient && activeModule !== 'home' && activeModule !== 'protocol-master' && (
                         <div className="mb-8 p-6 bg-white rounded-3xl border-l-4 border-l-blue-600 shadow-sm flex items-center justify-between animate-in fade-in slide-in-from-top-4 duration-500">
                             <div className="flex items-center gap-6">
@@ -87,7 +87,7 @@ const OncologistDashboard = () => {
                     
                     <div className="bg-white rounded-[3rem] p-4 min-h-[75vh] shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden">
                         
-                        {/* Global Dashboard Modules (No Selected Patient Required) */}
+                        {/* Global Dashboard Modules (No Session Patient Selection Enforced) */}
                         {activeModule === 'home' && (
                             <DoctorHome 
                                 onSelectPatient={handleAttendPatient} 
@@ -99,7 +99,14 @@ const OncologistDashboard = () => {
                             <ProtocolMaster />
                         )}
 
-                        {/* Patient Specific Care Streams */}
+                        {activeModule === 'lab' && (
+                            <LaboratoryResults 
+                                patient={selectedPatient} 
+                                onTabSwitch={setActiveModule} 
+                            />
+                        )}
+
+                        {/* Patient Specific Care Streams (Strictly require active selectedPatient context) */}
                         {selectedPatient ? (
                             <>
                                 {activeModule === 'vitals' && (
@@ -107,9 +114,6 @@ const OncologistDashboard = () => {
                                         selectedPatientFromParent={selectedPatient} 
                                         onTabSwitch={setActiveModule} 
                                     />
-                                )}
-                                {activeModule === 'lab' && (
-                                    <LaboratoryResults patient={selectedPatient} onTabSwitch={setActiveModule} />
                                 )}
                                 {activeModule === 'history' && (
                                     <ClinicalEMR patient={selectedPatient} />
@@ -120,7 +124,7 @@ const OncologistDashboard = () => {
                             </>
                         ) : (
                             /* Block views if patient is required but absent */
-                            activeModule !== 'home' && activeModule !== 'protocol-master' && (
+                            activeModule !== 'home' && activeModule !== 'protocol-master' && activeModule !== 'lab' && (
                                 <div className="flex flex-col items-center justify-center h-[60vh] text-center">
                                     <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mb-6 text-slate-300 text-2xl font-serif italic">!</div>
                                     <h3 className="text-xl font-black text-slate-900 uppercase italic">Patient Selection Required</h3>

@@ -10,6 +10,36 @@ import DiagnosticWorklist from './modules/DiagnosticWorklist';
 import PatientHistory from './modules/PatientHistory';
 import LabReference from './modules/LabReference';
 import LabInventory from './modules/LabInventory';
+import LabRequisitionsTab from './modules/LabRequisitionsTab';
+
+// 🔴 FIX 1: Moved helper utility completely outside the component block 
+// so it doesn't get re-allocated on every single state change render cycle.
+const getShortForm = (label) => {
+  const targetString = label || '';
+  
+  // 1. If it contains parentheses (e.g. "Full Blood Count (CBC)"), extract 'CBC'
+  const match = targetString.match(/\(([^)]+)\)/);
+  if (match && match[1]) {
+    return match[1].toUpperCase();
+  }
+
+  // 2. Fallback dictionary matching for key standard panels without parentheses
+  const fallbackMap = {
+    'full blood count': 'CBC',
+    'urea, electrolytes & creatinine': 'U&E',
+    'liver function test': 'LFT',
+    'prostate specific antigen': 'PSA',
+    'urinalysis (routine)': 'URINE',
+    'urinalysis': 'URINE',
+    'blood group & cross match': 'BG/XM',
+    'blood slide (malaria parasite)': 'BS/MP',
+    'blood slide for malaria': 'BS/MP'
+  };
+
+  const cleanString = targetString.toLowerCase().trim();
+  return fallbackMap[cleanString] || targetString.toUpperCase();
+};
+
 
 const LabTechDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -24,28 +54,55 @@ const LabTechDashboard = () => {
   const fetchLabData = useCallback(async () => {
     setLoading(true);
     try {
-        // 1. Fetch the Queue and the actual Lab Result records in parallel
-        const [resQueue, resLabs, resAnalytics] = await Promise.all([
-            API.get('/queue/', { params: { current_station: 'LAB', status: 'WAITING' } }),
-            API.get('/lab-results/', { params: { status: 'PENDING' } }), // Get actual test records
-            API.get('/queue/analytics/', { params: { station: 'LAB' } })
+        // 1. Fetch the basic waiting queue items and aggregate analytics
+        const [resQueue, resAnalytics] = await Promise.all([
+            API.get('/queue', { params: { current_station: 'LAB', status: 'WAITING' } }),
+            API.get('/queue/analytics', { params: { station: 'LAB' } })
         ]);
         
         const queueData = resQueue.data.results || resQueue.data || [];
-        const labsData = resLabs.data.results || resLabs.data || [];
 
-        // 2. Map the tests to each patient in the queue
-        const enrichedQueue = queueData.map(patient => {
-            // Find all pending tests belonging to this patient's current visit
-            const patientTests = labsData.filter(lab => lab.visit === patient.visit_id || lab.visit === patient.visit);
+        // 2. Resolve requested tests for each patient by querying the lab-orders endpoint in parallel
+        const enrichedQueue = await Promise.all(queueData.map(async (order) => {
+            let rawTests = order.requested_tests || [];
+            
+            // 🔴 If requested_tests doesn't exist on the queue object, fetch it via its visit ID
+            if (!order.requested_tests || order.requested_tests.length === 0) {
+                try {
+                    const visitId = order.visit || order.visit_id;
+                    if (visitId) {
+                        const resOrders = await API.get('/lab-orders/', { params: { visit: visitId } });
+                        const ordersList = resOrders.data.results || resOrders.data || [];
+                        
+                        // Find the first pending/active lab requisition block
+                        const activeOrder = ordersList.find(o => 
+                            o.status === 'PENDING' || o.status === 'PROCESSING' || o.status === 'WAITING'
+                        );
+                        
+                        if (activeOrder && activeOrder.requested_tests) {
+                            rawTests = activeOrder.requested_tests;
+                        }
+                    }
+                } catch (orderErr) {
+                    console.error(`Failed resolving lab orders for patient assignment #${order.id}`, orderErr);
+                }
+            }
+
+            // 3. Map values safely into short badges
+            const longFormTests = rawTests.map(test => {
+                if (!test) return '';
+                if (typeof test === 'object') {
+                    return test.test_name || test.name || test.label || '';
+                }
+                return String(test);
+            }).filter(Boolean);
             
             return {
-                ...patient,
-                // Extract the readable labels (e.g., "Full Blood Count", "Urinalysis")
-                requested_tests: patientTests.map(t => t.test_label || t.test_name),
-                test_count: patientTests.length
+                ...order,
+                requested_tests: longFormTests.map(testName => getShortForm(testName)),
+                test_count: longFormTests.length
             };
-        });
+        }));
 
         setQueue(enrichedQueue);
         
@@ -73,10 +130,11 @@ const LabTechDashboard = () => {
       case 'history': return <PatientHistory />;
       case 'reference': return <LabReference />;
       case 'inventory': return <LabInventory />;
+      case 'requisitions': return <LabRequisitionsTab />;
       default: return (
         <div className="space-y-10 animate-in fade-in duration-700">
           
-          {/* 1. KPI SECTION: CLEAN LIGHT THEME */}
+          {/* 1. KPI SECTION */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <StatCard icon={Clock} label="Waitlist Queue" value={stats.pending} color="blue" />
             <StatCard icon={Beaker} label="Today's Lab Tests" value={stats.todays_tests} color="teal" />
@@ -115,15 +173,16 @@ const LabTechDashboard = () => {
                 <thead>
                   <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] border-b border-slate-50 bg-slate-50/50">
                     <th className="px-12 py-6">Patient Identity</th>
+                    <th className="px-12 py-6">Health Record No.</th>
                     <th className="px-12 py-6">Token</th>
-                    <th className="px-12 py-6">Requested Investigations</th>
+                    <th className="px-12 py-6">Requested tests</th>
                     <th className="px-12 py-6 text-right">No. of Tests</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {loading ? (
                     <tr>
-                      <td colSpan="4" className="py-32 text-center font-black text-slate-400 uppercase text-[10px] tracking-widest italic">
+                      <td colSpan="5" className="py-32 text-center font-black text-slate-400 uppercase text-[10px] tracking-widest italic">
                         <Loader2 className="animate-spin mx-auto mb-4 text-teal-500" size={32} />
                         Syncing Diagnostic Pipeline...
                       </td>
@@ -133,7 +192,9 @@ const LabTechDashboard = () => {
                       <tr key={p.id} className="hover:bg-slate-50/50 transition-all group cursor-pointer" onClick={() => setActiveTab('diagnostics')}>
                         <td className="px-12 py-8">
                           <p className="font-black text-slate-900 text-base uppercase tracking-tight">{p.patient_name}</p>
-                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest italic">{p.patient_id_no}</p>
+                        </td>
+                        <td className="px-12 py-8">
+                          <p className="text-sm font-black text-slate-700 uppercase tracking-tight">{p.health_record_number || 'N/A'}</p>
                         </td>
                         <td className="px-12 py-8">
                           <span className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-teal-600 shadow-sm italic">
@@ -141,23 +202,25 @@ const LabTechDashboard = () => {
                           </span>
                         </td>
                         <td className="px-12 py-8">
-                            {/* Displaying test names as tags */}
                             <div className="flex flex-wrap gap-2">
                                 {p.requested_tests?.map((test, idx) => (
-                                    <span key={idx} className="bg-slate-900 text-teal-400 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border border-white/10">
+                                    <span key={idx} className="bg-slate-950 text-teal-400 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider border border-slate-800 shadow-sm">
                                         {test}
                                     </span>
-                                )) || <span className="text-slate-400 italic text-[10px]">Processing Order...</span>}
+                                ))}
+                                {(!p.requested_tests || p.requested_tests.length === 0) && (
+                                  <span className="text-slate-400 italic text-[10px]">Processing Order...</span>
+                                )}
                             </div>
                         </td>
                         <td className="px-12 py-8 text-right font-black text-slate-900 text-lg italic">
-                           {p.test_count || 0}
+                            {p.test_count || 0}
                         </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="4" className="py-32 text-center text-slate-300 font-bold uppercase tracking-[0.4em] text-xs">
+                      <td colSpan="5" className="py-32 text-center text-slate-300 font-bold uppercase tracking-[0.4em] text-xs">
                         Worklist Clear / No Pending Samples
                       </td>
                     </tr>
@@ -183,7 +246,6 @@ const LabTechDashboard = () => {
   );
 };
 
-// Reusable Light Theme StatCard
 const StatCard = ({ icon: Icon, label, value, color }) => {
   const themes = {
     blue: "bg-blue-50 text-blue-600 border-blue-100",

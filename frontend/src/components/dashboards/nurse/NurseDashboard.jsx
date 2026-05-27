@@ -20,6 +20,7 @@ import ImagingStudies from "./modules/ImagingStudies";
 import LaboratoryResults from "../oncologist/modules/LaboratoryResults";
 import PalliativeCare from "./modules/PalliativeCare";
 import ToxicityTracker from "./modules/ToxicityTracker";
+import NurseRequisitionsTab from './modules/NurseRequisitionsTab';
 
 const NurseDashboard = () => {
     const [activeModule, setActiveModule] = useState('home'); 
@@ -46,7 +47,7 @@ const NurseDashboard = () => {
             const [labRes, criticalRes, vitalsRes] = await Promise.all([
                 API.get('/lab-results', { params: { status: 'PENDING' } }),
                 API.get('/lab-results', { params: { is_critical: true } }),
-                API.get('/vitals') // In production, filter this by today's date on the backend
+                API.get('/vitals') 
             ]);
             
             setStats({
@@ -78,7 +79,7 @@ const NurseDashboard = () => {
     );
 
     return (
-        <div className="flex min-h-screen bg-slate-50 font-['Inter']">
+        <div className="flex min-h-screen bg-slate-50 font-sans antialiased text-slate-800">
             <NurseSidebar activeModule={activeModule} setActiveModule={setActiveModule} />
 
             <main className="flex-1 overflow-y-auto h-screen p-8">
@@ -89,22 +90,22 @@ const NurseDashboard = () => {
                             {/* Header */}
                             <div className="flex justify-between items-end">
                                 <div>
-                                    <p className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] mb-1">Nursing Operations</p>
-                                    <h1 className="text-4xl font-black text-slate-900 tracking-tighter italic uppercase">Clinical Dashboard</h1>
+                                    <p className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Nursing Operations</p>
+                                    <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight uppercase">Clinical Dashboard</h1>
                                 </div>
                                 <div className="flex gap-4">
                                     <div className="relative group">
                                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
                                         <input 
                                             type="text" 
-                                            placeholder="Search queue..." 
+                                            placeholder="Search patient queue..." 
                                             value={searchTerm}
                                             onChange={(e) => setSearchTerm(e.target.value)}
-                                            className="pl-12 pr-6 py-3.5 bg-white border border-slate-200 rounded-[1.25rem] text-sm font-bold outline-none focus:ring-4 focus:ring-blue-500/10 w-80 transition-all shadow-sm"
+                                            className="pl-12 pr-6 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 w-80 transition-all shadow-xs"
                                         />
                                     </div>
-                                    <button onClick={fetchNurseData} className="p-4 bg-white border border-slate-200 rounded-2xl hover:bg-blue-50 transition-all shadow-sm group">
-                                        <RefreshCcw size={20} className={`${loading ? 'animate-spin' : ''} text-slate-400 group-hover:text-blue-600`} />
+                                    <button onClick={fetchNurseData} className="p-3 bg-white border border-slate-200 rounded-xl hover:bg-blue-50 transition-all shadow-xs group cursor-pointer">
+                                        <RefreshCcw size={18} className={`${loading ? 'animate-spin' : ''} text-slate-500 group-hover:text-blue-600`} />
                                     </button>
                                 </div>
                             </div>
@@ -117,58 +118,62 @@ const NurseDashboard = () => {
                                 <KpiCard icon={<Beaker className="text-amber-500"/>} label="Pending Labs" value={stats.pending_labs} color="amber" />
                             </div>
 
-                            {/* 3-Column Triage Queue Table */}
-                            <div className="bg-white rounded-[3rem] border border-slate-200 shadow-xl overflow-hidden min-h-[500px]">
-                                <div className="p-10 border-b border-slate-100 flex justify-between items-center">
-                                    <div className="flex items-center gap-5">
-                                        <div className="p-4 bg-blue-600 rounded-[1.5rem] text-white shadow-lg">
-                                            <Users size={28} />
+                            {/* Triage Queue Table */}
+                            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden min-h-[500px]">
+                                <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+                                    <div className="flex items-center gap-4">
+                                        <div className="p-2.5 bg-blue-600 rounded-xl text-white shadow-sm">
+                                            <Users size={22} />
                                         </div>
                                         <div>
-                                            <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tighter italic">Patient Queue</h3>
-                                            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">Awaiting physical assessment</p>
+                                            <h3 className="text-lg font-bold text-slate-900">Patient Queue</h3>
+                                            <p className="text-xs text-slate-400 mt-0.5">Awaiting physical baseline assessment</p>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-2">
                                         <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
-                                        <span className="text-xs font-black text-slate-900 uppercase tracking-widest italic">Live Feed</span>
+                                        <span className="text-xs font-semibold text-slate-700 tracking-wider uppercase">Live Feed</span>
                                     </div>
                                 </div>
 
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-left border-collapse">
-                                        <thead className="bg-slate-50/80 border-b border-slate-100">
+                                        <thead className="bg-slate-50/80 border-b border-slate-200">
                                             <tr>
-                                                <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Patient Name</th>
-                                                <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Queue ID / Token</th>
-                                                <th className="px-10 py-6 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] text-right">Workflow Action</th>
+                                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Patient Name</th>
+                                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Queue ID / Token</th>
+                                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Workflow Action</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-slate-50">
+                                        <tbody className="divide-y divide-slate-100">
                                             {loading ? (
-                                                <tr><td colSpan="3" className="py-32 text-center text-slate-400 font-bold uppercase text-[10px] tracking-widest italic">Updating Patient Registry...</td></tr>
+                                                <tr>
+                                                    <td colSpan="3" className="py-32 text-center text-slate-400 font-medium text-sm">
+                                                        Updating Patient Registry...
+                                                    </td>
+                                                </tr>
                                             ) : filteredQueue.length > 0 ? (
                                                 filteredQueue.map(p => (
-                                                    <tr key={p.id} className="hover:bg-blue-50/30 transition-all group">
-                                                        <td className="px-10 py-8">
-                                                            <div className="flex items-center gap-5">
-                                                                <div className="h-12 w-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white text-sm font-black shadow-md">
+                                                    <tr key={p.id} className="hover:bg-slate-50/80 transition-colors group">
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex items-center gap-4">
+                                                                <div className="h-10 w-10 bg-slate-900 rounded-lg flex items-center justify-center text-white text-sm font-bold shadow-xs">
                                                                     {p.patient_name?.charAt(0)}
                                                                 </div>
-                                                                <p className="font-black text-slate-900 uppercase text-base tracking-tight">{p.patient_name}</p>
+                                                                <p className="font-semibold text-slate-900 text-sm">{p.patient_name}</p>
                                                             </div>
                                                         </td>
-                                                        <td className="px-10 py-8">
-                                                            <span className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-blue-600 shadow-sm">
+                                                        <td className="px-6 py-4">
+                                                            <span className="px-3 py-1 bg-blue-50 border border-blue-100 rounded-md text-xs font-bold text-blue-600">
                                                                 #{p.token_id}
                                                             </span>
                                                         </td>
-                                                        <td className="px-10 py-8 text-right">
+                                                        <td className="px-6 py-4 text-right">
                                                             <button 
                                                                 onClick={() => handleAttendPatient(p)}
-                                                                className="bg-[#020617] text-white px-8 py-3.5 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] hover:bg-blue-600 transition-all flex items-center gap-3 ml-auto shadow-md group-hover:scale-105"
+                                                                className="bg-slate-900 text-white px-5 py-2 rounded-lg text-xs font-semibold uppercase tracking-wider hover:bg-blue-600 transition-colors flex items-center gap-2 ml-auto shadow-xs"
                                                             >
-                                                                Attend Patient <ArrowRight size={16} />
+                                                                Attend Patient <ArrowRight size={14} />
                                                             </button>
                                                         </td>
                                                     </tr>
@@ -176,8 +181,8 @@ const NurseDashboard = () => {
                                             ) : (
                                                 <tr>
                                                     <td colSpan="3" className="py-32 text-center">
-                                                        <ClipboardList size={48} className="mx-auto text-slate-200 mb-4" />
-                                                        <h4 className="text-sm font-black text-slate-300 uppercase italic tracking-tighter">Queue is currently empty</h4>
+                                                        <ClipboardList size={40} className="mx-auto text-slate-300 mb-2" />
+                                                        <h4 className="text-sm font-semibold text-slate-400">Queue is currently empty</h4>
                                                     </td>
                                                 </tr>
                                             )}
@@ -191,18 +196,18 @@ const NurseDashboard = () => {
                             <div className="flex justify-between items-center">
                                 <button 
                                     onClick={() => setActiveModule('home')}
-                                    className="group flex items-center gap-3 bg-white border border-slate-200 px-6 py-3 rounded-2xl text-slate-500 hover:text-blue-600 font-black text-[10px] uppercase tracking-[0.2em] transition-all shadow-sm"
+                                    className="group flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-xl text-slate-600 hover:text-blue-600 font-bold text-xs uppercase tracking-wider transition-colors shadow-xs cursor-pointer"
                                 >
-                                    <RefreshCcw size={14} /> Back to Dashboard
+                                    <RefreshCcw size={13} /> Back to Dashboard
                                 </button>
                                 {selectedPatient && (
-                                    <div className="bg-slate-900 text-white px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border-l-4 border-l-blue-500 shadow-lg">
+                                    <div className="bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider border-l-4 border-l-blue-500 shadow-sm">
                                         Current Context: {selectedPatient.patient_name}
                                     </div>
                                 )}
                             </div>
                             
-                            <div className="bg-white rounded-[3rem] p-8 shadow-xl border border-slate-100 min-h-[75vh] animate-in slide-in-from-bottom-6 duration-700">
+                            <div className="bg-white rounded-2xl p-6 shadow-xs border border-slate-200 min-h-[75vh] animate-in slide-in-from-bottom-4 duration-500">
                                 {activeModule === 'triage' && <TriageVitals selectedPatientFromParent={selectedPatient} />}
                                 {activeModule === 'history' && <ClinicalEMR patient={selectedPatient} />}
                                 {activeModule === 'labs' && <LaboratoryResults patient={selectedPatient} />}
@@ -210,6 +215,7 @@ const NurseDashboard = () => {
                                 {activeModule === 'administration' && <DrugAdministration patient={selectedPatient} />}
                                 {activeModule === 'toxicity' && <ToxicityTracker patient={selectedPatient} />}
                                 {activeModule === 'imaging' && <ImagingStudies patient={selectedPatient} />}
+                                {activeModule === 'requisitions' && <NurseRequisitionsTab />}
                             </div>
                         </div>
                     )}
@@ -221,20 +227,20 @@ const NurseDashboard = () => {
 
 const KpiCard = ({ icon, label, value, color }) => {
     const theme = {
-        blue: "bg-blue-50 text-blue-600 border-blue-100",
-        rose: "bg-rose-50 text-rose-600 border-rose-100",
-        teal: "bg-teal-50 text-teal-600 border-teal-100",
-        amber: "bg-amber-50 text-amber-600 border-amber-100"
+        blue: "bg-blue-50/60 text-blue-600 border-blue-100",
+        rose: "bg-rose-50/60 text-rose-600 border-rose-100",
+        teal: "bg-teal-50/60 text-teal-600 border-teal-100",
+        amber: "bg-amber-50/60 text-amber-600 border-amber-100"
     };
     return (
-        <div className={`${theme[color]} p-8 rounded-[2.5rem] border-2 shadow-sm relative overflow-hidden group hover:scale-[1.03] transition-all duration-500`}>
-            <div className="flex items-center gap-4 mb-4 relative z-10">
-                <div className="p-3 bg-white rounded-2xl shadow-md">{icon}</div>
-                <p className="text-[10px] font-black uppercase tracking-widest opacity-80">{label}</p>
+        <div className={`${theme[color]} p-6 rounded-2xl border shadow-xs relative overflow-hidden group hover:scale-[1.01] transition-transform duration-300`}>
+            <div className="flex items-center gap-3 mb-3 relative z-10">
+                <div className="p-2 bg-white rounded-xl shadow-xs">{icon}</div>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p>
             </div>
-            <p className="text-5xl font-black tracking-tighter relative z-10">{value}</p>
-            <div className="absolute -right-6 -bottom-6 opacity-[0.04] rotate-12 group-hover:rotate-0 transition-all duration-700">
-                {React.cloneElement(icon, { size: 140 })}
+            <p className="text-3xl font-extrabold tracking-tight text-slate-900 relative z-10">{value}</p>
+            <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 group-hover:rotate-0 transition-transform duration-500">
+                {React.cloneElement(icon, { size: 100 })}
             </div>
         </div>
     );

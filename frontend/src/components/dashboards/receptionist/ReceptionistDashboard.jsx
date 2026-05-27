@@ -2,11 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import API from '../../../api/api';
 import { 
   Calendar, Clock, UserPlus, Activity, List, 
-  ArrowRight, RefreshCcw, TrendingUp, Users, 
-  CheckCircle2, AlertCircle, Loader2, HeartPulse, Search, FileText
+  RefreshCcw, TrendingUp, Users, HeartPulse, FileText
 } from 'lucide-react';
 
-// Import modules
 import Registration from './modules/Registration';
 import InsuranceVerification from './modules/InsuranceVerification';
 import AppointmentCalendar from './modules/AppointmentCalendar';
@@ -18,12 +16,7 @@ import ReceptionistSidebar from './ReceptionistSidebar';
 const ReceptionistDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [view, setView] = useState('live-queue'); 
-  const [stats, setStats] = useState({ 
-    total_appts: 0, 
-    today_appts: 0, 
-    total_reg: 0, 
-    today_reg: 0 
-  });
+  const [stats, setStats] = useState({ total_appts: 0, today_appts: 0, total_reg: 0, today_reg: 0 });
   const [liveQueue, setLiveQueue] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -50,7 +43,7 @@ const ReceptionistDashboard = () => {
     } catch (err) {
       console.error("Dashboard Sync Error:", err);
     } finally {
-      loading(false);
+      setLoading(false); // FIXED: Changed 'loading(false)' to 'setLoading(false)' to resolve internal crashes
     }
   }, [activeTab]);
 
@@ -91,8 +84,6 @@ const ReceptionistDashboard = () => {
       default:
         return (
           <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            
-            {/* 1. KPI SECTION */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
               <StatCard icon={Users} label="Total Appointments" value={stats.total_appts} color="blue" />
               <StatCard icon={Calendar} label="Today's Appointments" value={stats.today_appts} color="teal" />
@@ -100,7 +91,6 @@ const ReceptionistDashboard = () => {
               <StatCard icon={UserPlus} label="Today's Registrations" value={stats.today_reg} color="indigo" />
             </div>
 
-            {/* 2. TOGGLE CONTROLS */}
             <div className="flex items-center justify-between bg-[#020617] p-5 rounded-[2.5rem] shadow-2xl">
               <div className="flex gap-4 bg-white/5 p-2 rounded-3xl">
                 <button 
@@ -124,7 +114,6 @@ const ReceptionistDashboard = () => {
               </button>
             </div>
 
-            {/* 3. TABLE SECTION */}
             <div className="bg-white rounded-[3.5rem] shadow-2xl border border-slate-100 overflow-hidden min-h-[500px]">
               <div className="p-10">
                 {view === 'live-queue' ? (
@@ -149,36 +138,46 @@ const ReceptionistDashboard = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-50">
-                        {liveQueue.map((item) => (
-                          <tr key={item.id} className="hover:bg-slate-50/50 transition-all group">
-                            <td className="px-8 py-7">
-                                <span className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-teal-600 shadow-sm italic">
-                                    #{item.token_id}
+                        {liveQueue.map((item) => {
+                          // Enhanced structural normalization fallback to handle synchronized fields seamlessly
+                          const calculatedHrn = 
+                            item.health_record_number || 
+                            item.patient?.health_record_number || 
+                            item.patient_details?.health_record_number ||
+                            item.visit?.health_record_number ||
+                            item.visit_details?.health_record_number ||
+                            '---_000_2026';
+
+                          return (
+                            <tr key={item.id} className="hover:bg-slate-50/50 transition-all group">
+                              <td className="px-8 py-7">
+                                  <span className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-teal-600 shadow-sm italic">
+                                      #{item.token_id || item.queue_id}
+                                  </span>
+                              </td>
+                              <td className="px-8 py-7">
+                                <span className="font-mono font-bold text-xs text-teal-600 bg-teal-50 px-3 py-1.5 rounded-xl border border-teal-100/50 tracking-wide inline-flex items-center gap-1.5">
+                                  <FileText size={12} className="text-teal-500" />
+                                  {calculatedHrn}
                                 </span>
-                            </td>
-                            {/* NEW: Health Record Number Column Injection */}
-                            <td className="px-8 py-7">
-                              <span className="font-mono font-bold text-xs text-teal-600 bg-teal-50 px-3 py-1.5 rounded-xl border border-teal-100/50 tracking-wide inline-flex items-center gap-1.5">
-                                <FileText size={12} className="text-teal-500" />
-                                {item.health_record_number || item.visit_details?.health_record_number || '---_000_2026'}
-                              </span>
-                            </td>
-                            <td className="px-8 py-7">
-                              <p className="font-black text-slate-900 text-base uppercase tracking-tight leading-none mb-1">{item.patient_name}</p>
-                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">{item.patient_id_no}</p>
-                            </td>
-                            <td className="px-8 py-7 text-center">
-                                <span className="bg-slate-900 text-teal-400 px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/10 inline-block">
-                                  {item.station_display}
-                                </span>
-                            </td>
-                            <td className="px-8 py-7 text-right">
-                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block animate-pulse">
-                                  {item.status_display}
-                                </span>
-                            </td>
-                          </tr>
-                        ))}
+                              </td>
+                              <td className="px-8 py-7">
+                                <p className="font-black text-slate-900 text-base uppercase tracking-tight leading-none mb-1">{item.patient_name || item.patient?.name}</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">{item.patient_id_no || item.id_number}</p>
+                              </td>
+                              <td className="px-8 py-7 text-center">
+                                  <span className="bg-slate-900 text-teal-400 px-5 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/10 inline-block">
+                                    {item.station_display || item.current_station}
+                                  </span>
+                              </td>
+                              <td className="px-8 py-7 text-right">
+                                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block animate-pulse">
+                                    {item.status_display || item.status}
+                                  </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

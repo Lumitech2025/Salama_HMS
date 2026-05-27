@@ -1,8 +1,52 @@
-import React from 'react';
-import { Wallet, Activity, Receipt, Box, ArrowUpRight, Clock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Wallet, Activity, Receipt, Box, ArrowUpRight, Clock, Loader2 } from 'lucide-react';
 
 const FinanceDashboard = ({ setActiveTab }) => {
+  const [requisitions, setRequisitions] = useState([]);
+  const [loading, setLoading] = useState(false);
   const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+
+  const getAuthHeaders = () => {
+    const token = 
+      localStorage.getItem('access_token') || 
+      localStorage.getItem('access') || 
+      localStorage.getItem('salama_access_token') || 
+      localStorage.getItem('token') || 
+      localStorage.getItem('accessToken');
+
+    return {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    };
+  };
+
+  useEffect(() => {
+    const fetchRecentRequisitions = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch('/api/requisitions/', { headers: getAuthHeaders() });
+        if (response.ok) {
+          const data = await response.json();
+          const rawList = data.results || data || [];
+          setRequisitions(rawList.slice(0, 3));
+        }
+      } catch (err) {
+        console.error("Failed syncing live state tracking log vectors:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecentRequisitions();
+  }, []);
+
+  // Standardizer helper to redirect to the active side-panel route safely
+  const handleNavigationToHub = () => {
+    if (typeof setActiveTab === 'function') {
+      // Lowercase fallback if your primary layout state matches standard path strings
+      setActiveTab('requisitions'); 
+    }
+  };
 
   return (
     <div className="space-y-10 animate-in fade-in duration-700 font-['Inter']">
@@ -28,7 +72,7 @@ const FinanceDashboard = ({ setActiveTab }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
-        {/* 2. ANALYTICS GRAPH - Reduced Height */}
+        {/* 2. ANALYTICS GRAPH */}
         <div className="lg:col-span-8 bg-white border border-slate-100 rounded-[3.5rem] p-10 shadow-2xl min-h-[450px] flex flex-col text-left">
           <div className="flex justify-between items-center mb-8">
             <div>
@@ -41,7 +85,6 @@ const FinanceDashboard = ({ setActiveTab }) => {
             </div>
           </div>
           
-          {/* Chart logic - Standardized bars with Month Names */}
           <div className="flex-1 flex items-end justify-between gap-3 px-2 pt-6">
              {[45, 60, 55, 80, 70, 95, 85, 60, 75, 90, 80, 100].map((h, i) => (
                 <div key={i} className="flex-1 flex flex-col items-center gap-3 group">
@@ -55,35 +98,63 @@ const FinanceDashboard = ({ setActiveTab }) => {
         </div>
 
         {/* 3. REQUISITION SIDEBAR */}
-        <div className="lg:col-span-4 bg-[#020617] rounded-[3.5rem] p-10 shadow-2xl text-white flex flex-col">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="p-3 bg-teal-500/10 rounded-xl text-teal-400"><Clock size={20}/></div>
-            <h4 className="text-xl font-black uppercase italic tracking-tighter text-white leading-none">Recent <span className="text-teal-500">Requisitions</span></h4>
-          </div>
-          
-          <div className="space-y-4 flex-1">
-            {[
-              { id: 'RQ-882', item: 'REAGENTS', dept: 'LAB DEPT', cost: '120,000', status: 'PENDING' },
-              { id: 'RQ-881', item: 'SYRINGES', dept: 'NURSE DEPT', cost: '5,000', status: 'URGENT' },
-              { id: 'RQ-879', item: 'CONTRAST', dept: 'RAD DEPT', cost: '18,500', status: 'NORMAL' },
-            ].map((req, i) => (
-              <div key={i} className="bg-white/5 border border-white/5 p-6 rounded-[2.5rem] group hover:bg-white/10 transition-all text-left">
-                <div className="flex justify-between items-start mb-4">
-                    <span className="text-[10px] font-black text-teal-500 uppercase tracking-[0.2em]">{req.id}</span>
-                    <span className={`text-[8px] font-black px-3 py-1 rounded-lg tracking-widest ${req.status === 'URGENT' ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-400'}`}>{req.status}</span>
-                </div>
-                <p className="font-black text-base uppercase italic tracking-tight leading-none mb-4">{req.item}</p>
-                <div className="flex justify-between items-center pt-4 border-t border-white/5">
-                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{req.dept}</span>
-                    <span className="text-xs font-black italic text-teal-400">KES {req.cost}</span>
-                </div>
+        <div className="lg:col-span-4 bg-white border border-slate-100 rounded-[3.5rem] p-10 shadow-2xl flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-teal-50 rounded-xl text-teal-600"><Clock size={20}/></div>
+                <h4 className="text-xl font-black uppercase italic tracking-tighter text-slate-900 leading-none">Recent <span className="text-teal-600">Requisitions</span></h4>
               </div>
-            ))}
+              {loading && <Loader2 size={16} className="animate-spin text-teal-600" />}
+            </div>
+            
+            <div className="space-y-4">
+              {!loading && requisitions.length === 0 ? (
+                <div className="border border-dashed border-slate-200 rounded-[2.5rem] p-12 text-center text-xs font-medium text-slate-400">
+                  No active funding demands found inside the pipeline registries.
+                </div>
+              ) : (
+                requisitions.map((req, i) => {
+                  const displayId = req.id ? `RQ-${req.id}` : `RQ-00${i + 1}`;
+                  const rawTitle = req.title || (req.items && req.items[0]?.non_inventory_title) || 'Direct Allocation';
+                  const displayItem = rawTitle.replace(/\[.*?\]\s*/g, '');
+                  const departmentLabel = req.dept || req.department || 'GENERAL';
+                  const numericCost = req.requested_amount || req.total_cost || req.total || 0;
+                  const currentStatus = req.status || 'PENDING';
+
+                  return (
+                    <div key={req.id || i} className="bg-slate-50/60 border border-slate-100 p-6 rounded-[2.5rem] group hover:bg-slate-100/80 transition-all text-left">
+                      <div className="flex justify-between items-start mb-4">
+                        <span className="text-[10px] font-black text-teal-600 uppercase tracking-[0.2em]">{displayId}</span>
+                        <span className={`text-[8px] font-black px-3 py-1 rounded-lg tracking-widest uppercase ${
+                          currentStatus === 'APPROVED' 
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                            : currentStatus === 'REJECTED' 
+                            ? 'bg-rose-100 text-rose-800 border border-rose-200' 
+                            : 'bg-amber-100 text-amber-800 border border-amber-200'
+                        }`}>
+                          {currentStatus}
+                        </span>
+                      </div>
+                      <p className="font-black text-base uppercase italic tracking-tight text-slate-800 line-clamp-1 leading-none mb-4">
+                        {displayItem}
+                      </p>
+                      <div className="flex justify-between items-center pt-4 border-t border-slate-200/60">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{departmentLabel} DEPT</span>
+                        <span className="text-sm font-black italic text-slate-900">
+                          KES {parseFloat(numericCost).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
           
           <button 
-            onClick={() => setActiveTab('requisitions')}
-            className="w-full mt-8 bg-teal-600 hover:bg-teal-500 py-6 rounded-3xl font-black text-[10px] uppercase tracking-[0.3em] transition-all shadow-xl shadow-teal-900/20 active:scale-95"
+            onClick={handleNavigationToHub}
+            className="w-full mt-8 bg-slate-900 hover:bg-slate-800 text-teal-400 py-6 rounded-3xl font-black text-[10px] uppercase tracking-[0.3em] transition-all shadow-md active:scale-95"
           >
             Open Requisition Hub
           </button>

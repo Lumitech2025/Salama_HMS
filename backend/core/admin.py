@@ -7,13 +7,14 @@ from django.http import HttpResponse
 from django.utils.safestring import mark_safe
 
 import csv
-from .models import (LabOrder, RegistrationRecord,
-    LabInventoryItem, Patient, Protocol, StockAdjustment, Treatment, ChemoSession, 
-    Drug, LabResult, Bill, Appointment, VitalSign, Queue,
+from datetime import date
+from .models import (InsuranceScheme, LabOrder, RegistrationRecord,
+    LabInventoryItem, Patient, Protocol, RequisitionItem, StockAdjustment, Treatment, ChemoSession, 
+    Drug, LabResult, Bill, Appointment, VitalSign, Queue, Requisition,
     Prescription, PrescriptionItem, ClinicalNote, ImagingRecord, PsychologyEnrollment, SessionLog, BereavementLog, 
-    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisition, LabTestRegistry, LabPanel, ProtocolMaster, ProtocolDrug, DrugGuardrail
+    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabTestRegistry, LabPanel, ProtocolMaster, ProtocolDrug, DrugGuardrail,
+    InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch
 )
-
 
 
 User = get_user_model()
@@ -68,14 +69,24 @@ class QueueAdmin(admin.ModelAdmin):
             colors.get(obj.priority, '#6c757d'), obj.priority
         )
 
-# --- Find your RegistrationRecordAdmin and update it to this: ---
 
 @admin.register(RegistrationRecord)
 class RegistrationRecordAdmin(admin.ModelAdmin):
-    list_display = ('queue_id', 'urgency_badge', 'patient', 'insurance', 'registered_at')
-    list_filter = ('is_urgent', 'insurance', 'registered_at')
-    search_fields = ('queue_id', 'patient__name', 'id_number')
-    readonly_fields = ('queue_id', 'registered_at')
+    # 🚀 FIXED: Kept layout clean, using the updated badge fields
+    list_display = ('queue_id', 'health_record_badge', 'urgency_badge', 'patient', 'insurance_tag', 'registered_at')
+    
+    # 🚀 FIXED: Changed 'insurance' to filter by 'payment_mode' and the relational 'insurance_company' link
+    list_filter = ('is_urgent', 'payment_mode', 'insurance_company', 'registered_at')
+    
+    search_fields = ('queue_id', 'health_record_number', 'patient__name', 'id_number')
+    readonly_fields = ('queue_id', 'health_record_number', 'registered_at')
+
+    def health_record_badge(self, obj):
+        return format_html(
+            '<span style="font-family: monospace; font-weight: bold; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; color: #0f172a;">{}</span>',
+            obj.health_record_number
+        )
+    health_record_badge.short_description = "Health Record No"
 
     def urgency_badge(self, obj):
         if obj.is_urgent:
@@ -103,15 +114,22 @@ class RegistrationRecordAdmin(admin.ModelAdmin):
         )
     gender_tag.short_description = "Gender"
 
+    # 🚀 FIXED: Completely overhauled to support structural payment_mode and relational items
     def insurance_tag(self, obj):
-        color = "#28a745" if obj.insurance != "CASH" else "#ffc107"
+        if obj.payment_mode == "CASH":
+            return format_html(
+                '<span style="background: #ffc107; color: black; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: bold;">CASH</span>'
+            )
+        
+        # Pull the corporate configuration company name safely if it exists, fallback to general flag
+        display_name = obj.insurance_company.name if obj.insurance_company else "INSURANCE"
         return format_html(
-            '<span style="background: {}; color: {}; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: bold;">{}</span>',
-            color, "white" if obj.insurance != "CASH" else "black", obj.insurance
+            '<span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: bold;">{}</span>',
+            display_name
         )
     insurance_tag.short_description = "Billing Mode"
 
-
+    
 # --- 2. PHARMACY & PRESCRIPTIONS ---
 
 class PrescriptionItemInline(admin.TabularInline):
@@ -122,7 +140,7 @@ class PrescriptionItemInline(admin.TabularInline):
 class PrescriptionAdmin(admin.ModelAdmin):
     list_display = ('id', 'patient', 'prescribed_by', 'status', 'created_at')
     list_filter = ('status', 'created_at')
-    search_fields = ('patient__name', 'patient__registry_no')
+    search_fields = ('patient__name', 'patient__registrations__health_record_number')
     inlines = [PrescriptionItemInline]
     actions = [export_as_csv]
 
@@ -292,16 +310,23 @@ class LabOrderInline(admin.TabularInline):
 
 @admin.register(Patient)
 class PatientAdmin(admin.ModelAdmin):
-    list_display = ['registry_no', 'name', 'gender', 'cancer_type', 'staging', 'created_at']
-    search_fields = ('name', 'registry_no', 'phone')
+    list_display = ['latest_health_record_number', 'name', 'gender', 'cancer_type', 'created_at']
+    search_fields = ('name', 'registrations__health_record_number', 'phone')
     list_filter = ('gender', 'cancer_type', 'staging')
     inlines = [VitalSignInline, LabResultInline, ClinicalNoteInline, LabOrderInline, PrescriptionInline]
     
     fieldsets = (
-        ('Core Identity', {'fields': ('name', 'registry_no', 'dob', 'gender', 'phone', 'email', 'blood_group')}),
-        ('Oncology Profile', {'fields': ('cancer_type', 'staging', 'ecog_status', 'biomarkers')}),
-        ('Insurance & Finance', {'fields': ('insurance_type', 'insurance_no', 'benefit_balance')}),
+        ('Core Identity', {'fields': ('name', 'gender', 'phone', 'email')}),
+        ('Oncology Profile', {'fields': ('cancer_type', 'staging')}),
     )
+
+    def latest_health_record_number(self, obj):
+        # Fetches the structural operational code assigned during their encounter checkout sequence
+        latest_reg = obj.registrations.order_by('id').last()
+        if latest_reg and latest_reg.health_record_number:
+            return format_html('<span style="font-family: monospace; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; color: #1e293b;">{}</span>', latest_reg.health_record_number)
+        return mark_safe('<span style="color: #94a3b8; font-style: italic;">No Active Record</span>')
+    latest_health_record_number.short_description = "Health Record No"
 
 # --- 6. SCHEDULING & REVENUE ---
 
@@ -331,7 +356,6 @@ class LabInventoryAdmin(admin.ModelAdmin):
 @admin.register(StockAdjustment)
 class StockAdjustmentAdmin(admin.ModelAdmin):
     list_display = ('item', 'quantity_used', 'remaining_stock', 'technician', 'created_at')
-
 
 # --- 8. LAB DIAGNOSTICS & PARAMETERS (RESTRUCTURED) ---
 
@@ -376,17 +400,30 @@ class LabTestRegistryAdmin(admin.ModelAdmin):
 
 @admin.register(LabOrder)
 class LabOrderAdmin(admin.ModelAdmin):
+    # 1. Added select_related optimization here too so loading the admin list is fast
     list_display = ('id', 'patient_link', 'visit_token', 'formatted_tests', 'status_badge', 'created_at')
     list_filter = ('status', 'created_at')
-    search_fields = ('patient__name', 'visit__queue_id', 'id')
+    
+    # Kept your excellent deep search indexing across registration workflows intact
+    search_fields = ('patient__name', 'patient__registrations__health_record_number', 'visit__queue_id', 'id')
     readonly_fields = ('created_at', 'updated_at')
     
     fieldsets = (
         ('Order Framework Context', {
             'fields': ('patient', 'visit', 'status')
         }),
-        ('Diagnostic Directives', {
-            'fields': ('requested_tests', 'doctor_notes'),
+        # 2. Replaced the missing requested_tests with the explicit boolean toggles
+        ('Diagnostic Directives (Select Tests)', {
+            'fields': (
+                'has_cbc', 
+                'has_ue', 
+                'has_lft', 
+                'has_psa', 
+                'has_urine', 
+                'has_bg_cross', 
+                'has_bs_mp', 
+                'doctor_notes'
+            ),
         }),
         ('System Audit Timestamps', {
             'fields': ('created_at', 'updated_at'),
@@ -396,8 +433,14 @@ class LabOrderAdmin(admin.ModelAdmin):
 
     def patient_link(self, obj):
         if obj.patient:
+            # Note: Ensure "core_patient_change" matches your actual patient app name layout
             url = reverse("admin:core_patient_change", args=(obj.patient.id,))
-            return format_html('<a href="{}"><b>{}</b></a>', url, obj.patient.name)
+            latest_reg = obj.patient.registrations.order_by('id').last()
+            hrn = latest_reg.health_record_number if latest_reg else "N/A"
+            return format_html(
+                '<a href="{}"><b>{}</b> <span style="font-size: 11px; color: #64748b; font-family: monospace;">({})</span></a>', 
+                url, obj.patient.name, hrn
+            )
         return "No Patient"
     patient_link.short_description = "Patient"
 
@@ -416,24 +459,33 @@ class LabOrderAdmin(admin.ModelAdmin):
     status_badge.short_description = "Status"
 
     def formatted_tests(self, obj):
-        if not obj.requested_tests:
+        """
+        3. Updated to dynamically read our clean model property helper.
+        This loops through whatever booleans are checked and builds your exact design!
+        """
+        tests = obj.selected_test_list
+        if not tests:
             return mark_safe('<span style="color: #94a3b8; font-style: italic;">No panels selected</span>')
         
         badges = []
-        for test in obj.requested_tests:
+        for test in tests:
             badges.append(
                 f'<span style="background: #e2e8f0; color: #1e293b; padding: 2px 6px; '
-                f'border-radius: 4px; font-weight: bold; font-size: 10px; margin-right: 4px;">{test}</span>'
+                f'border-radius: 4px; font-weight: bold; font-size: 10px; margin-right: 4px; display: inline-block; margin-bottom: 2px;">{test}</span>'
             )
         return mark_safe("".join(badges))
     formatted_tests.short_description = "Requested Panels"
 
-
+    def get_queryset(self, request):
+        """Optimizes Admin dashboard performance by joining patient and visit queries together"""
+        return super().get_queryset(request).select_related('patient', 'visit')
+    
+    
 @admin.register(LabResult)
 class LabResultAdmin(admin.ModelAdmin):
     list_display = ('test_name_display', 'patient_link', 'visit_token', 'formatted_metrics_inline', 'status_tag', 'is_critical', 'created_at')
     list_filter = ('status', 'is_critical', 'test_name', 'created_at')
-    search_fields = ('patient__name', 'test_name', 'technician_notes')
+    search_fields = ('patient__name', 'patient__registrations__health_record_number', 'test_name', 'technician_notes')
     
     fieldsets = (
         ('Encounter Context', {
@@ -481,7 +533,9 @@ class LabResultAdmin(admin.ModelAdmin):
     def patient_link(self, obj):
         if obj.patient:
             url = reverse("admin:core_patient_change", args=(obj.patient.id,))
-            return format_html('<a href="{}"><b>{}</b></a>', url, obj.patient.name)
+            latest_reg = obj.patient.registrations.order_by('id').last()
+            hrn = latest_reg.health_record_number if latest_reg else "N/A"
+            return format_html('<a href="{}"><b>{}</b> <span style="font-size:11px; color:#0d9488; font-family:monospace;">[{}]</span></a>', url, obj.patient.name, hrn)
         return "No Patient"
     patient_link.short_description = "Patient"
 
@@ -618,11 +672,31 @@ class SocialMediaPostAdmin(admin.ModelAdmin):
     )
 
 
-@admin.register(MarketingRequisition)
-class MarketingRequisitionAdmin(admin.ModelAdmin):
-    list_display = ('title', 'category', 'campaign', 'requested_amount', 'status', 'created_at')
-    list_filter = ('category', 'status', 'created_at')
-    search_fields = ('title', 'justification_notes')
+
+
+# 1. Create an inline view for marketing extensions
+class MarketingExtensionInline(admin.StackedInline):
+    model = MarketingRequisitionExtension
+    can_delete = False
+    verbose_name_plural = "Marketing Metadata Extension"
+
+# 2. Create an inline view for itemized lines (Lab/Pharmacy)
+class RequisitionItemInline(admin.TabularInline):
+    model = RequisitionItem
+    extra = 0
+    readonly_fields = ['unit_price', 'line_total']
+
+# 3. Create the parent Admin Manager
+@admin.register(Requisition)
+class RequisitionAdmin(admin.ModelAdmin):
+    # Fixed list_display fields to pull valid columns from the parent Requisition model
+    list_display = ['id', 'department', 'reason', 'requested_by', 'status', 'total_cost', 'created_at']
+    list_filter = ['department', 'status', 'created_at', 'is_viewed_by_finance']
+    search_fields = ['reason', 'requested_by__first_name', 'requested_by__last_name', 'id']
+    ordering = ['-created_at']
+    
+    # Attaches both clinical line arrays and marketing tags into a single clean admin panel view
+    inlines = [MarketingExtensionInline, RequisitionItemInline]
 
 
 admin.site.register(Protocol)
@@ -630,15 +704,13 @@ admin.site.register(ChemoSession)
 admin.site.register(Treatment)
 
 
-
-
 class DrugGuardrailInline(admin.StackedInline):
     """
     Allows editing cascading guardrails directly within the Medication panel
     """
     model = DrugGuardrail
-    extra = 1  # Provides 1 empty form slot by default for rapid additions
-    classes = ['collapse']  # Keeps the rule sets collapsible to avoid visual clutter
+    extra = 1  
+    classes = ['collapse']  
     fieldsets = (
         (None, {
             'fields': (('parameter', 'operator', 'value'), ('action', 'action_value'))
@@ -652,7 +724,7 @@ class ProtocolDrugInline(admin.StackedInline):
     """
     model = ProtocolDrug
     extra = 1
-    show_change_link = True  # Useful if you want to jump to this specific row's detail screen
+    show_change_link = True  
     fieldsets = (
         (None, {
             'fields': (('drug_name', 'base_dose', 'unit'), ('route', 'administration_day'))
@@ -665,16 +737,10 @@ class ProtocolMasterAdmin(admin.ModelAdmin):
     """
     The Ultimate Engine Control Center Panel
     """
-    # High-level overview table layout columns
     list_display = ('protocol_name', 'cancer_type', 'total_cycles', 'days_per_cycle', 'created_at')
-    
-    # Left-side quick-filtering sidebar widgets
     list_filter = ('cancer_type', 'created_at')
-    
-    # Omnibox target indexing fields
     search_fields = ('protocol_name', 'cancer_type', 'clinical_signs')
     
-    # Organizes the structural properties layout elegantly using bold headers
     fieldsets = (
         ('System Classification Core', {
             'fields': (('protocol_name', 'cancer_type'),)
@@ -683,34 +749,167 @@ class ProtocolMasterAdmin(admin.ModelAdmin):
             'fields': ('stages', 'biomarkers', 'clinical_signs'),
             'description': 'Input arrays are maintained directly as valid JSON tracking strings.'
         }),
-        ('Temporal Scheduling Parameters', {
-            'fields': (('total_cycles', 'days_per_cycle'),)
+    )
+
+
+class InsuranceSchemeInline(admin.TabularInline):
+    """
+    Allows inline creation and editing of nested sub-plans directly 
+    inside the parent Insurance Company detail view.
+    """
+    model = InsuranceScheme
+    extra = 1  # Provides one empty row by default for adding a new scheme
+    fields = (
+        'name', 'classification', 'preauth_threshold', 
+        'copay_amount', 'shif_coordination', 'is_active'
+    )
+    classes = ('collapse',)  # Keeps the form clean by allowing the matrix to toggle open/closed
+
+
+@admin.register(InsuranceCompany)
+class InsuranceCompanyAdmin(admin.ModelAdmin):
+    """
+    Control panel for managing medical insurance payers and corporate accounts.
+    Enriched with nested operational schemes and advanced corporate attributes.
+    """
+    list_display = (
+        'name', 'payer_type', 'kra_pin', 'contact_person', 
+        'phone', 'view_portal', 'is_active'
+    )
+    search_fields = ('name', 'payer_code', 'kra_pin', 'contact_person', 'email')
+    list_filter = ('payer_type', 'is_active', 'contract_end_date')
+    ordering = ('name',)
+    
+    # Wire up the inline manager to handle nested layout schemes concurrently
+    inlines = [InsuranceSchemeInline]
+
+    fieldsets = (
+        ('Corporate Identity', {
+            'fields': ('name', 'payer_code', 'payer_type', 'kra_pin', 'api_endpoint')
+        }),
+        ('Contact & Address Parameters', {
+            # 👇 FIXED: Swapped out non-existent portal_link with api_endpoint field mapping reference
+            'fields': ('contact_person', 'contact_role', 'email', 'phone', 'physical_address', 'postal_address')
+        }),
+        ('Contract SLA & Tariff Management', {
+            'fields': ('contract_start_date', 'contract_end_date', 'claim_submission_window', 'corporate_discount_rate', 'price_list_tariff', 'sla_document'),
+            'description': 'Contract terms matching valid Service Level Agreements (SLA) signed with the provider.'
         }),
     )
 
-    inlines = [ProtocolDrugInline]
+    def view_portal(self, obj):
+        """Generates a secure shortcut link directly to the payer portal in a new tab."""
+        # 👇 FIXED: Points cleanly to real api_endpoint column values
+        if obj.api_endpoint:
+            return format_html('<a href="{}" target="_blank" style="font-weight: bold; color: #00796b;">Verify Sync API ↗</a>', obj.api_endpoint)
+        return "No API Linked"
+    view_portal.short_description = 'Payer Portal Integration'
 
 
-# Also register the child objects directly in case admins need a standalone bird's-eye view of them
-@admin.register(ProtocolDrug)
-class ProtocolDrugAdmin(admin.ModelAdmin):
-    list_display = ('drug_name', 'protocol', 'base_dose', 'unit', 'route')
-    list_filter = ('route', 'unit')
-    search_fields = ('drug_name', 'protocol__protocol_name')
-    inlines = [DrugGuardrailInline]
+@admin.register(InsuranceClaim)
+class InsuranceClaimAdmin(admin.ModelAdmin):
+    """
+    Audit ledger tracking hospital treatment invoices routed to medical insurers.
+    """
+    list_display = (
+        'claim_number', 'patient', 'insurance_company', 
+        'total_amount_billed', 'amount_paid', 'shortfall_amount', 'status_tag', 'date_submitted'
+    )
+    list_filter = ('status', 'insurance_company', 'date_submitted')
+    search_fields = ('claim_number', 'pre_auth_code', 'patient__first_name', 'patient__last_name')
+    ordering = ('-date_submitted',)
+    
+    # Enforces explicit data entry safety loops on critical financial records
+    readonly_fields = ('date_submitted', 'reconciled_at')
+    
+    # Optimizes DB overhead by replacing massive dropdowns with a sleek search modal box
+    raw_id_fields = ('patient', 'insurance_company')
+
+    # Color code execution pathways for insurance claims in the admin index table
+    def status_tag(self, obj):
+        # 👇 FIXED: Aligned keys perfectly with your InsuranceClaim model's real database choices
+        status_colors = {
+            'DRAFT': '#757575',               # Neutral Slate Gray
+            'SUBMITTED': '#0288d1',           # Vibrant Informational Blue
+            'ADJUDICATION': '#f57c00',        # Amber Alert/In Review Warning
+            'DISPUTED': '#d32f2f',            # Danger Crimson Red
+            'REMITTED': '#388e3c',            # Success Field Emerald Green
+            'PARTIALLY_REMITTED': '#7b1fa2'   # Deep Purple Shortfall Warning
+        }
+        color = status_colors.get(obj.status, '#757575')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; text-transform: uppercase;">{}</span>',
+            color, obj.get_status_display() # Use get_status_display() to show clean frontend wording ("Paid/Remitted") instead of raw DB keys
+        )
+    status_tag.short_description = 'Claim Status'
 
 
-@admin.register(DrugGuardrail)
-class DrugGuardrailAdmin(admin.ModelAdmin):
-    list_display = ('get_drug_name', 'get_protocol_name', 'parameter', 'operator', 'value', 'action')
-    list_filter = ('parameter', 'action', 'operator')
-    search_fields = ('drug__drug_name', 'drug__protocol__protocol_name')
+@admin.register(InsuranceScheme)
+class InsuranceSchemeAdmin(admin.ModelAdmin):
+    """
+    Standalone registry fallback to view or modify specific benefit matrix rules directly.
+    """
+    list_display = ('name', 'company', 'classification', 'copay_amount', 'shif_coordination', 'is_active')
+    list_filter = ('classification', 'shif_coordination', 'is_active', 'company')
+    search_fields = ('name', 'company__name')
+    raw_id_fields = ('company',)
 
-    # Custom model field getters to show linked relational values in columns cleanly
-    def get_drug_name(self, obj):
-        return obj.drug.drug_name
-    get_drug_name.short_description = 'Medication Target'
 
-    def get_protocol_name(self, obj):
-        return obj.drug.protocol.protocol_name
-    get_protocol_name.short_description = 'Parent Protocol Code'
+@admin.register(RemittanceBatch)
+class RemittanceBatchAdmin(admin.ModelAdmin):
+    """
+    Financial batch tracking module for processed bulk electronic funds transfers (EFT).
+    """
+    list_display = (
+        'payment_reference', 'insurance_company', 'total_amount_received', 
+        'date_received', 'reconciled_by', 'has_file'
+    )
+    list_filter = ('insurance_company', 'date_received')
+    search_fields = ('payment_reference', 'insurance_company__name')
+    ordering = ('-date_received', '-id')
+    readonly_fields = ('created_at', 'reconciled_by')
+    raw_id_fields = ('insurance_company',)
+
+    def has_file(self, obj):
+        """Visual checkmark in the list view showing if a spreadsheet document is present."""
+        return bool(obj.remittance_file)
+    has_file.boolean = True
+    has_file.short_description = 'Statement File'
+
+    def save_model(self, request, obj, form, change):
+        """Automatically stamp the administrative auditor's user ID onto newly registered bank files."""
+        if not change: # If creating a record via admin site
+            obj.reconciled_by = request.user
+        super().save_model(request, obj, form, change)
+
+@admin.register(ClaimDispatchBatch)
+class ClaimDispatchBatchAdmin(admin.ModelAdmin):
+    """
+    Hospital Ledger interface tracking structured claim invoices 
+    batched and physically or electronically dispatched to insurance providers.
+    """
+    list_display = (
+        'batch_reference', 'insurance_company', 'total_batch_value', 
+        'date_dispatched', 'claims_count_display', 'is_acknowledged', 'created_by'
+    )
+    list_filter = ('is_acknowledged', 'insurance_company', 'date_dispatched')
+    search_fields = ('batch_reference', 'insurance_company__name')
+    ordering = ('-date_dispatched', '-id')
+    
+    # Pre-emptively block dangerous edits on audited transactional properties
+    readonly_fields = ('date_dispatched', 'created_by')
+    raw_id_fields = ('insurance_company',)
+    
+    def claims_count_display(self, obj):
+        """Displays total number of patient files nested inside this batch record."""
+        count = obj.claims.count()
+        if count == 0:
+            return format_html('<span style="color: #c62828; font-weight: bold;">0 Claims (Empty)</span>')
+        return format_html('<span style="color: #2e7d32; font-weight: bold;">{} Claims</span>', count)
+    claims_count_display.short_description = 'Claims Count'
+
+    def save_model(self, request, obj, form, change):
+        """Automatically audit-stamps the logged-in billing specialist compile signature."""
+        if not change:  # On record creation
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)

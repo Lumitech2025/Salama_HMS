@@ -26,6 +26,7 @@ const NurseSidebar = ({ activeModule, setActiveModule, onLogout }) => {
         { id: 'dressing', name: 'Dressing Room', icon: <Bandage size={18} /> },
         { id: 'palliative', name: 'Palliative Care', icon: <HeartHandshake size={18} /> },
         { id: 'history', name: 'Patient History', icon: <FileSearch size={18} /> },
+        { id: 'requisitions', name: 'Requisition Hub', icon: <FileSearch size={18} />  }
     ];
 
     // Defensive handle logout controller fallback layer

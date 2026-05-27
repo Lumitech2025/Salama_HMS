@@ -15,6 +15,7 @@ const LabSidebar = ({ activeTab, setActiveTab, onLogout }) => {
         { id: 'history', label: 'Patient History', icon: <History size={18} /> },
         { id: 'reference', label: 'Reference Desk', icon: <BookOpen size={18} /> },
         { id: 'inventory', label: 'Inventory', icon: <PackageSearch size={18} /> },
+        { id: 'requisitions', label: 'Lab Requisitions', icon: <PackageSearch size={18} /> }
     ];
 
     // Defensive handle logout controller fallback layer

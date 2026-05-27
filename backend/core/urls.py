@@ -3,14 +3,20 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
+    InsuranceCompanyViewSet,
+    InsuranceSchemeViewSet,      # Now correctly bound below
+    RemittanceBatchViewSet, 
+    InsuranceClaimViewSet,
+    ClaimDispatchBatchViewSet,
     InventoryItemViewSet,
     LabInventoryViewSet,
     LabOrderViewSet,
-    LabReferenceViewSet,
+    LabReferenceViewSet,         # Now correctly bound below
     LabTestRegistryViewSet,
     MarketingRequisitionViewSet,
     PatientViewSet, 
-    ProtocolViewSet, 
+    ProtocolViewSet,
+    RequisitionViewSet, 
     TreatmentViewSet, 
     ChemoSessionViewSet, 
     DrugViewSet, 
@@ -36,26 +42,29 @@ from .views import (
 class OptionalSlashRouter(DefaultRouter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # This allows endpoints to accept both formats natively
+        # Allows endpoints to accept both trailing slashes and slash-less formats natively
         self.trailing_slash = '/?' 
 
-# Swap your old router initialization for this one:
+# Initialize our specialized router
 router = OptionalSlashRouter()
 
 # --- 1. Front Desk & Patient Registry ---
 router.register(r'appointments', AppointmentViewSet, basename='appointment')
 router.register(r'patients', PatientViewSet, basename='patient')
+router.register(r'registrations', RegistrationRecordViewSet, basename='registration-records')
 
 # --- 2. Queue & Workflow Orchestration ---
 router.register(r'queue', QueueViewSet, basename='queue')
 
 # --- 3. Triage & Clinical EMR Data ---
 router.register(r'vital-signs', VitalSignViewSet, basename='vital-signs')
+router.register(r'vitals', VitalSignViewSet, basename='vitals') 
 router.register(r'clinical-notes', ClinicalNoteViewSet, basename='clinical-note')
 router.register(r'imaging', ImagingRecordViewSet, basename='imaging')
 
 # --- 4. Protocols & Treatment Plans ---
 router.register(r'protocols', ProtocolViewSet, basename='protocol')
+router.register(r'protocol-masters', ProtocolMasterViewSet, basename='protocol-master') 
 router.register(r'treatments', TreatmentViewSet, basename='treatment')
 router.register(r'chemo-sessions', ChemoSessionViewSet, basename='chemo-session')
 
@@ -65,13 +74,12 @@ router.register(r'drugs', DrugViewSet, basename='drug')
 router.register(r'inventory', LabInventoryViewSet, basename='inventory')
 router.register(r'inventory-items', InventoryItemViewSet, basename='inventory-item')
 
-# --- 6. Diagnostics & Revenue Cycle ---
+# --- 6. Diagnostics, Revenue Cycle & Lab Core ---
 router.register(r'lab-results', LabResultViewSet, basename='lab-result')
 router.register(r'lab-orders', LabOrderViewSet, basename='lab-order')
-router.register(r'lab-references', LabTestRegistryViewSet, basename='lab-reference')
+router.register(r'lab-registry', LabTestRegistryViewSet, basename='lab-registry')
+router.register(r'lab-references', LabReferenceViewSet, basename='lab-reference')
 router.register(r'bills', BillViewSet, basename='bill')
-router.register(r'registrations', RegistrationRecordViewSet, basename='registration-records')
-router.register(r'vitals', VitalSignViewSet, basename='vitals')
 
 # --- 7. Support & Psychology Units ---
 router.register(r'psychology-enrollments', PsychologyEnrollmentViewSet, basename='psychology-enrollment')
@@ -82,18 +90,21 @@ router.register(r'bereavement-logs', BereavementLogViewSet, basename='bereavemen
 router.register(r'outreach-campaigns', OutreachCampaignViewSet, basename='outreach-campaigns')
 router.register(r'referral-partners', ReferralPartnerViewSet, basename='referral-partners')
 router.register(r'social-media-posts', SocialMediaPostViewSet, basename='social-media-posts')
+router.register(r'requisitions', RequisitionViewSet, basename='requisition')
 router.register(r'marketing-requisitions', MarketingRequisitionViewSet, basename='marketing-requisitions')
 
-router.register(r'protocols', ProtocolMasterViewSet, basename='protocol-master')
+# --- 9. Insurance Infrastructure & Revenue Cycle Management (RCM) ---
+router.register(r'insurance-companies', InsuranceCompanyViewSet, basename='insurance-company')
+router.register(r'insurance-schemes', InsuranceSchemeViewSet, basename='insurance-scheme')
+router.register(r'remittance-batches', RemittanceBatchViewSet, basename='remittance-batch')
+router.register(r'insurance-claims', InsuranceClaimViewSet, basename='insurance-claim')
+router.register(r'claim-dispatch-batches', ClaimDispatchBatchViewSet, basename='claim-dispatch-batch')
+
 
 urlpatterns = [
-    # Include the main router paths
-    path('', include(router.urls)), 
-
-    # Fallback paths to accept trailing slashes if any other component sends them
-    path('lab-references/', include(router.urls)),
-
-    # Authentication Endpoints
     path('token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+
+    # Include all auto-generated paths from the router cleanly
+    path('', include(router.urls)), 
 ]

@@ -7,6 +7,7 @@ import {
     Package, 
     Users,
     Receipt,      
+    FileSpreadsheet, // Swapped for icon variety
     LogOut 
 } from 'lucide-react';
 
@@ -20,6 +21,7 @@ const PharmacistSidebar = ({ activeTab, setActiveTab, onLogout }) => {
         { id: 'inventory', label: 'Inventory', icon: <Package size={18} /> },
         { id: 'patients', label: 'References', icon: <Users size={18} /> },
         { id: 'billing', label: 'Billing', icon: <Receipt size={18} /> },
+        { id: 'requisitions', label: 'Requisitions', icon: <FileSpreadsheet size={18} /> }, // Fixed ID to lowercase & unique icon
     ];
 
     // Defensive handle logout controller fallback layer
@@ -73,7 +75,7 @@ const PharmacistSidebar = ({ activeTab, setActiveTab, onLogout }) => {
                 </div>
                 <button 
                     onClick={handleLogoutClick}
-                    className="flex items-center justify-start space-x-4 px-6 py-4 text-rose-500 hover:bg-rose-500/5 rounded-2xl transition-all w-full"
+                    className="flex items-center justify-start space-x-4 px-6 py-4 text-rose-500 hover:bg-rose-500/5 rounded-2xl transition-all w-full cursor-pointer"
                 >
                     <LogOut size={18} />
                     <span className="text-[11px] font-black uppercase tracking-[0.2em]">Log Out</span>

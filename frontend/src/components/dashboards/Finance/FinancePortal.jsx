@@ -3,10 +3,11 @@ import FinanceSidebar from './FinanceSidebar';
 import FinanceDashboard from './FinanceDashboard';
 
 // Import all functional modules
-import RequisitionHub from './modules/RequisitionHub';
 import MainStoreLedger from './modules/MainStoreLedger';
 import SupplierManagement from './modules/SupplierManagement';
-import InsuranceClaimsHub from './modules/InsuranceClaimsHub'; 
+import InsuranceClaimsHub from './modules/InsuranceClaimsHub';
+import FinanceRequisitionsTab from './modules/FinanceRequisitionsTab';
+import InsuranceProviders from '../billingofficer/modules/InsuranceProviders';
 
 const FinancePortal = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -21,9 +22,6 @@ const FinancePortal = () => {
       case 'overview': 
         return <FinanceDashboard />;
       
-      case 'requisitions': 
-        return <RequisitionHub />; 
-      
       case 'inventory': 
         return <MainStoreLedger />;
       
@@ -31,8 +29,14 @@ const FinancePortal = () => {
         return <SupplierManagement />;
       
       case 'claims': 
-        // Replaced the placeholder with the functional Hub
         return <InsuranceClaimsHub />; 
+
+      case 'finance_requisitions':
+        // The unread polling badge is handled directly inside the Sidebar independently now
+        return <FinanceRequisitionsTab />;
+      
+      case 'insurance_providers':
+        return <InsuranceProviders />;
       
       default: 
         return <FinanceDashboard />;
@@ -40,16 +44,20 @@ const FinancePortal = () => {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      {/* The sidebar controls the activeTab state */}
+    <div className="flex min-h-screen bg-slate-50 font-sans antialiased text-slate-800">
+      {/* Fixed sidebar container handling local state and background threads */}
       <FinanceSidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         onLogout={handleLogout} 
       />
       
-      <main className="flex-1 ml-80 p-12 transition-all duration-500">
-        <div className="max-w-[1600px] mx-auto">
+      {/* MAIN CONTENT VIEWPORT CONTAINER
+        Using w-80 sidebar width offset (pl-80) instead of ml-80 to create a rigid spacing block.
+        This provides a safe bounding box for your tables and dashboard metrics.
+      */}
+      <main className="flex-1 pl-80 min-h-screen w-full transition-all duration-300">
+        <div className="p-8 md:p-12 max-w-[1600px] mx-auto w-full animate-in fade-in duration-300">
           {renderContent()}
         </div>
       </main>

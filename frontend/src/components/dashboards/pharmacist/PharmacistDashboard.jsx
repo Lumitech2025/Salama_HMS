@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import PharmacistSidebar from './PharmacistSidebar';
-import PharmacyOverview from './modules/PharmacyOverview'; // New Component
+import PharmacyOverview from './modules/PharmacyOverview'; 
 import BillingRequisition from './modules/BillingRequisition';
 import PrescriptionQueue from './modules/PrescriptionQueue';
 import InventoryManager from './modules/InventoryManager';
 import PatientRegistry from "../../shared/PatientRegistry";
+// FIX 1: Explicitly matching the exact file name on disk to prevent Vite build analysis crash
+import PharmacyRequisitionsTab from './modules/PharmacyRequisitionsTab';
 
 const PharmacistDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -17,6 +19,12 @@ const PharmacistDashboard = () => {
         return <PrescriptionQueue />;
       case 'inventory':
         return <InventoryManager />;
+      case 'dispensing': 
+        return (
+          <div className="p-10 text-slate-400 italic bg-white rounded-[3rem] border border-slate-100 shadow-sm">
+            Patient Dispensing History & Clinical Records coming soon...
+          </div>
+        );
       case 'patients':
         return (
           <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
@@ -25,16 +33,18 @@ const PharmacistDashboard = () => {
         );
       case 'billing':
         return <BillingRequisition />;
+      case 'requisitions': 
+        return <PharmacyRequisitionsTab />;
       default:
         return <div className="p-10 text-slate-400 italic">Module under construction...</div>;
     }
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans">
+    <div className="flex min-h-screen bg-slate-50 font-sans antialiased text-slate-800">
       <PharmacistSidebar activeTab={activeTab} setActiveTab={setActiveTab} />
       
-      <main className="flex-1 p-8 overflow-y-auto">
+      <main className="flex-1 p-8 overflow-y-auto h-screen">
         <header className="flex justify-between items-center mb-10">
           <div>
             <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase italic">
@@ -45,18 +55,19 @@ const PharmacistDashboard = () => {
             </p>
           </div>
           
-          <div className="bg-white px-6 py-3 rounded-[2rem] shadow-sm border border-slate-200 flex items-center gap-4">
-             <div className="w-10 h-10 bg-teal-500 rounded-full flex items-center justify-center text-white font-black text-xs shadow-lg shadow-teal-200">
-               CK
+          <div className="bg-white px-6 py-3 rounded-[2rem] shadow-xs border border-slate-200 flex items-center gap-4">
+             <div className="w-10 h-10 bg-teal-500 rounded-full flex items-center justify-center text-white font-black text-xs shadow-md shadow-teal-200">
+               MK
              </div>
              <div className="flex flex-col">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Pharmacist on Duty</span>
-                <span className="text-sm font-black text-slate-800">Collins Kimathi</span>
+                <span className="text-sm font-black text-slate-800">Meryln Kendi</span>
              </div>
           </div>
         </header>
 
-        {renderContent()}
+        <div className="animate-in fade-in duration-300">
+          {renderContent()}
+        </div>
       </main>
     </div>
   );

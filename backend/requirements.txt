@@ -1,0 +1,22 @@
+asgiref==3.11.1
+branca==0.8.1
+certifi==2026.5.20
+charset-normalizer==3.4.7
+Django==6.0.4
+django-cors-headers==4.9.0
+django-filter==25.2
+django-jazzmin==3.0.4
+djangorestframework==3.17.1
+djangorestframework_simplejwt==5.5.1
+folium==0.20.0
+idna==3.16
+packaging @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_packaging_1777103621/work
+psycopg2-binary==2.9.12
+PyJWT==2.12.1
+requests==2.34.2
+setuptools==82.0.1
+sqlparse==0.5.5
+tzdata==2026.2
+urllib3==2.7.0
+wheel==0.47.0
+xyzservices==2025.4.0

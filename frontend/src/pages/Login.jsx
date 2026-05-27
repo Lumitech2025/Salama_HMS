@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, Fingerprint, IdCard, Leaf, ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
+import { LOGIN_URL } from '../services/API'; // Import our new single-point-of-truth address configuration
 import salamaBg from '../assets/salama.jpg';
 
 const Login = () => {
@@ -11,45 +12,50 @@ const Login = () => {
     const navigate = useNavigate();
 
     const handleLogin = async (e) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-    
-    try {
-        const response = await fetch('http://localhost:8000/api/auth/login/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ employee_id: employeeId, password: password }),
-        });
+        e.preventDefault();
+        setError('');
+        setIsLoading(true);
+        
+        try {
+            // FIXED: Utilizes the absolute network variable imported from your shared API utility
+            const response = await fetch(LOGIN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ employee_id: employeeId, password: password }),
+            });
 
-        const data = await response.json();
+            const data = await response.json();
 
-        if (response.ok) {
-            localStorage.setItem('access_token', data.access);
-            
-            // ONE clean role variable
-            const cleanRole = (data.role || data.designation || "").toUpperCase().trim();
-            
-            // Save to BOTH keys to satisfy App.jsx AND Dashboard.jsx
-            localStorage.setItem('user_role', cleanRole);
-            localStorage.setItem('designation', cleanRole);
+            if (response.ok) {
+                // Securely write both JWT tokens to local storage
+                localStorage.setItem('access_token', data.access);
+                localStorage.setItem('refresh_token', data.refresh); 
+                
+                // Extract and normalize role parameters
+                const cleanRole = (data.role || data.designation || "").toUpperCase().trim();
+                
+                localStorage.setItem('user_role', cleanRole);
+                localStorage.setItem('designation', cleanRole);
 
-            // Use the cleanRole for navigation
-            if (cleanRole === 'HMS ADMIN' || cleanRole === 'HMS_ADMIN' || cleanRole === 'ADMIN') {
-                navigate('/admin-dashboard');
-            } 
-            else {
-                navigate('/'); 
+                // Role-based clinical workflow redirection
+                if (cleanRole === 'HMS ADMIN' || cleanRole === 'HMS_ADMIN' || cleanRole === 'ADMIN') {
+                    navigate('/admin-dashboard');
+                } 
+                else if (cleanRole === 'FINANCE') {
+                    navigate('/finance-dashboard');
+                }
+                else {
+                    navigate('/'); 
+                }
+            } else {
+                setError(response.status === 401 ? 'Authentication Failed: Invalid Credentials' : 'Access Denied');
             }
-        } else {
-            setError(response.status === 401 ? 'Authentication Failed: Invalid Credentials' : 'Access Denied');
+        } catch (err) {
+            setError('System Connection Error: Verify Server Status');
+        } finally {
+            setIsLoading(false);
         }
-    } catch (err) {
-        setError('System Connection Error: Verify Server Status');
-    } finally {
-        setIsLoading(false);
-    }
-};
+    };
 
     return (
         <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-slate-950 font-['Inter'] antialiased">
@@ -60,7 +66,6 @@ const Login = () => {
                     className="w-full h-full object-cover"
                     alt="Hospital Background"
                 />
-                {/* High-density mask for text protection */}
                 <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-[4px]"></div>
                 <div className="absolute inset-0 bg-gradient-to-b from-slate-950/80 via-transparent to-slate-950/90"></div>
             </div>
@@ -81,10 +86,11 @@ const Login = () => {
                         </p>
                     </div>
 
-                    <form onSubmit={handleLogin} className="space-y-6 font-['Roboto']">
+                    {/* Form Layout matching reception typography structures */}
+                    <form onSubmit={handleLogin} className="space-y-6">
                         {error && (
                             <div className="p-4 rounded-xl text-xs font-bold bg-red-950/50 text-red-400 border border-red-500/30 flex items-center uppercase tracking-wider">
-                                <ShieldCheck size={18} className="mr-3" /> {error}
+                                <ShieldCheck size={18} className="mr-3 text-red-500" /> {error}
                             </div>
                         )}
 
