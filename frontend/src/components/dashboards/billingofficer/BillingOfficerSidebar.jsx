@@ -4,23 +4,21 @@ import {
     LayoutDashboard, 
     FileSpreadsheet, 
     FileSearch, 
-    RefreshCcw, 
-    Scale, 
-    Calculator, 
-    History,
     Building2,
+    History,
+    Scale,
     LogOut
 } from 'lucide-react';
 
-const BillingOfficerSidebar = ({ activeTab, setActiveTab }) => {
+const BillingOfficerSidebar = ({ activeTab = 'overview', setActiveTab }) => {
     const navigate = useNavigate();
 
+    // Expanded menu items to encompass full hospital revenue cycle workflows
     const menuItems = [
         { id: 'overview', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
-    { id: 'clearance', label: 'Insurance Verification', icon: <FileSpreadsheet size={18} /> },
-    { id: 'insurance-providers', label: 'Insurance Providers', icon: <Building2 size={18} /> },
-    
-        
+        { id: 'clearance', label: 'Insurance Verification', icon: <FileSpreadsheet size={18} /> },
+        { id: 'insurance-providers', label: 'Insurance Providers', icon: <Building2 size={18} /> },
+        { id: 'service-catalogue', label: 'Service Catalogue', icon: <FileSearch size={18} /> },
     ];
 
     const handleLogout = () => {
@@ -46,7 +44,7 @@ const BillingOfficerSidebar = ({ activeTab, setActiveTab }) => {
                 {menuItems.map((item) => (
                     <button
                         key={item.id}
-                        onClick={() => setActiveTab(item.id)}
+                        onClick={() => setActiveTab?.(item.id)}
                         className={`w-full flex items-center justify-start px-6 py-4 rounded-2xl transition-all duration-300 ${
                             activeTab === item.id 
                             ? 'bg-teal-600 text-white shadow-xl shadow-teal-600/20 font-bold' 

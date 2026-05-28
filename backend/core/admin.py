@@ -9,11 +9,11 @@ from django.utils.safestring import mark_safe
 import csv
 from datetime import date
 from .models import (InsuranceScheme, LabOrder, RegistrationRecord,
-    LabInventoryItem, Patient, Protocol, RequisitionItem, StockAdjustment, Treatment, ChemoSession, 
+    LabInventoryItem, Patient, Protocol, RequisitionItem, Service, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue, Requisition,
     Prescription, PrescriptionItem, ClinicalNote, ImagingRecord, PsychologyEnrollment, SessionLog, BereavementLog, 
     OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabTestRegistry, LabPanel, ProtocolMaster, ProtocolDrug, DrugGuardrail,
-    InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch
+    InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, Service, PatientBillableItem
 )
 
 
@@ -913,3 +913,91 @@ class ClaimDispatchBatchAdmin(admin.ModelAdmin):
         if not change:  # On record creation
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+
+# --- Inline View for Billable Items inside Patient/Visit views if needed ---
+class PatientBillableItemInline(admin.TabularInline):
+    model = PatientBillableItem
+    extra = 0
+    raw_id_fields = ['patient', 'visit']
+    readonly_fields = [
+        'service_sku_snapshot', 'service_name_snapshot', 
+        'price_snap', 'total_amount', 'ordered_by', 'created_at'
+    ]
+    can_delete = False
+
+
+# --- Admin Configuration for Master Service Catalog ---
+
+@admin.register(Service)
+class ServiceAdmin(admin.ModelAdmin):
+    list_display = ['sku', 'name', 'dept', 'price', 'active', 'created_at']
+    list_filter = ['dept', 'active', 'created_at']
+    search_fields = ['sku', 'name']
+    ordering = ['sku']
+    list_editable = ['price', 'active']  # Allows quick baseline adjustments right from the table row
+    
+    fieldsets = (
+        ('Core Identifier', {
+            'fields': ('sku', 'name', 'dept')
+        }),
+        ('Financial Configuration', {
+            'fields': ('price', 'active')
+        }),
+    )
+
+    def save_model(self, request, obj, form, change):
+        """Force uppercase SKUs on save via Django Admin interface."""
+        if obj.sku:
+            obj.sku = obj.sku.strip().upper()
+        super().save_model(request, obj, form, change)
+
+
+# --- Admin Configuration for Point-of-Care Billing Transactions ---
+
+@admin.register(PatientBillableItem)
+class PatientBillableItemAdmin(admin.ModelAdmin):
+    list_display = [
+        'id', 'get_queue_id', 'get_patient_name', 'service_sku_snapshot', 
+        'service_name_snapshot', 'station_charged', 'qty', 'price_snap', 
+        'total_amount', 'billing_status', 'created_at'
+    ]
+    list_filter = ['billing_status', 'station_charged', 'created_at']
+    search_fields = [
+        'service_sku_snapshot', 'service_name_snapshot', 
+        'patient__name', 'visit__queue_id', 'visit__health_record_number'
+    ]
+    ordering = ['-created_at']
+    list_editable = ['billing_status']  # Enables billing supervisors to quickly toggle status overrides (PAID/WAIVED)
+    
+    # Critical: Keep snapshot details strictly read-only to prevent back-end financial manipulation
+    readonly_fields = [
+        'service_sku_snapshot', 'service_name_snapshot', 
+        'price_snap', 'total_amount', 'ordered_by', 'created_at'
+    ]
+    
+    raw_id_fields = ['patient', 'visit', 'service']  # Use search glass popups instead of resource-heavy select boxes
+
+    fieldsets = (
+        ('Encounter Linkage', {
+            'fields': ('patient', 'visit', 'service')
+        }),
+        ('Transaction Snapshot Data', {
+            'description': 'Immutable point-of-care financial snapshots preserved for historical auditing purposes.',
+            'fields': ('service_sku_snapshot', 'service_name_snapshot', 'price_snap')
+        }),
+        ('Quantities & Financials', {
+            'fields': ('qty', 'total_amount', 'billing_status', 'station_charged')
+        }),
+        ('Audit Metadata', {
+            'fields': ('ordered_by', 'created_at')
+        }),
+    )
+
+    # Custom columns to resolve performance-friendly relational field strings on your table matrix
+    @admin.display(ordering='visit__queue_id', description='Queue Token')
+    def get_queue_id(self, obj):
+        return obj.visit.queue_id if obj.visit else "N/A"
+
+    @admin.display(ordering='patient__name', description='Patient Name')
+    def get_patient_name(self, obj):
+        return obj.patient.name

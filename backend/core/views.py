@@ -29,7 +29,8 @@ from .models import (
     LabInventoryItem, StockAdjustment, Prescription, 
     PrescriptionItem, ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem, PsychologyEnrollment, SessionLog, BereavementLog, 
     OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabReference, LabTestRegistry, ProtocolMaster, ProtocolDrug, DrugGuardrail,
-    InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, InsuranceScheme
+    InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, InsuranceScheme,
+    Service, PatientBillableItem
 )
 from .serializers import (
     LabOrderSerializer, LabReferenceSerializer, OncologyClinicalPortalSerializer, PatientSerializer, ProtocolSerializer, TreatmentSerializer, 
@@ -39,7 +40,8 @@ from .serializers import (
     QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer, RegistrationRecordSerializer, InventoryItemSerializer, PsychologyEnrollmentSerializer, 
     SessionLogSerializer, 
     BereavementLogSerializer, OutreachCampaignSerializer, ReferralPartnerSerializer, SocialMediaPostSerializer,RequisitionSerializer, MarketingRequisitionSerializer, LabTestRegistrySerializer, ProtocolMasterSerializer,
-    InsuranceCompanySerializer, InsuranceClaimSerializer, RemittanceBatchSerializer, DetailedPatientClaimSerializer, ClaimDispatchBatchSerializer, InsuranceSchemeSerializer
+    InsuranceCompanySerializer, InsuranceClaimSerializer, RemittanceBatchSerializer, DetailedPatientClaimSerializer, ClaimDispatchBatchSerializer, InsuranceSchemeSerializer,
+    ServiceSerializer, PatientBillableItemSerializer
 )
 
 # --- 1. PERMISSION LOGIC ---
@@ -881,3 +883,106 @@ class ClaimDispatchBatchViewSet(viewsets.ModelViewSet):
     serializer_class = ClaimDispatchBatchSerializer
     filterset_fields = ['insurance_company', 'is_acknowledged']
     search_fields = ['batch_reference']
+
+class ServiceViewSet(viewsets.ModelViewSet):
+    """
+    Handles administrative CRUD operations for the clinic's price book catalog.
+    """
+    queryset = Service.objects.all().order_by('sku')
+    serializer_class = ServiceSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['dept', 'active']
+    search_fields = ['sku', 'name']
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Prevent accidental hard deletion of services. Soft-deactivates instead 
+        to maintain historical foreign key data integrity.
+        """
+        instance = self.get_object()
+        instance.active = False
+        instance.save()
+        return Response(
+            {"detail": f"Service {instance.sku} has been deactivated successfully."},
+            status=status.HTTP_200_OK
+        )
+
+
+class PatientBillableItemViewSet(viewsets.ModelViewSet):
+    """
+    Handles point-of-care item charging across multiple clinical workflow stations.
+    """
+    queryset = PatientBillableItem.objects.all()
+    serializer_class = PatientBillableItemSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['patient', 'visit', 'station_charged', 'billing_status']
+    search_fields = ['service_sku_snapshot', 'service_name_snapshot', 'visit__queue_id', 'patient__name']
+
+    def get_queryset(self):
+        """
+        Optimizes database performance using select_related, minimizing 
+        N+1 lookup problems on heavy finance tracking queries.
+        """
+        return self.queryset.select_related('patient', 'visit', 'service', 'ordered_by')
+
+    @action(detail=False, methods=['get'], url_path='active-invoice')
+    def active_invoice(self, request):
+        """
+        Custom endpoint for the billing/cashier desk to instantly retrieve all 
+        PENDING charges for a patient's active visit loop using their queue ID or visit record.
+        Example query: /api/billable-items/active-invoice/?visit_id=5 or ?queue_id=Q26-001
+        """
+        visit_id = request.query_params.get('visit_id')
+        queue_id = request.query_params.get('queue_id')
+        
+        queryset = self.get_queryset().filter(billing_status='PENDING')
+        
+        if visit_id:
+            queryset = queryset.filter(visit_id=visit_id)
+        elif queue_id:
+            queryset = queryset.filter(visit__queue_id__iexact=queue_id)
+        else:
+            return Response(
+                {"error": "Please provide a 'visit_id' or 'queue_id' query parameter."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        serializer = self.get_serializer(queryset, many=True)
+        
+        # Calculate summary metadata block for the billing UI
+        subtotal = sum(item.total_amount for item in queryset)
+        
+        return Response({
+            "items": serializer.data,
+            "invoice_metadata": {
+                "item_count": queryset.count(),
+                "total_pending_kes": subtotal
+            }
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='update-status')
+    def update_status(self, request, pk=None):
+        """
+        Explicit action endpoint for the cashier or administrative desk to settle payments or issue waivers.
+        Expected payload: {"status": "PAID"} or {"status": "WAIVED"}
+        """
+        billable_item = self.get_object()
+        new_status = request.data.get('status')
+        
+        valid_statuses = [choice[0] for choice in PatientBillableItem.BILLING_STATUS_CHOICES]
+        if new_status not in valid_statuses:
+            return Response(
+                {"error": f"Invalid status selection. Choose from: {', '.join(valid_statuses)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        billable_item.billing_status = new_status
+        billable_item.save()
+        
+        return Response({
+            "message": f"Item status updated successfully to {new_status}.",
+            "item_id": billable_item.id,
+            "new_status": billable_item.billing_status
+        }, status=status.HTTP_200_OK)

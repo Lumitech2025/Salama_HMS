@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import API from '@/api/api';
 import { 
   LayoutDashboard, Database, ClipboardList, Truck, 
-  Receipt, LogOut, ChevronRight, ShieldCheck, Building2 
+  Receipt, LogOut, ChevronRight, ShieldCheck, Building2, 
+  FileText  // Using clean FileText icon for the tariff book catalog look
 } from 'lucide-react';
 
 const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
@@ -10,18 +11,16 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
 
   // Poll for new pending requisitions to show the notification badge
   useEffect(() => {
-    let isMounted = true; // Clean teardown flag to prevent race conditions
+    let isMounted = true; 
 
     const fetchUnread = async () => {
       try {
-        // Fetching only PENDING requisitions that haven't been viewed
         const res = await API.get('/requisitions/', { 
           params: { status: 'PENDING', is_viewed_by_finance: false } 
         });
         
         if (!isMounted) return;
 
-        // Adjust based on whether your API returns a 'count' field or a raw array
         const count = res.data.count !== undefined ? res.data.count : res.data.length;
         setUnreadCount(count);
       } catch (err) {
@@ -30,27 +29,27 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
     };
 
     fetchUnread();
-    const interval = setInterval(fetchUnread, 30000); // Check every 30 seconds
+    const interval = setInterval(fetchUnread, 30000); 
     
     return () => {
       isMounted = false;
-      clearInterval(interval); // Destroys the interval process on user signout
+      clearInterval(interval); 
     };
   }, []);
 
-  // Map descriptions & assign the live unread count to the core array
+  // Map descriptions & assign the live unread count cleanly using raw class references for icons
   const menuItems = [
-    { id: 'overview', label: 'Overview',  icon: LayoutDashboard },
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard, },
     { 
       id: 'finance_requisitions', label: 'Requisitions', 
       icon: ClipboardList, 
-      badge: unreadCount > 0 ? unreadCount : null 
+            badge: unreadCount > 0 ? unreadCount : null 
     },
-    { id: 'inventory', label: 'Main Store',  icon: Database },
-    { id: 'vendors', label: 'Suppliers',  icon: Truck },
-    { id: 'insurance_providers', label: 'Insurance Providers', icon: Building2 },
-    { id: 'claims', label: 'Claims', icon: Receipt },
-
+    { id: 'inventory', label: 'Main Store', icon: Database  },
+    { id: 'vendors', label: 'Suppliers', icon: Truck },
+    { id: 'insurance_providers', label: 'Insurance Providers', icon: Building2  },
+    { id: 'claims', label: 'Claims', icon: Receipt  },
+    { id: 'service-catalogue', label: 'Service Catalogue', icon: FileText },
   ];
 
   return (
@@ -87,7 +86,7 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
               }`}>
                 <Icon size={20} />
                 
-                {/* WHATSAPP-STYLE NOTIFICATION BADGE */}
+                {/* NOTIFICATION BADGE */}
                 {item.badge && (
                   <span className="absolute -top-1.5 -right-1.5 flex h-5 min-w-[20px] px-1 items-center justify-center rounded-full bg-rose-500 text-[10px] font-black text-white animate-pulse shadow-lg shadow-rose-500/40 border border-[#020617]">
                     {item.badge}

@@ -4,14 +4,14 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
     InsuranceCompanyViewSet,
-    InsuranceSchemeViewSet,      # Now correctly bound below
+    InsuranceSchemeViewSet,      
     RemittanceBatchViewSet, 
     InsuranceClaimViewSet,
     ClaimDispatchBatchViewSet,
     InventoryItemViewSet,
     LabInventoryViewSet,
     LabOrderViewSet,
-    LabReferenceViewSet,         # Now correctly bound below
+    LabReferenceViewSet,         
     LabTestRegistryViewSet,
     MarketingRequisitionViewSet,
     PatientViewSet, 
@@ -36,7 +36,10 @@ from .views import (
     OutreachCampaignViewSet, 
     ReferralPartnerViewSet, 
     SocialMediaPostViewSet,
-    ProtocolMasterViewSet
+    ProtocolMasterViewSet,
+    # --- New Point-of-Care Billing Imports ---
+    ServiceViewSet,
+    PatientBillableItemViewSet
 )
 
 class OptionalSlashRouter(DefaultRouter):
@@ -75,6 +78,8 @@ router.register(r'inventory', LabInventoryViewSet, basename='inventory')
 router.register(r'inventory-items', InventoryItemViewSet, basename='inventory-item')
 
 # --- 6. Diagnostics, Revenue Cycle & Lab Core ---
+router.register(r'services', ServiceViewSet, basename='services')
+router.register(r'billable-items', PatientBillableItemViewSet, basename='billable-item')
 router.register(r'lab-results', LabResultViewSet, basename='lab-result')
 router.register(r'lab-orders', LabOrderViewSet, basename='lab-order')
 router.register(r'lab-registry', LabTestRegistryViewSet, basename='lab-registry')

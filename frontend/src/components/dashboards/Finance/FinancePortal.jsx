@@ -8,6 +8,7 @@ import SupplierManagement from './modules/SupplierManagement';
 import InsuranceClaimsHub from './modules/InsuranceClaimsHub';
 import FinanceRequisitionsTab from './modules/FinanceRequisitionsTab';
 import InsuranceProviders from '../billingofficer/modules/InsuranceProviders';
+import ServiceCatalogue from '../billingofficer/modules/ServiceCatalogue';
 
 const FinancePortal = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -37,6 +38,9 @@ const FinancePortal = () => {
       
       case 'insurance_providers':
         return <InsuranceProviders />;
+      
+      case 'service-catalogue':
+        return <ServiceCatalogue />;
       
       default: 
         return <FinanceDashboard />;

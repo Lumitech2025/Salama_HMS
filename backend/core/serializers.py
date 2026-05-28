@@ -8,7 +8,8 @@ from .models import (
     LabInventoryItem, Prescription, PrescriptionItem, LabPanel,
     ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem, PsychologyEnrollment, SessionLog, BereavementLog, 
     OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabOrder, ProtocolMaster, ProtocolDrug, DrugGuardrail, Requisition, MarketingRequisitionExtension, OutreachCampaign,
-    InsuranceScheme, InsuranceCompany, InsuranceClaim, RemittanceBatch, ClaimDispatchBatch
+    InsuranceScheme, InsuranceCompany, InsuranceClaim, RemittanceBatch, ClaimDispatchBatch,
+    Service, PatientBillableItem
 )
 User = get_user_model()
 
@@ -1060,3 +1061,72 @@ class DetailedPatientClaimSerializer(serializers.ModelSerializer):
         if obj.patient:
             return f"{obj.patient.first_name} {obj.patient.last_name}"
         return "Unknown Patient"
+    
+
+
+class ServiceSerializer(serializers.ModelSerializer):
+    # Display the human-readable label for departments in read-only mode
+    dept_display = serializers.CharField(source='get_dept_display', read_only=True)
+
+    class Meta:
+        model = Service
+        fields = ['id', 'sku', 'name', 'dept', 'dept_display', 'price', 'active', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_sku(self, value):
+        """Force uppercase SKUs and strip whitespace."""
+        return value.strip().upper()
+
+
+# --- Real-Time Point-of-Care Billing Serializer ---
+
+class PatientBillableItemSerializer(serializers.ModelSerializer):
+    # Read-only nested lookup helpers for the UI dashboards
+    patient_name = serializers.CharField(source='patient.name', read_only=True)
+    health_record_number = serializers.CharField(source='visit.health_record_number', read_only=True)
+    queue_id = serializers.CharField(source='visit.queue_id', read_only=True)
+    ordered_by_name = serializers.CharField(source='ordered_by.get_full_name', read_only=True)
+    station_display = serializers.CharField(source='get_station_charged_display', read_only=True)
+    
+    class Meta:
+        model = PatientBillableItem
+        fields = [
+            'id', 'patient', 'patient_name', 'visit', 'health_record_number', 'queue_id',
+            'service', 'service_sku_snapshot', 'service_name_snapshot',
+            'station_charged', 'station_display', 'qty', 'price_snap', 'total_amount', 
+            'billing_status', 'ordered_by', 'ordered_by_name', 'created_at'
+        ]
+        read_only_fields = [
+            'id', 'service_sku_snapshot', 'service_name_snapshot', 
+            'total_amount', 'ordered_by', 'created_at'
+        ]
+
+    def validate(self, data):
+        """
+        Validate and automatically establish price snapshots from the 
+        Service template matrix if not explicitly overridden.
+        """
+        service = data.get('service')
+        price_snap = data.get('price_snap')
+
+        # If a service blueprint is provided, pull its defaults if snapshots are missing
+        if service:
+            if not price_snap:
+                data['price_snap'] = service.price
+        elif not price_snap:
+            raise serializers.ValidationError({
+                "price_snap": "A baseline price rate must be supplied if no master service template is selected."
+            })
+            
+        return data
+
+    def create(self, validated_data):
+        """Inject the requesting clinical user context directly from the active HTTP session."""
+        request = self.context.get('request')
+        if request and request.user:
+            validated_data['ordered_by'] = request.user
+        else:
+            # Fallback error check if context isn't clean
+            raise serializers.ValidationError("Authentication context is required to register automated point-of-care billing charges.")
+            
+        return super().create(validated_data)

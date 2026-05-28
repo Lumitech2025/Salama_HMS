@@ -1394,3 +1394,103 @@ def auto_generate_lab_results(sender, instance, created, **kwargs):
                         test_name=clean_code,
                         status='PENDING'
                     )
+
+
+class Service(models.Model):
+    DEPARTMENT_CHOICES = [
+        ('ONC', 'Oncology Center'),
+        ('LAB', 'Laboratory'),
+        ('RAD', 'Radiology & Imaging'),
+        ('NUR', 'Nursing & Procedures'),
+        ('PSY', 'Counselling Psychology'),
+        ('PHA', 'Pharmacy'),
+    ]
+
+    sku = models.CharField(max_length=50, unique=True, db_index=True)
+    name = models.CharField(max_length=255)
+    dept = models.CharField(max_length=3, choices=DEPARTMENT_CHOICES)
+    price = models.DecimalField(max_digits=12, decimal_places=2, help_text="Base selling price in KES")
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.sku} - {self.name} (KES {self.price})"
+
+
+# --- Transactional Point-Of-Care Billing Matrix ---
+
+class PatientBillableItem(models.Model):
+    STATION_CHOICES = [
+        ('REGISTRATION', 'Registration'),
+        ('TRIAGE', 'Triage Station'),
+        ('DOCTOR', 'Consultation Room'),
+        ('LAB', 'Laboratory'),
+        ('RADIOLOGY', 'Radiology Room'),
+        ('PSYCHOLOGY', 'Psychology Room'),
+        ('PHARMACY', 'Pharmacy'),
+    ]
+
+    BILLING_STATUS_CHOICES = [
+        ('PENDING', 'Pending Payment'),
+        ('PAID', 'Paid'),
+        ('WAIVED', 'Waived'),
+    ]
+
+    patient = models.ForeignKey(
+        'Patient', 
+        on_delete=models.CASCADE, 
+        related_name='billable_items'
+    )
+    # Links directly to the current session sequence to cluster items on an active visit invoice
+    visit = models.ForeignKey(
+        'RegistrationRecord', 
+        on_delete=models.CASCADE, 
+        related_name='billable_items',
+        null=True,
+        blank=True
+    )
+    # Optional connection to the specific base configuration blueprint
+    service = models.ForeignKey(
+        Service, 
+        on_delete=models.PROTECT, 
+        related_name='billed_instances',
+        null=True,
+        blank=True
+    )
+    
+    # Text fallback snapshots to prevent historical changes from corrupting old financial records
+    service_sku_snapshot = models.CharField(max_length=50)
+    service_name_snapshot = models.CharField(max_length=255)
+    
+    # Real-time auditing context
+    station_charged = models.CharField(max_length=20, choices=STATION_CHOICES)
+    qty = models.PositiveIntegerField(default=1)
+    price_snap = models.DecimalField(max_digits=12, decimal_places=2, help_text="Price snapshot at point of care")
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
+    
+    billing_status = models.CharField(max_length=15, choices=BILLING_STATUS_CHOICES, default='PENDING')
+    ordered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.PROTECT, 
+        related_name='initiated_charges'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        # Always pull from the configuration template if present during initial entry creation
+        if self.service and not self.id:
+            self.service_sku_snapshot = self.service.sku
+            self.service_name_snapshot = self.service.name
+            if not self.price_snap:
+                self.price_snap = self.service.price
+                
+        # Handle strict point-of-care totals generation
+        self.total_amount = self.qty * self.price_snap
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.service_sku_snapshot} - {self.patient.name} ({self.billing_status})"
