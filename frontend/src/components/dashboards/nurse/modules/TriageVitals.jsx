@@ -26,7 +26,6 @@ const TriageVitals = ({ patient }) => {
             <div className="flex justify-between items-center mb-8">
                 <h2 className="text-2xl font-black text-slate-900 tracking-tight">Clinical Triage & Vitals</h2>
                 <div className="text-right">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Patient Context</p>
                     <p className="text-sm font-bold text-blue-600">{patient?.ucrn || 'N/A'}</p>
                 </div>
             </div>

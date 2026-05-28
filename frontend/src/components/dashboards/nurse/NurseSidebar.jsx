@@ -18,12 +18,12 @@ const NurseSidebar = ({ activeModule, setActiveModule, onLogout }) => {
 
     const modules = [
         { id: 'home', name: 'Clinical Overview', icon: <LayoutDashboard size={18} /> },
-        { id: 'registry', name: 'Patient Registry', icon: <Users size={18} /> },
         { id: 'triage', name: 'Vitals', icon: <ClipboardCheck size={18} /> },
         { id: 'labs', name: 'Lab Results', icon: <Beaker size={18} /> },
         { id: 'imaging', name: 'Radiology & Imaging', icon: <Layers size={18} /> },
         { id: 'prescriptions', name: 'Prescriptions', icon: <Pill size={18} /> },
         { id: 'dressing', name: 'Dressing Room', icon: <Bandage size={18} /> },
+        { id: 'wards', name: 'Ward Management', icon: <Users size={18} /> },
         { id: 'palliative', name: 'Palliative Care', icon: <HeartHandshake size={18} /> },
         { id: 'history', name: 'Patient History', icon: <FileSearch size={18} /> },
         { id: 'requisitions', name: 'Requisition Hub', icon: <FileSearch size={18} />  }

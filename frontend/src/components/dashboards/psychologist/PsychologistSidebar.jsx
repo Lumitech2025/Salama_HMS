@@ -1,15 +1,17 @@
 import React from 'react';
-import { LayoutDashboard, HeartHandshake, MapPin, BookOpen, LogOut } from 'lucide-react';
+import { LayoutDashboard, HeartHandshake, MapPin, Heart, BookOpen, LogOut, CalendarDays } from 'lucide-react';
 
-const PsychologistSidebar = ({ activeTab, setActiveTab, onLogout, stats = { activeCases: 0, ltfuAlerts: 0 } }) => {
+const PsychologistSidebar = ({ activeTab, setActiveTab, onLogout, stats = { activeCases: 0, ltfuAlerts: 0, bereavementCases: 0 } }) => {
     const rawFirstName = localStorage.getItem('first_name') || 'Ayana';
     const rawLastName = localStorage.getItem('last_name') || 'Nkirote';
     const designation = localStorage.getItem('designation') || 'Counseling Psychologist';
 
+    // Fully mapping out all 6 workspace modules discovered in the directory tree
     const menuItems = [
-        { id: 'overview', label: 'Clinical Overview', icon: <LayoutDashboard size={18} /> },
-        { id: 'psychosocial', label: 'Psychosocial Desk', icon: <HeartHandshake size={18} />, badge: stats.activeCases },
-        { id: 'tracing', label: 'Continuity & Tracing', icon: <MapPin size={18} />, badge: stats.ltfuAlerts, badgeColor: 'bg-rose-500 text-white' },
+        { id: 'home', label: 'Home', icon: <HeartHandshake size={18} />, badge: stats.activeCases, badgeColor: 'bg-teal-500 text-white' },
+        { id: 'appointments', label: 'Appointments', icon: <CalendarDays size={18} /> },
+        { id: 'tracing', label: 'Tracing', icon: <MapPin size={18} />, badge: stats.ltfuAlerts, badgeColor: 'bg-rose-500 text-white' },
+        { id: 'bereavement', label: 'Bereavement Support', icon: <Heart size={18} />, badge: stats.bereavementCases, badgeColor: 'bg-slate-700 text-slate-200' },
         { id: 'hro_cme', label: 'HRO & CME Registry', icon: <BookOpen size={18} /> },
     ];
 
@@ -36,7 +38,7 @@ const PsychologistSidebar = ({ activeTab, setActiveTab, onLogout, stats = { acti
                 </div>
             </div>
 
-            {/* Navigation - Tailored to match your screenshot's exact Teal hue */}
+            {/* Navigation - Core Workstation Links */}
             <nav className="flex-1 space-y-2 overflow-y-auto pr-1">
                 {menuItems.map((item) => (
                     <button
@@ -48,9 +50,9 @@ const PsychologistSidebar = ({ activeTab, setActiveTab, onLogout, stats = { acti
                             : 'text-slate-400 hover:bg-white/5 hover:text-white'
                         }`}
                     >
-                        <div className="flex items-center">
-                            <div className="mr-4 text-current">{item.icon}</div>
-                            <span className="text-[13px] font-bold tracking-widest uppercase truncate">
+                        <div className="flex items-center m-0">
+                            <div className="mr-4 text-current flex items-center justify-center">{item.icon}</div>
+                            <span className="text-[12px] font-bold tracking-widest uppercase truncate">
                                 {item.label}
                             </span>
                         </div>

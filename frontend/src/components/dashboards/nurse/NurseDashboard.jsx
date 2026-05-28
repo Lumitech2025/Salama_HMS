@@ -21,6 +21,7 @@ import LaboratoryResults from "../oncologist/modules/LaboratoryResults";
 import PalliativeCare from "./modules/PalliativeCare";
 import ToxicityTracker from "./modules/ToxicityTracker";
 import NurseRequisitionsTab from './modules/NurseRequisitionsTab';
+import WardManagement from './modules/WardManager';
 
 const NurseDashboard = () => {
     const [activeModule, setActiveModule] = useState('home'); 
@@ -194,12 +195,7 @@ const NurseDashboard = () => {
                     ) : (
                         <div className="space-y-6">
                             <div className="flex justify-between items-center">
-                                <button 
-                                    onClick={() => setActiveModule('home')}
-                                    className="group flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-xl text-slate-600 hover:text-blue-600 font-bold text-xs uppercase tracking-wider transition-colors shadow-xs cursor-pointer"
-                                >
-                                    <RefreshCcw size={13} /> Back to Dashboard
-                                </button>
+                                
                                 {selectedPatient && (
                                     <div className="bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider border-l-4 border-l-blue-500 shadow-sm">
                                         Current Context: {selectedPatient.patient_name}
@@ -216,6 +212,7 @@ const NurseDashboard = () => {
                                 {activeModule === 'toxicity' && <ToxicityTracker patient={selectedPatient} />}
                                 {activeModule === 'imaging' && <ImagingStudies patient={selectedPatient} />}
                                 {activeModule === 'requisitions' && <NurseRequisitionsTab />}
+                                {activeModule === 'wards' && <WardManagement />}
                             </div>
                         </div>
                     )}
