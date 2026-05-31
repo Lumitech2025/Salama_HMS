@@ -1,59 +1,205 @@
 import React from 'react';
-import { Activity, Thermometer, Heart, Scale } from 'lucide-react';
+import { CheckCircle2, Activity, Thermometer, Heart, Scale, Percent, MoveUp, HelpCircle, Wind } from 'lucide-react';
 
-const VitalsTab = ({ vitals }) => {
-  const latestVitals = vitals[0] || {};
+const VitalsTab = ({ vitals = [], patientData }) => {
+  
+  // 🎯 Extract active patient ID accurately across context formats
+  const activePatientId = patientData?.id || patientData?.patient?.id || patientData?.patient_id;
+
+  // 🛡️ Fail-safe structural array resolution
+  const rawVitalsList = Array.isArray(vitals) 
+    ? vitals 
+    : Array.isArray(patientData?.vitals) 
+      ? patientData.vitals 
+      : Array.isArray(patientData?.patient?.vitals) 
+        ? patientData.patient.vitals 
+        : [];
+
+  // 🔄 Defensive Filtering: Handles both flat ID integers and nested patient sub-objects 
+  const targetVitals = rawVitalsList.filter(item => {
+    if (!activePatientId) return true; 
+    
+    // Extract the ID whether backend sent an object or a flat integer ID
+    const recordPatientId = item.patient && typeof item.patient === 'object' 
+      ? item.patient.id 
+      : item.patient;
+
+    return Number(recordPatientId) === Number(activePatientId);
+  });
+
+  // Extract the latest record (guaranteed by Django's ordering = ['-created_at'])
+  const latestVitals = targetVitals[0] || {};
+
+  // Comprehensive safety parser for patient naming values
+  const getPatientFullName = () => {
+    if (!patientData) return "COLLINS KIMATHI MWITI";
+    const core = patientData.patient || patientData;
+    
+    if (core.first_name || core.last_name) {
+      const mid = core.middle_name ? ` ${core.middle_name}` : '';
+      return `${core.first_name || ''}${mid} ${core.last_name || ''}`.trim().toUpperCase();
+    }
+    return (core.name || "COLLINS KIMATHI MWITI").toUpperCase();
+  };
+
+  const hrn = patientData?.health_record_number || patientData?.patient?.health_record_number || "SCC-001/26";
+
+  const renderBP = (v) => {
+    if (v && v.systolic_bp && v.diastolic_bp) {
+      return `${v.systolic_bp}/${v.diastolic_bp} mmHg`;
+    }
+    return '—';
+  };
 
   return (
-    <div className="space-y-8 text-left animate-in fade-in duration-300 font-['Inter']">
-      <div>
-        <h2 className="text-xl font-bold text-slate-800 tracking-tight">Personal Health Parameters & Vitals</h2>
-        <p className="text-xs text-slate-400 mt-0.5">Biometric logs compiled by triage nursing teams during clinical check-ins.</p>
+    <div className="space-y-6 text-left animate-in fade-in duration-300 font-sans w-full max-w-none px-2 pb-12">
+      
+      {/* ACTIVE PATIENT WORKSPACE CONTEXT TILE */}
+      <div className="bg-emerald-50/60 border border-emerald-100 rounded-2xl p-4 flex items-center justify-between shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center text-white shrink-0">
+            <CheckCircle2 size={20} className="stroke-[2.5]" />
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-widest block">Active Patient Workspace Context</span>
+            <h3 className="text-base font-black text-slate-900 tracking-tight leading-tight">
+              {getPatientFullName()}
+            </h3>
+            <span className="text-xs font-medium text-slate-500 block mt-0.5">
+              Health Record Number: <span className="font-mono font-bold text-slate-700">{hrn}</span>
+            </span>
+          </div>
+        </div>
+        <div className="hidden sm:block">
+          <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 px-3 py-1 rounded-full uppercase tracking-wider">
+            Vitals View Mode Locked
+          </span>
+        </div>
       </div>
 
-      {/* LATEST CAPTURED VITALS QUICK READ CARDS ROW */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="pt-2">
+        <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">
+          Personal Health & Vitals
+        </h2>
+        <p className="text-xs text-slate-500 mt-0.5">
+          Chronological patient biometric diagnostic readings and triage evaluations.
+        </p>
+      </div>
+
+      {/* QUICK READ CARDS GRID */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {[
-          { label: 'Blood Pressure / Baseline', value: latestVitals.blood_pressure || '—', sub: 'Systolic/Diastolic Index', icon: Heart, color: 'text-rose-600 bg-rose-50' },
-          { label: 'Pulse Rate Count', value: latestVitals.pulse_rate ? `${latestVitals.pulse_rate} bpm` : '—', sub: 'Heart Cycle Frequency', icon: Activity, color: 'text-teal-600 bg-teal-50' },
-          { label: 'Last Logged Weight Index', value: latestVitals.weight ? `${latestVitals.weight} kg` : '—', sub: 'Dosage Mass Coefficient', icon: Scale, color: 'text-blue-600 bg-blue-50' },
+          { 
+            label: 'Blood Pressure', 
+            value: renderBP(latestVitals), 
+            sub: 'Systolic / Diastolic Index', 
+            icon: Heart, 
+            color: 'text-rose-600 bg-rose-50 border-rose-100' 
+          },
+          { 
+            label: 'Heart Rate', 
+            value: latestVitals.heart_rate ? `${latestVitals.heart_rate} bpm` : '—', 
+            sub: 'Pulse Cycle Frequency', 
+            icon: Activity, 
+            color: 'text-emerald-600 bg-emerald-50 border-emerald-100' 
+          },
+          { 
+            label: 'Respiratory Rate', 
+            value: latestVitals.respiratory_rate ? `${latestVitals.respiratory_rate} cpm` : '—', 
+            sub: 'Breathing Excursion Frequency', 
+            icon: Wind, 
+            color: 'text-orange-600 bg-orange-50 border-orange-100' 
+          },
+          { 
+            label: 'Body Temperature', 
+            value: latestVitals.temperature ? `${latestVitals.temperature} °C` : '—', 
+            sub: 'Core Thermal Reading', 
+            icon: Thermometer, 
+            color: 'text-amber-600 bg-amber-50 border-amber-100' 
+          },
+          { 
+            label: 'Oxygen Saturation', 
+            value: latestVitals.spo2 ? `${latestVitals.spo2} %` : '—', 
+            sub: 'Peripheral Oxygen Saturation Index', 
+            icon: Percent, 
+            color: 'text-cyan-600 bg-cyan-50 border-cyan-100' 
+          },
+          { 
+            label: 'Weight & Height', 
+            value: latestVitals.weight ? `${latestVitals.weight} kg / ${latestVitals.height || '—'} cm` : '—', 
+            sub: 'Gross Physical Metrics', 
+            icon: Scale, 
+            color: 'text-blue-600 bg-blue-50 border-blue-100' 
+          },
+          { 
+            label: 'Body Mass Index (BMI)', 
+            value: latestVitals.bmi && latestVitals.bmi !== 0 ? `${latestVitals.bmi} kg/m²` : '—', 
+            sub: 'Calculated Body Mass Value', 
+            icon: MoveUp, 
+            color: 'text-indigo-600 bg-indigo-50 border-indigo-100 font-bold' 
+          },
+          { 
+            label: 'Body Surface Area (BSA)', 
+            value: latestVitals.bsa && latestVitals.bsa !== 0 ? `${latestVitals.bsa} m²` : '—', 
+            sub: 'Mosteller Surface Index Metric', 
+            icon: HelpCircle, 
+            color: 'text-purple-600 bg-purple-50 border-purple-100 font-bold' 
+          },
         ].map((card, i) => (
-          <div key={i} className="bg-white border border-slate-100 p-6 rounded-3xl shadow-sm text-left">
-            <div className={`p-2 rounded-xl w-fit mb-4 ${card.color}`}><card.icon size={16} /></div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">{card.label}</p>
-            <h3 className="text-xl font-bold text-slate-800 tracking-tight">{card.value}</h3>
-            <p className="text-[10px] text-slate-400 mt-2 font-medium">{card.sub}</p>
+          <div key={i} className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm text-left flex flex-col justify-between transition-all hover:shadow-md">
+            <div>
+              <div className={`p-3 rounded-xl w-fit mb-4 border ${card.color}`}><card.icon size={20} /></div>
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">{card.label}</p>
+              <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">{card.value}</h3>
+            </div>
+            <p className="text-xs text-slate-500 mt-4 font-medium border-t border-slate-50 pt-2">{card.sub}</p>
           </div>
         ))}
       </div>
 
       {/* LONGITUDINAL SYSTEM LEDGER TABLE */}
-      <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-sm">
-        <h3 className="text-sm font-bold text-slate-800 tracking-tight mb-4">Historical Triage Parameter Registry</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-slate-600">
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm overflow-hidden">
+        <h3 className="text-base md:text-lg font-bold text-slate-900 tracking-tight mb-4">
+          Historical Vitals Records
+        </h3>
+        <div className="overflow-x-auto rounded-xl border border-slate-100">
+          <table className="w-full text-sm text-slate-600 border-collapse">
             <thead>
-              <tr className="border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/60">
-                <th className="p-3 px-4 font-semibold text-left">Assessment Date Frame</th>
-                <th className="p-3 font-semibold text-center">Blood Pressure</th>
-                <th className="p-3 font-semibold text-center">Heart Rate</th>
-                <th className="p-3 font-semibold text-center">Temperature</th>
-                <th className="p-3 text-right px-4 font-semibold">Body Mass Weight</th>
+              <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider bg-slate-50">
+                <th className="p-4 text-left font-bold">Assessment Date</th>
+                <th className="p-4 text-center font-bold">BP (mmHg)</th>
+                <th className="p-4 text-center font-bold">HR (bpm)</th>
+                <th className="p-4 text-center font-bold">RR (cpm)</th>
+                <th className="p-4 text-center font-bold">Temp (°C)</th>
+                <th className="p-4 text-center font-bold">SpO₂ (%)</th>
+                <th className="p-4 text-center font-bold">Wt / Ht</th>
+                <th className="p-4 text-center font-bold">BMI</th>
+                <th className="p-4 text-right px-6 font-bold">BSA (m²)</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50">
-              {vitals.length > 0 ? vitals.map((item, idx) => (
-                <tr key={idx} className="hover:bg-slate-50/30 transition-colors">
-                  <td className="p-4 px-4 text-left font-medium text-slate-500">{item.created_at?.slice(0, 10) || 'Clinical Triage Check'}</td>
-                  <td className="p-4 text-center font-mono font-bold text-slate-800">{item.blood_pressure || '—'}</td>
-                  <td className="p-4 text-center font-mono text-slate-600">{item.pulse_rate ? `${item.pulse_rate} bpm` : '—'}</td>
-                  <td className="p-4 text-center font-mono text-slate-600">{item.temperature ? `${item.temperature} °C` : '—'}</td>
-                  <td className="p-4 text-right px-4 font-mono font-bold text-blue-600">{item.weight ? `${item.weight} kg` : '—'}</td>
+            <tbody className="divide-y divide-slate-200">
+              {targetVitals.length > 0 ? targetVitals.map((item, idx) => (
+                <tr key={idx} className="hover:bg-slate-50/70 transition-colors text-slate-700">
+                  <td className="p-4 text-left font-semibold text-slate-900">
+                    {item.created_at ? new Date(item.created_at).toLocaleDateString('en-GB') : 'Clinical Check'}
+                  </td>
+                  <td className="p-4 text-center font-mono font-bold text-slate-900 text-base">{renderBP(item)}</td>
+                  <td className="p-4 text-center font-mono text-base">{item.heart_rate || '—'}</td>
+                  <td className="p-4 text-center font-mono text-base">{item.respiratory_rate || '—'}</td>
+                  <td className="p-4 text-center font-mono text-base">{item.temperature ? `${item.temperature}°C` : '—'}</td>
+                  <td className="p-4 text-center font-mono font-bold text-emerald-600 text-base">{item.spo2 ? `${item.spo2}%` : '—'}</td>
+                  <td className="p-4 text-center font-mono text-sm">{item.weight || '—'}kg / {item.height || '—'}cm</td>
+                  <td className="p-4 text-center font-mono font-bold text-indigo-700 bg-indigo-50/40 text-base">
+                    {item.bmi && item.bmi !== 0 ? item.bmi : '—'}
+                  </td>
+                  <td className="p-4 text-right px-6 font-mono font-bold text-purple-700 text-base bg-purple-50/20">
+                    {item.bsa && item.bsa !== 0 ? item.bsa : '—'}
+                  </td>
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan="5" className="p-12 text-center text-slate-400 font-medium">
-                    No longitudinal triage histories detected within database layers.
+                  <td colSpan="9" className="p-16 text-center text-slate-400 font-medium font-mono text-sm">
+                    No Vitals Records Found for this Selection Context
                   </td>
                 </tr>
               )}
@@ -61,7 +207,6 @@ const VitalsTab = ({ vitals }) => {
           </table>
         </div>
       </div>
-
     </div>
   );
 };

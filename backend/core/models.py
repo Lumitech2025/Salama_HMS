@@ -1607,3 +1607,33 @@ class PatientBillableItem(models.Model):
 
     def __str__(self):
         return f"{self.service_sku_snapshot} - {self.patient.name} ({self.billing_status})"
+
+
+
+class ICD10Diagnosis(models.Model):
+    # Pure anatomical primary sites matching your exact UI layout
+    PRIMARY_SITE_CHOICES = [
+        ('BREAST', 'Breast'),
+        ('HEAD & NECK', 'Head & Neck'),
+        ('BONE & NECK', 'Bone & Neck'),
+        ('BRAIN TUMOURS', 'Brain Tumours'),
+        ('GASTROINTESTINAL', 'Gastrointestinal'),
+        ('LUNG', 'Lung'),
+        ('UROLOGICAL', 'Urological'),
+        ('KAPOSI SARCOMA', 'Kaposi Sarcoma'),
+        ('ADULT HAEMATOLOGICAL', 'Adult Haematological'),
+        ('GYNAECOLOGICAL', 'Gynaecological'),
+        ('LEUKEMIA', 'Leukemia'),
+    ]
+    
+    primary_site = models.CharField(max_length=50, choices=PRIMARY_SITE_CHOICES, db_index=True)
+    code = models.CharField(max_length=15, unique=True, db_index=True)
+    short_description = models.CharField(max_length=255)
+    long_description = models.TextField()
+
+    class Meta:
+        verbose_name = "Anatomical Diagnosis Mapping"
+        verbose_name_plural = "Anatomical Diagnosis Mappings"
+
+    def __str__(self):
+        return f"[{self.code}] {self.short_description}"

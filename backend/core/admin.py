@@ -6,7 +6,6 @@ from django.urls import reverse
 from django.http import HttpResponse
 from django.utils.safestring import mark_safe
 
-
 import csv
 from datetime import date
 from .models import (InsuranceScheme, LabOrder, RegistrationRecord,
@@ -15,7 +14,8 @@ from .models import (InsuranceScheme, LabOrder, RegistrationRecord,
     Drug, LabResult, Bill, Appointment, VitalSign, Queue, Requisition,
     Prescription, PrescriptionItem, ClinicalNote, ImagingRecord, PsychologyEnrollment, SessionLog, BereavementLog, 
     OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabTestRegistry, LabPanel, ProtocolMaster, ProtocolDrug, DrugGuardrail,
-    InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, Service, PatientBillableItem
+    InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, Service, PatientBillableItem,
+    ICD10Diagnosis
 )
 
 
@@ -1171,3 +1171,31 @@ class RegimenDrugAdmin(admin.ModelAdmin):
     @admin.display(ordering='regimen__name', description='Protocol Regimen')
     def get_regimen_name(self, obj):
         return obj.regimen.name
+    
+
+@admin.register(ICD10Diagnosis)
+class ICD10DiagnosisAdmin(admin.ModelAdmin):
+    # Columns to display in the admin change-list grid layout
+    list_display = ('code', 'primary_site', 'short_description')
+    
+    # Left sidebar filters to quickly slice records by anatomical site
+    list_filter = ('primary_site',)
+    
+    # Enables a global search box targeting the code or descriptions
+    search_fields = ('code', 'short_description', 'long_description')
+    
+    # Alphabetical ordering by primary site group, then code sequence
+    ordering = ('primary_site', 'code')
+    
+    # Optimizes pagination speeds by showing 50 entries per page
+    list_per_page = 50
+
+    # Read-only fields layout configurations for safety
+    fieldsets = (
+        ('Anatomical Classification', {
+            'fields': ('primary_site', 'code')
+        }),
+        ('Clinical Content Definitions', {
+            'fields': ('short_description', 'long_description'),
+        }),
+    )

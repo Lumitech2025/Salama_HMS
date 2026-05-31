@@ -1,9 +1,13 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
+from .views import ICD11TokenProxyView
+from core.views import ICD10DiagnosisView
+
 
 # All viewsets and functions imported cleanly from your local views.py
 from .views import (
+    ICD11TokenProxyView,
     InsuranceCompanyViewSet,
     InsuranceSchemeViewSet,      
     RemittanceBatchViewSet, 
@@ -119,6 +123,8 @@ urlpatterns = [
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
     path('patients/lookup/', patient_lookup, name='patient-lookup'),
+
+     path('api/icd11/token/', ICD11TokenProxyView.as_view(), name='icd11-token'),
 
     # All generated viewset endpoints (including nested action URLs) are safely included here
     path('', include(router.urls)), 

@@ -12,8 +12,14 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // This bridges the gap between Vite (5173) and Django (8000)
+      // Catches /api/v1/, /api/ext/, etc.
       '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        secure: false,
+      },
+      // Fallback: If you are serving the token from a standalone /icd11/ route on Django
+      '/icd11': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,

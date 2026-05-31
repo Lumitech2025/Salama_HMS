@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api'; 
 import { 
   Save, Loader2, UserPlus, AlertCircle, CheckCircle2, 
-  Users, Calendar, RefreshCw, AlertTriangle, FileText, Layers
+  Users, Calendar, RefreshCw, AlertTriangle, FileText, Layers,
+  Contact2
 } from 'lucide-react';
 
 const Registration = () => {
@@ -18,24 +19,27 @@ const Registration = () => {
       returning_today: 0
   });
 
-  // 🚀 FIXED: Keys updated to snake_case to match Django Serializer expectations exactly
   const initialFormState = {
     first_name: '', 
+    middle_name: '',
     last_name: '', 
     id_number: '', 
     age: '', 
     gender: 'M', 
     phone: '', 
+    email: '',
     payment_mode: 'CASH',          
-    insurance_company_id: '',         
+    insurance_company_id: '',          
     insurance_number: '',
     is_urgent: false,
-    is_returning: false
+    is_returning: false,
+    next_of_kin_name: '',
+    next_of_kin_relationship: 'SPOUSE',
+    next_of_kin_phone: ''
   };
 
   const [formData, setFormData] = useState(initialFormState);
 
-  // Calculates the 'SCC-XXX/YY' format dynamically for the visual preview badge
   const getLiveHrnPreview = () => {
     const shortYear = String(new Date().getFullYear()).slice(-2);
     const nextSequence = String((analytics.total_patients || 0) + 1).padStart(3, '0');
@@ -81,12 +85,13 @@ const Registration = () => {
     setRegStatus('idle');
     setErrorMessage('');
     
-    // 🚀 FIXED: Payload mapping variables match your backend serializers perfectly
     const payload = {
       first_name: formData.first_name.trim(),
+      middle_name: formData.middle_name.trim(),
       last_name: formData.last_name.trim(),
       id_number: formData.id_number.trim(),
       phone: formData.phone.trim(),
+      email: formData.email.trim() || null, 
       age: parseInt(formData.age, 10) || 0,
       gender: formData.gender,
       payment_mode: formData.payment_mode,
@@ -94,6 +99,9 @@ const Registration = () => {
       insurance_number: formData.payment_mode === 'INSURANCE' ? formData.insurance_number.trim() : '',
       is_urgent: formData.is_urgent,
       is_returning: formData.is_returning,
+      next_of_kin_name: formData.next_of_kin_name.trim(),
+      next_of_kin_relationship: formData.next_of_kin_relationship,
+      next_of_kin_phone: formData.next_of_kin_phone.trim()
     };
 
     try {
@@ -117,7 +125,7 @@ const Registration = () => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto pb-20 font-['Inter'] relative px-4">
+    <div className="max-w-7xl mx-auto pb-20 font-['Inter'] relative px-4 text-left">
       
       {regStatus === 'success' && (
         <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-2xl flex items-center gap-3 font-bold text-sm">
@@ -141,8 +149,8 @@ const Registration = () => {
           <StatCard label="Returning Patients" value={analytics.returning_today} icon={<RefreshCw className="text-amber-500"/>} color="amber" />
       </div>
 
-      {/* 🚀 FIXED: Sticky Patient Bar Header remains pinned inline over form on scroll */}
-      <div className="flex justify-between items-center mb-8 bg-white/90 backdrop-blur-md p-6 rounded-3xl border border-slate-100 shadow-md sticky top-4 z-40 transition-all">
+      {/* FIXED: Standard Static Page Header Header (No longer floating/sticky) */}
+      <div className="flex justify-between items-center mb-8 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
         <div>
           <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3 uppercase italic">
             <UserPlus className="text-teal-600" size={22} /> Patient <span className="text-teal-600">Registrations</span>
@@ -153,20 +161,28 @@ const Registration = () => {
           form="registration-form" 
           type="submit" 
           disabled={isSubmitting} 
-          className="bg-slate-950 hover:bg-teal-600 text-white px-8 py-3.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-md flex items-center space-x-2 disabled:opacity-50"
+          className="bg-slate-950 hover:bg-teal-600 text-white px-8 py-3.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-md flex items-center space-x-2 disabled:opacity-50 cursor-pointer"
         >
           {isSubmitting ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
           <span>{isSubmitting ? 'Registering...' : 'Register Patient'}</span>
         </button>
       </div>
 
-      <form id="registration-form" onSubmit={handleSubmit} className="space-y-6 mb-12">
-        <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-8">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-8">
+      <form id="registration-form" onSubmit={handleSubmit} className="space-y-8 mb-12">
+        
+        {/* BLOCK 1: PRIMARY DEMOGRAPHICS (With HRN incorporated under identification) */}
+        <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
+          <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2 mb-2">
+            <FileText size={14} className="text-slate-400" /> 1. Core Identification & Demographics
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-6">
             <FormInput label="National ID / Passport" name="id_number" value={formData.id_number} onChange={handleChange} required />
             <FormInput label="First Name" name="first_name" value={formData.first_name} onChange={handleChange} required />
+            <FormInput label="Middle Name (Optional)" name="middle_name" value={formData.middle_name} onChange={handleChange} />
             <FormInput label="Last Name" name="last_name" value={formData.last_name} onChange={handleChange} required />
+            
             <FormInput label="Phone Number" name="phone" value={formData.phone} onChange={handleChange} required />
+            <FormInput label="Email Address (Optional)" type="email" name="email" value={formData.email} onChange={handleChange} />
             <FormInput label="Age" type="number" name="age" value={formData.age} onChange={handleChange} required />
 
             <div className="space-y-2">
@@ -178,6 +194,57 @@ const Registration = () => {
               </select>
             </div>
 
+            {/* FIXED: Live Preview HRN relocated immediately to the bottom row of Core Identifications */}
+            <div className="space-y-2 md:col-span-4 border-t border-slate-50 pt-4 grid grid-cols-1 md:grid-cols-4">
+              <div className="space-y-2 md:col-span-1">
+                <label className="text-[9px] font-black text-teal-600 uppercase tracking-widest ml-2 flex items-center gap-1.5">
+                  <FileText size={10} /> Live Preview HRN
+                </label>
+                <div className="w-full bg-teal-50/60 border border-teal-100/50 text-teal-700 rounded-2xl p-4 text-sm font-mono font-bold tracking-wider text-center md:text-left">
+                  {getLiveHrnPreview()}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* BLOCK 2: NEXT OF KIN RELATIONAL DATA */}
+        <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
+          <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2 mb-2">
+            <Contact2 size={14} className="text-slate-400" /> 2. Next of Kin / Relational Contacts
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <FormInput label="Next of Kin Full Name" name="next_of_kin_name" value={formData.next_of_kin_name} onChange={handleChange} required />
+            
+            {/* FIXED: Modified from text field to select component dropdown options */}
+            <div className="space-y-2">
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Relationship</label>
+              <select 
+                name="next_of_kin_relationship" 
+                value={formData.next_of_kin_relationship} 
+                onChange={handleChange} 
+                className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold outline-none appearance-none cursor-pointer"
+              >
+                <option value="SPOUSE">Spouse</option>
+                <option value="PARENT">Parent</option>
+                <option value="CHILD">Child</option>
+                <option value="SIBLING">Sibling</option>
+                <option value="GUARDIAN">Legal Guardian</option>
+                <option value="DEPENDENT">Dependent</option>
+                <option value="OTHER">Other Relative</option>
+              </select>
+            </div>
+
+            <FormInput label="Next of Kin Phone Number" name="next_of_kin_phone" value={formData.next_of_kin_phone} onChange={handleChange} required />
+          </div>
+        </div>
+
+        {/* BLOCK 3: FINANCIAL COVER */}
+        <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
+          <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2 mb-2">
+            <Layers size={14} className="text-slate-400" /> 3. Coverage Allocation & Status Flags
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="space-y-2">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Mode of Payment</label>
               <select name="payment_mode" value={formData.payment_mode} onChange={handleChange} className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold outline-none appearance-none cursor-pointer">
@@ -208,15 +275,6 @@ const Registration = () => {
                 <FormInput label="Insurance Card No." name="insurance_number" value={formData.insurance_number} onChange={handleChange} required />
               </>
             )}
-
-            <div className="space-y-2">
-              <label className="text-[9px] font-black text-teal-600 uppercase tracking-widest ml-2 flex items-center gap-1.5">
-                <FileText size={10} /> Live Preview HRN
-              </label>
-              <div className="w-full bg-teal-50/60 border border-teal-100/50 text-teal-700 rounded-2xl p-4 text-sm font-mono font-bold tracking-wider">
-                {getLiveHrnPreview()}
-              </div>
-            </div>
           </div>
 
           <div className="flex items-center gap-8 pt-4 border-t border-slate-50">
@@ -230,6 +288,7 @@ const Registration = () => {
             </label>
           </div>
         </div>
+
       </form>
 
       {/* Activity Logs Table */}
@@ -257,7 +316,6 @@ const Registration = () => {
                     </span>
                   </td>
                   <td className="px-8 py-5">
-                    {/* 🚀 FIXED: Captures health_record_number returned natively from the serializer view */}
                     <span className="font-mono font-bold text-xs text-teal-600 bg-teal-50/80 px-2.5 py-1.5 rounded-xl border border-teal-100">
                       {r.health_record_number} 
                     </span>
@@ -266,7 +324,6 @@ const Registration = () => {
                     <p className="font-black text-slate-800 text-xs uppercase tracking-tight">{r.name}</p>
                   </td>
                   <td className="px-8 py-5">
-                    {/* 🚀 FIXED: Captures active payment modes and custom corporate provider profiles safely */}
                     <span className={`px-2.5 py-1 rounded-md text-[8px] font-black uppercase tracking-wider ${r.payment_mode === 'CASH' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
                       {r.payment_mode === 'CASH' ? 'CASH' : (r.insurance_company_name || 'INSURANCE')}
                     </span>

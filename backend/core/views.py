@@ -1,3 +1,5 @@
+from django.http import JsonResponse
+
 from rest_framework import viewsets, filters, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -20,9 +22,14 @@ from django.db.models import OuterRef, Subquery, ExpressionWrapper, DecimalField
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework import status
 from django.db.models import Q
+import requests
+from django.conf import settings
+from django.core.cache import cache
 
 
 from appointments.utils import dispatch_async_notifications
+
+
 
 # Import local models and serializers
 from .models import (
@@ -34,7 +41,8 @@ from .models import (
     ProtocolMaster, ProtocolDrug, DrugGuardrail, ProtocolIngredient,
     CancerSite, CancerType, Regimen, RegimenDrug,
     InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, InsuranceScheme,
-    Service, PatientBillableItem
+    Service, PatientBillableItem,
+    ICD10Diagnosis
 )
 from .serializers import (
     LabOrderSerializer, LabReferenceSerializer, LabResultSerializer, 
@@ -48,7 +56,8 @@ from .serializers import (
     SessionLogSerializer, 
     BereavementLogSerializer, OutreachCampaignSerializer, ReferralPartnerSerializer, SocialMediaPostSerializer,RequisitionSerializer, MarketingRequisitionSerializer, LabTestRegistrySerializer, ProtocolMasterSerializer,
     InsuranceCompanySerializer, InsuranceClaimSerializer, RemittanceBatchSerializer, DetailedPatientClaimSerializer, ClaimDispatchBatchSerializer, InsuranceSchemeSerializer,
-    ServiceSerializer, PatientBillableItemSerializer
+    ServiceSerializer, PatientBillableItemSerializer,
+    ICD10DiagnosisSerializer
 )
 
 # --- 1. PERMISSION LOGIC ---
@@ -70,7 +79,6 @@ class IsFinancialStaff(permissions.BasePermission):
 
 class SalamaTokenObtainPairView(TokenObtainPairView):
     serializer_class = SalamaTokenObtainPairSerializer
-
 
 
 
@@ -1172,3 +1180,86 @@ class PatientBillableItemViewSet(viewsets.ModelViewSet):
             "item_id": billable_item.id,
             "new_status": billable_item.billing_status
         }, status=status.HTTP_200_OK)
+
+
+# APIs
+class ICD11TokenProxyView(APIView):
+    """
+    Obtains and caches short-lived OAuth2 access tokens from the WHO Identity server
+    to securely authorize the frontend Embedded Classification Tool.
+    """
+    def get(self, request):
+        # 1. Look for a valid token in the Django cache framework first
+        cached_token = cache.get('icd11_access_token')
+        if cached_token:
+            return Response({"token": cached_token}, status=status.HTTP_200_OK)
+
+        # 2. Grab configurations from settings
+        client_id = getattr(settings, 'ICD11_CLIENT_ID', None)
+        client_secret = getattr(settings, 'ICD11_CLIENT_SECRET', None)
+
+        if not client_id or not client_secret:
+            return Response(
+                {"error": "ICD-11 credentials are unconfigured on the server environment."}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # 3. Request a fresh token directly from the WHO Access Management server
+        token_url = "https://icdaccessmanagement.who.int/connect/token"
+        payload = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'grant_type': 'client_credentials',
+            'scope': 'icdapi_access'
+        }
+
+        try:
+            response = requests.post(token_url, data=payload, timeout=10)
+            response.raise_for_status()
+            token_data = response.json()
+            
+            access_token = token_data['access_token']
+            expires_in = token_data.get('expires_in', 3600)
+
+            # Cache the token, setting expiration 5 minutes early as a safety buffer
+            cache.set('icd11_access_token', access_token, timeout=expires_in - 300)
+
+            return Response({"token": access_token}, status=status.HTTP_200_OK)
+
+        except requests.exceptions.RequestException as e:
+            return Response(
+                {"error": f"Failed authentication handshake with WHO: {str(e)}"}, 
+                status=status.HTTP_502_BAD_GATEWAY
+            )
+        
+class ICD10DiagnosisView(APIView):
+    """
+    Handles retrieval of localized ICD-10 medical codes grouped by 
+    anatomical primary site, mapping out full clinical long descriptions.
+    """
+    def get(self, request):
+        # Normalize and clean inputs
+        site = request.query_params.get('site', '').strip().upper()
+        search_query = request.query_params.get('q', '').strip()
+
+        if not site:
+            return Response(
+                {"error": "The 'site' parameter is required. Example: ?site=BREAST"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Base database query using the indexed primary_site field
+        queryset = ICD10Diagnosis.objects.filter(primary_site=site)
+
+        # Autocomplete lookups matching code numbers or description tokens
+        if search_query:
+            queryset = queryset.filter(
+                Q(code__icontains=search_query) | 
+                Q(long_description__icontains=search_query)
+            )
+
+        # Apply strict query limit (50) to prevent payload bloat and maintain fast render speeds
+        queryset = queryset.order_by('code')[:50]
+        
+        serializer = ICD10DiagnosisSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

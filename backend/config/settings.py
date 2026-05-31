@@ -198,6 +198,10 @@ DEFAULT_FROM_EMAIL = f"Salama Cancer Care <{EMAIL_HOST_USER}>"
 # Pulled safely from your local .env to keep your public GitHub repo secure
 HTTPSMS_API_KEY = os.environ.get('HTTPSMS_API_KEY')
 
+# WHO ICD-11 Configuration
+ICD11_CLIENT_ID = os.getenv('ICD11_CLIENT_ID')
+ICD11_CLIENT_SECRET = os.getenv('ICD11_CLIENT_SECRET')
+
 
 JAZZMIN_SETTINGS = {
     "site_title": "Salama HMS",

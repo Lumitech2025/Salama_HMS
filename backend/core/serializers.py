@@ -11,7 +11,8 @@ from .models import (
     ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem, PsychologyEnrollment, SessionLog, BereavementLog, 
     OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabOrder, ProtocolMaster, ProtocolDrug, DrugGuardrail, Requisition, MarketingRequisitionExtension, OutreachCampaign,
     InsuranceScheme, InsuranceCompany, InsuranceClaim, RemittanceBatch, ClaimDispatchBatch,
-    Service, PatientBillableItem, 
+    Service, PatientBillableItem,
+    ICD10Diagnosis 
 )
 User = get_user_model()
 
@@ -1226,3 +1227,31 @@ class PatientBillableItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Authentication context is required to register automated point-of-care billing charges.")
             
         return super().create(validated_data)
+    
+
+class ICD10DiagnosisSerializer(serializers.ModelSerializer):
+    """
+    Serializer optimized for anatomical site filtering and autocomplete.
+    Provides the primary site grouping, clinical code, and descriptions.
+    """
+    # Expose a clean display string combining the code and the short description
+    display_label = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ICD10Diagnosis
+        fields = [
+            'id', 
+            'primary_site', 
+            'code', 
+            'short_description', 
+            'long_description',
+            'display_label'
+        ]
+        read_only_fields = fields
+
+    def get_display_label(self, obj):
+        """
+        Creates a uniform label format for frontend drop-down options.
+        Example: "[C50.4] Malignant neoplasm of upper-outer quadrant of breast"
+        """
+        return f"[{obj.code}] {obj.short_description}"

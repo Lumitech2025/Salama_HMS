@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api';
 import { Loader2 } from 'lucide-react';
 
@@ -18,6 +18,9 @@ const PatientDashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [patientData, setPatientData] = useState(null);
   const [loading, setLoading] = useState(true);
+  
+  // 🎯 Persistent Global Workspace Focus state for Active Selection
+  const [selectedPatientContext, setSelectedPatientContext] = useState(null);
 
   // EMR Multi-Tiered Database Storage Lines
   const [appointments, setAppointments] = useState([]);
@@ -29,42 +32,22 @@ const PatientDashboard = ({ onLogout }) => {
   const [chemoSessions, setChemoSessions] = useState([]);
   const [bills, setBills] = useState([]);
 
-  useEffect(() => {
-    fetchComprehensivePatientData();
-  }, []);
+  // Resolve the active patient object accurately based on current workflow scope
+  const currentPatient = selectedPatientContext || patientData;
 
-  const fetchComprehensivePatientData = async () => {
-    setLoading(true);
+  const fetchPatientSubRecords = useCallback(async (patientId) => {
+    if (!patientId) return;
     try {
-      // 1. Fetch targeted patient profile context metrics from backend model records
-      const patientRes = await API.get('/patients/').catch(() => ({ data: [] }));
-      const patientList = patientRes.data.results || patientRes.data || [];
-      
-      // Fallback matching framework if dataset is empty during dev environments baseline checks
-      const assignedProfile = patientList[0] || {
-        id: 1,
-        name: "COLLINS KIMATHI MWITI",
-        national_id: "29482024",
-        gender: "MALE",
-        phone: "254712346105",
-        email: "collin****ti@gmail.com",
-        cancer_type: "Colorectal Carcinoma (Stage III)",
-        address: "Nyeri, Central Region",
-        next_of_kin_name: "Mary Mwiti",
-        next_of_kin_phone: "+254 711 222333"
-      };
-      setPatientData(assignedProfile);
-
-      // 2. Query related records across all EMR application namespaces concurrently matching relational keys
+      // Query records filtering on the focused client model context
       const [appRes, vitRes, noteRes, rxRes, labRes, imgRes, chemoRes, billRes] = await Promise.all([
-        API.get('/appointments/').catch(() => ({ data: [] })),
-        API.get('/vital-signs/').catch(() => ({ data: [] })),
-        API.get('/clinical-notes/').catch(() => ({ data: [] })),
-        API.get('/prescriptions/').catch(() => ({ data: [] })),
-        API.get('/lab-results/').catch(() => ({ data: [] })),
-        API.get('/imaging/').catch(() => ({ data: [] })),
-        API.get('/chemo-sessions/').catch(() => ({ data: [] })),
-        API.get('/bills/').catch(() => ({ data: [] })),
+        API.get(`/appointments/?patient=${patientId}`).catch(() => ({ data: [] })),
+        API.get(`/vital-signs/?patient=${patientId}`).catch(() => ({ data: [] })),
+        API.get(`/clinical-notes/?patient=${patientId}`).catch(() => ({ data: [] })),
+        API.get(`/prescriptions/?patient=${patientId}`).catch(() => ({ data: [] })),
+        API.get(`/lab-results/?patient=${patientId}`).catch(() => ({ data: [] })),
+        API.get(`/imaging/?patient=${patientId}`).catch(() => ({ data: [] })),
+        API.get(`/chemo-sessions/?patient=${patientId}`).catch(() => ({ data: [] })),
+        API.get(`/bills/?patient=${patientId}`).catch(() => ({ data: [] })),
       ]);
 
       setAppointments(appRes.data.results || appRes.data || []);
@@ -75,6 +58,36 @@ const PatientDashboard = ({ onLogout }) => {
       setImaging(imgRes.data.results || imgRes.data || []);
       setChemoSessions(chemoRes.data.results || chemoRes.data || []);
       setBills(billRes.data.results || billRes.data || []);
+    } catch (error) {
+      console.error("Error retrieving contextual medical files:", error);
+    }
+  }, []);
+
+  const fetchComprehensivePatientData = async () => {
+    setLoading(true);
+    try {
+      const patientRes = await API.get('/patients/').catch(() => ({ data: [] }));
+      const patientList = patientRes.data.results || patientRes.data || [];
+      
+      const assignedProfile = patientList[0] || {
+        id: 1,
+        name: "COLLINS KIMATHI MWITI",
+        health_record_number: "SCC-001/26",
+        national_id: "29482024",
+        gender: "MALE",
+        phone: "254712346105",
+        email: "collin****ti@gmail.com",
+        cancer_type: "Colorectal Carcinoma (Stage III)",
+        address: "Nyeri, Central Region",
+        next_of_kin_name: "Mary Mwiti",
+        next_of_kin_phone: "+254 711 222333"
+      };
+      
+      setPatientData(assignedProfile);
+      
+      // Target the active selection context ID over baseline if set
+      const activeId = selectedPatientContext?.id || assignedProfile.id;
+      await fetchPatientSubRecords(activeId);
 
     } catch (err) {
       console.error("Critical error mapping client dashboard metrics array:", err);
@@ -83,19 +96,20 @@ const PatientDashboard = ({ onLogout }) => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-400 font-medium text-xs space-y-3">
-        <Loader2 className="animate-spin text-teal-600" size={28} />
-        <span>Syncing encrypted biometric clinical logs with Afya Yangu database pipelines...</span>
-      </div>
-    );
-  }
+  useEffect(() => {
+    fetchComprehensivePatientData();
+  }, []);
+
+  // Proactively re-trigger query dependency arrays when active context scope updates
+  useEffect(() => {
+    if (currentPatient?.id) {
+      fetchPatientSubRecords(currentPatient.id);
+    }
+  }, [currentPatient?.id, fetchPatientSubRecords]);
 
   const renderTabContent = () => {
-    // Pack down everything into a structured pass-through parameter configuration object
     const contextPayload = { 
-      patientData, 
+      patientData: currentPatient, 
       appointments, 
       vitals, 
       notes, 
@@ -103,8 +117,12 @@ const PatientDashboard = ({ onLogout }) => {
       labResults, 
       imaging, 
       chemoSessions, 
-      bills, 
-      refreshTrigger: fetchComprehensivePatientData 
+      bills,
+      setActiveTab,
+      onNavigateToTab: setActiveTab, 
+      refreshTrigger: fetchComprehensivePatientData,
+      setSelectedPatient: setSelectedPatientContext,
+      activePatientContext: selectedPatientContext
     };
 
     switch (activeTab) {
@@ -119,16 +137,27 @@ const PatientDashboard = ({ onLogout }) => {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
+          <p className="text-sm font-medium text-slate-500">Initializing Core Workspace Layout...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-screen bg-slate-50 w-full font-['Inter'] text-slate-800">
+    <div className="flex min-h-screen bg-slate-50 w-full font-['Inter'] text-slate-800 antialiased overflow-x-hidden">
       <PatientSidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         onLogout={onLogout}
-        patientData={patientData}
+        patientData={currentPatient}
       />
-      <main className="flex-1 ml-80 p-10 transition-all duration-500">
-        <div className="max-w-[1600px] mx-auto">
+      <main className="flex-1 min-w-0 p-6 md:p-10 lg:p-12 overflow-y-auto max-h-screen">
+        <div className="w-full h-full max-w-none">
           {renderTabContent()}
         </div>
       </main>

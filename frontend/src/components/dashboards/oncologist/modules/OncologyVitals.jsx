@@ -3,8 +3,12 @@ import API from '@/api/api';
 import { 
     Calculator, Activity, Thermometer, Heart, 
     Wind, Scale, ChevronDown, User, AlertCircle, 
-    CheckCircle2, Loader2, RefreshCcw, FlaskConical, MessageSquare, Save, Pill, ClipboardCheck
+    CheckCircle2, Loader2, RefreshCcw, FlaskConical, MessageSquare, Save, Pill, ClipboardCheck,
+    ShieldAlert, Stethoscope, X
 } from 'lucide-react';
+
+// 🟢 Swapped out ICD11 with localized, optimized Multi-Select ICD10 Search Interface
+import ICD10DiagnosisSearch from "@/components/ICD10DiagnosisSearch";
 
 const AVAILABLE_LAB_TESTS = [
     { id: 'CBC', label: 'Full Blood Count (CBC)' },
@@ -31,6 +35,12 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     const [isSaving, setIsSaving] = useState(false);
     const [labRequests, setLabRequests] = useState(INITIAL_LAB_STATE);
 
+    // DIAGNOSIS PIPELINE STATE VARIABLES
+    const [primarySitesList, setPrimarySitesList] = useState([]);
+    const [selectedSite, setSelectedSite] = useState("");
+    const [selectedDiagnoses, setSelectedDiagnoses] = useState([]); // Array supporting multi-selection setup
+    const [isSavingDiagnosis, setIsSavingDiagnosis] = useState(false);
+
     const fetchQueue = useCallback(async () => {
         try {
             const res = await API.get('/queue', {
@@ -41,6 +51,19 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         } catch (err) {
             console.error("Queue fetch error", err);
         }
+    }, []);
+
+    // Fetch primary sites on initialization
+    useEffect(() => {
+        const fetchPrimarySites = async () => {
+            try {
+                const res = await API.get('/cancer-sites/'); 
+                setPrimarySitesList(Array.isArray(res.data) ? res.data : res.data.results || []);
+            } catch (err) {
+                console.error("Error pulling clinical body site records:", err);
+            }
+        };
+        fetchPrimarySites();
     }, []);
 
     const fetchPatientData = useCallback(async (queueItem) => {
@@ -85,11 +108,25 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             fetchPatientData(item);
             setLabRequests(INITIAL_LAB_STATE);
             setDoctorNote("");
+            setSelectedSite("");
+            setSelectedDiagnoses([]);
         }
     };
 
     const toggleLabTest = (test) => {
         setLabRequests(prev => ({ ...prev, [test]: !prev[test] }));
+    };
+
+    // Toggle items inside the multi-selection diagnostic matrix state layout
+    const handleToggleDiagnosis = (diagnosisItem) => {
+        setSelectedDiagnoses(prev => {
+            const exists = prev.some(d => d.id === diagnosisItem.id);
+            if (exists) {
+                return prev.filter(d => d.id !== diagnosisItem.id);
+            } else {
+                return [...prev, diagnosisItem];
+            }
+        });
     };
 
     const handleSaveNotes = async () => {
@@ -111,12 +148,38 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         }
     };
 
-    /**
-     * ALIGNED WITH LABORDER MODEL & SERIALIZER
-     * Packages checked keys back into string arrays matching target options
-     */
+    const handleSaveDiagnosis = async () => {
+        if (!selectedPatient || !selectedSite || selectedDiagnoses.length === 0) {
+            alert("Please verify that a target site and at least one code choice are configured.");
+            return;
+        }
+        setIsSavingDiagnosis(true);
+        try {
+            const visitId = selectedPatient.visit_id || selectedPatient.visit;
+            
+            // Loop and save all checked conditions asynchronously
+            await Promise.all(selectedDiagnoses.map(diag => 
+                API.post('/patient-diagnoses/', {
+                    patient: selectedPatient.patient,
+                    visit: visitId,
+                    primary_site: selectedSite,
+                    icd10_code: diag.code,
+                    icd10_description: diag.short_description,
+                    long_description: diag.long_description
+                })
+            ));
+
+            alert(`✅ Recorded ${selectedDiagnoses.length} ICD-10 Diagnosis items successfully.`);
+            setSelectedDiagnoses([]); // Reset workflow state matrix trackers on success
+        } catch (err) {
+            console.error("Failed to post diagnosis logs:", err);
+            alert("Failed to record chosen diagnostics parameters.");
+        } finally {
+            setIsSavingDiagnosis(false);
+        }
+    };
+
     const handleReferToLab = async () => {
-        // Map checked internal object states to canonical frontend descriptive labels
         const selectedTests = AVAILABLE_LAB_TESTS
             .filter(test => labRequests[test.id])
             .map(test => test.label);
@@ -130,16 +193,14 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         try {
             const visitId = selectedPatient.visit_id || selectedPatient.visit;
             
-            // Send single atomic request object structure handled by LabOrderViewSet
             await API.post('/lab-orders/', {
                 patient: selectedPatient.patient,
                 visit: visitId,
-                requested_tests: selectedTests, // Clean Array mapping intercepted by Serializer
+                requested_tests: selectedTests, 
                 status: 'PENDING',
-                doctor_notes: doctorNote || "" // Passes running clinical logs down directly
+                doctor_notes: doctorNote || "" 
             });
             
-            // Advance tracker through workflow sequence
             await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'LAB' });
             
             alert(`Success: Patient routed to Lab for ${selectedTests.length} investigation(s).`);
@@ -147,14 +208,14 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             onTabSwitch('home'); 
         } catch (err) {
             console.error("Lab referral failure:", err.response?.data || err.message);
-            alert(`Referral failed: ${JSON.stringify(err.response?.data || "Check network connections or endpoint schemas")}`);
+            alert(`Referral failed: ${JSON.stringify(err.response?.data || "Check network connections")}`);
         } finally { 
             setIsSaving(false); 
         }
     };
 
     return (
-        <div className="space-y-6 animate-in face-in duration-700 font-['Inter'] pb-20 max-w-[1600px] mx-auto px-4">
+        <div className="space-y-6 animate-in fade-in duration-700 font-['Inter'] pb-20 max-w-[1600px] mx-auto px-4">
             
             {/* 1. ACTIVE PATIENT PROFILE BANNER */}
             {selectedPatient && (
@@ -230,6 +291,85 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                                     <VitalCard icon={<Wind size={18} className="text-teal-500"/>} label="SpO2 Saturation" value={vitals?.oxygen_saturation_percentage || '--'} unit="%" />
                                     <VitalCard icon={<Scale size={18} className="text-indigo-500"/>} label="Weight Metric" value={vitals?.weight || '--'} unit="kg" />
                                     <VitalCard icon={<Activity size={18} className="text-slate-500"/>} label="Patient Height" value={vitals?.height || '--'} unit="cm" />
+                                </div>
+                            )}
+                        </div>
+
+                        {/* LIVE DIAGNOSIS HUB */}
+                        <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md relative">
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="bg-blue-600 p-2.5 rounded-xl text-white shadow-sm"><Stethoscope size={18} /></div>
+                                <h3 className="text-xl font-bold tracking-tight text-slate-900">Clinical Diagnosis Configuration</h3>
+                            </div>
+
+                            {/* Refactored Two-Column Layout */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+                                
+                                {/* Left Side: Primary Target Anatomy Site Select input */}
+                                <div className="relative">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-0.5">Primary Disease Location Site</p>
+                                    <select 
+                                        className="w-full bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 font-semibold text-slate-800 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white cursor-pointer appearance-none transition-all"
+                                        value={selectedSite}
+                                        onChange={(e) => {
+                                            setSelectedSite(e.target.value);
+                                            setSelectedDiagnoses([]); // Flush selected conditions when anatomy site pivots
+                                        }}
+                                    >
+                                        <option value="">Select target anatomy structure...</option>
+                                        {primarySitesList.map(site => (
+                                            <option key={site.id} value={site.id}>{site.name?.toUpperCase()}</option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown className="absolute right-4 top-9 text-slate-400 pointer-events-none" size={16} />
+                                </div>
+
+                                {/* Right Side: Aligned Dependent Search & Option Multi-Selector container */}
+                                <div className="flex flex-col justify-end">
+                                    <ICD10DiagnosisSearch 
+                                        selectedSite={selectedSite} 
+                                        selectedDiagnoses={selectedDiagnoses}
+                                        onToggleDiagnosis={handleToggleDiagnosis}
+                                    />
+                                </div>
+                            </div>
+
+                            {!selectedSite && (
+                                <div className="flex items-center gap-2 text-amber-600 bg-amber-50 border border-amber-200/60 p-3 rounded-xl text-xs font-semibold mt-2">
+                                    <ShieldAlert size={14} />
+                                    <span>Primary site isolation filter must be actively targeted before querying live ICD-10 registries.</span>
+                                </div>
+                            )}
+
+                            {/* Show staging preview area for all checked codes before commit */}
+                            {selectedDiagnoses.length > 0 && (
+                                <div className="mt-6 border-t border-slate-100 pt-5 space-y-3 animate-in slide-in-from-top-2 duration-300">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                        Staged Diagnosis Bag ({selectedDiagnoses.length})
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {selectedDiagnoses.map(diag => (
+                                            <div key={diag.id} className="flex items-center gap-2 bg-slate-900 border border-slate-800 text-white rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
+                                                <span className="font-mono font-black text-xs text-blue-400">[{diag.code}]</span>
+                                                <span className="text-xs font-medium max-w-[200px] truncate">{diag.short_description}</span>
+                                                <button 
+                                                    onClick={() => handleToggleDiagnosis(diag)}
+                                                    className="p-0.5 hover:bg-slate-800 rounded text-slate-400 hover:text-rose-400 transition-colors"
+                                                >
+                                                    <X size={14} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    
+                                    <button 
+                                        onClick={handleSaveDiagnosis}
+                                        disabled={isSavingDiagnosis}
+                                        className="mt-2 w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-6 py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                                    >
+                                        {isSavingDiagnosis ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>} 
+                                        Commit Diagnosis Selections to Patient Record
+                                    </button>
                                 </div>
                             )}
                         </div>
