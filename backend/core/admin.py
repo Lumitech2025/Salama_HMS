@@ -6,10 +6,12 @@ from django.urls import reverse
 from django.http import HttpResponse
 from django.utils.safestring import mark_safe
 
+
 import csv
 from datetime import date
 from .models import (InsuranceScheme, LabOrder, RegistrationRecord,
     LabInventoryItem, Patient, Protocol, RequisitionItem, Service, StockAdjustment, Treatment, ChemoSession, 
+    CancerSite, CancerType, Regimen, RegimenDrug,
     Drug, LabResult, Bill, Appointment, VitalSign, Queue, Requisition,
     Prescription, PrescriptionItem, ClinicalNote, ImagingRecord, PsychologyEnrollment, SessionLog, BereavementLog, 
     OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabTestRegistry, LabPanel, ProtocolMaster, ProtocolDrug, DrugGuardrail,
@@ -72,14 +74,47 @@ class QueueAdmin(admin.ModelAdmin):
 
 @admin.register(RegistrationRecord)
 class RegistrationRecordAdmin(admin.ModelAdmin):
-    # 🚀 FIXED: Kept layout clean, using the updated badge fields
-    list_display = ('queue_id', 'health_record_badge', 'urgency_badge', 'patient', 'insurance_tag', 'registered_at')
+    list_display = (
+        'queue_id', 
+        'health_record_badge', 
+        'returning_tag',
+        'full_name_display', 
+        'gender_tag', 
+        'age', 
+        'urgency_badge', 
+        'insurance_tag', 
+        'registered_at'
+    )
     
-    # 🚀 FIXED: Changed 'insurance' to filter by 'payment_mode' and the relational 'insurance_company' link
-    list_filter = ('is_urgent', 'payment_mode', 'insurance_company', 'registered_at')
+    list_filter = ('is_urgent', 'is_returning', 'payment_mode', 'insurance_company', 'registered_at')
     
-    search_fields = ('queue_id', 'health_record_number', 'patient__name', 'id_number')
-    readonly_fields = ('queue_id', 'health_record_number', 'registered_at')
+    search_fields = (
+        'queue_id', 
+        'health_record_number', 
+        'first_name', 
+        'middle_name', 
+        'last_name', 
+        'id_number', 
+        'phone', 
+        'email'
+    )
+    
+    fieldsets = (
+        ('System Identifiers', {
+            'fields': ('queue_id', 'health_record_number', 'patient', 'registered_at'),
+        }),
+        ('Core Demographics', {
+            'fields': (('first_name', 'middle_name', 'last_name'), ('id_number', 'phone', 'email'), ('age', 'gender')),
+        }),
+        ('Next of Kin Matrix', {
+            'fields': ('next_of_kin_name', 'next_of_kin_relationship', 'next_of_kin_phone'),
+        }),
+        ('Financial Allocation & Priority Status', {
+            'fields': ('payment_mode', 'insurance_company', 'insurance_number', ('is_urgent', 'is_returning')),
+        }),
+    )
+    
+    readonly_fields = ('queue_id', 'health_record_number', 'patient', 'registered_at')
 
     def health_record_badge(self, obj):
         return format_html(
@@ -88,22 +123,27 @@ class RegistrationRecordAdmin(admin.ModelAdmin):
         )
     health_record_badge.short_description = "Health Record No"
 
+    def full_name_display(self, obj):
+        return obj.full_name
+    full_name_display.short_description = "Patient Name"
+
     def urgency_badge(self, obj):
-        if obj.is_urgent:
-            return format_html(
-                '<span style="background: #dc3545; color: white; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 900;">{}</span>',
-                "URGENT"
-            )
+        # 🚀 FIXED: Dynamic rendering to satisfy format_html
+        text = "URGENT" if obj.is_urgent else "NORMAL"
+        bg_color = "#dc3545" if obj.is_urgent else "#e9ecef"
+        text_color = "white" if obj.is_urgent else "#6c757d"
+        weight = "900" if obj.is_urgent else "700"
+        
         return format_html(
-            '<span style="background: #e9ecef; color: #6c757d; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: 700;">{}</span>',
-            "NORMAL"
+            '<span style="background: {}; color: {}; padding: 3px 10px; border-radius: 12px; font-size: 10px; font-weight: {};">{}</span>',
+            bg_color, text_color, weight, text
         )
     urgency_badge.short_description = "Priority"
 
     def returning_tag(self, obj):
         if obj.is_returning:
-            return format_html('<span style="color: #28a745; font-weight: bold;">🔄 Returning</span>')
-        return format_html('<span style="color: #007bff; font-weight: bold;">✨ New</span>')
+            return mark_safe('<span style="color: #28a745; font-weight: bold;">🔄 Returning</span>')
+        return mark_safe('<span style="color: #007bff; font-weight: bold;">✨ New</span>')
     returning_tag.short_description = "Type"
 
     def gender_tag(self, obj):
@@ -114,14 +154,13 @@ class RegistrationRecordAdmin(admin.ModelAdmin):
         )
     gender_tag.short_description = "Gender"
 
-    # 🚀 FIXED: Completely overhauled to support structural payment_mode and relational items
     def insurance_tag(self, obj):
+        # 🚀 FIXED: Swapped static cash branch to mark_safe to bypass format_html argument requirements
         if obj.payment_mode == "CASH":
-            return format_html(
+            return mark_safe(
                 '<span style="background: #ffc107; color: black; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: bold;">CASH</span>'
             )
         
-        # Pull the corporate configuration company name safely if it exists, fallback to general flag
         display_name = obj.insurance_company.name if obj.insurance_company else "INSURANCE"
         return format_html(
             '<span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: bold;">{}</span>',
@@ -699,7 +738,70 @@ class RequisitionAdmin(admin.ModelAdmin):
     inlines = [MarketingExtensionInline, RequisitionItemInline]
 
 
-admin.site.register(Protocol)
+@admin.register(Protocol)
+class ProtocolAdmin(admin.ModelAdmin):
+    list_display = (
+        'name', 
+        'get_primary_site', 
+        'get_cancer_type', 
+        'get_cycles', 
+        'get_duration',
+        'get_stages'
+    )
+    
+    search_fields = ('name',) 
+    ordering = ('name',)
+
+    @admin.display(description='Primary Site')
+    def get_primary_site(self, obj):
+        if getattr(obj, 'primary_site', None) and hasattr(obj.primary_site, 'name'):
+            return obj.primary_site.name.upper()
+        if hasattr(obj, 'primary_site_name') and obj.primary_site_name:
+            return str(obj.primary_site_name).upper()
+        return str(getattr(obj, 'primary_site_id', getattr(obj, 'primary_site', '—'))).upper()
+
+    @admin.display(description='Cancer Type')
+    def get_cancer_type(self, obj):
+        if getattr(obj, 'cancer_type', None) and hasattr(obj.cancer_type, 'name'):
+            return obj.cancer_type.name
+        if hasattr(obj, 'cancer_type_name') and obj.cancer_type_name:
+            return obj.cancer_type_name
+        return str(getattr(obj, 'cancer_type_id', getattr(obj, 'cancer_type', '—')))
+
+    @admin.display(description='Cycles')
+    def get_cycles(self, obj):
+        return getattr(obj, 'cycles', getattr(obj, 'total_cycles', '—'))
+
+    @admin.display(description='Duration')
+    def get_duration(self, obj):
+        days = getattr(obj, 'cycle_duration_days', getattr(obj, 'duration', getattr(obj, 'cycle_duration', None)))
+        return f"{days} Days" if days else "—"
+
+    @admin.display(description='Stages')
+    def get_stages(self, obj):
+        stages_data = getattr(obj, 'applicable_stages', getattr(obj, 'stages', []))
+        if not stages_data:
+            return format_html('<span style="color: #94a3b8; font-style: italic;">None</span>')
+        
+        # Safe string list conversion handling if stored as raw text separation commas
+        if isinstance(stages_data, str):
+            stages_data = [s.strip() for s in stages_data.split(',') if s.strip()]
+            
+        # FIXED: Building safe standalone html blocks via explicit format mapping arguments
+        badges = []
+        for stage in stages_data:
+            badges.append(
+                format_html(
+                    '<span style="background: #f1f5f9; color: #475569; padding: 2px 6px; '
+                    'margin: 2px; border-radius: 4px; font-size: 11px; font-weight: 500; '
+                    'border: 1px solid #e2e8f0; display: inline-block;">{}</span>',
+                    stage
+                )
+            )
+        
+        # Combine using safe HTML joining methods to prevent rendering literal escape characters
+        return mark_safe(''.join(badges))
+    
 admin.site.register(ChemoSession)
 admin.site.register(Treatment)
 
@@ -1001,3 +1103,71 @@ class PatientBillableItemAdmin(admin.ModelAdmin):
     @admin.display(ordering='patient__name', description='Patient Name')
     def get_patient_name(self, obj):
         return obj.patient.name
+    
+class RegimenDrugInline(admin.TabularInline):
+    model = RegimenDrug
+    extra = 0  # Prevents empty placeholder rows from cluttering the screen
+    # ✨ FIX: Included metric_unit and route_pathway fields
+    fields = ['name', 'base_value', 'metric_unit', 'route_pathway', 'cycle_cost_kes']
+
+
+# 2. Inline to see Regimen acronyms listed right inside a Cancer Subtype view
+class RegimenInline(admin.TabularInline):
+    model = Regimen
+    extra = 0
+    show_change_link = True  # Adds a direct link to open the full Regimen configuration window
+
+
+# 3. Registering the Primary Sites
+@admin.register(CancerSite)
+class CancerSiteAdmin(admin.ModelAdmin):
+    list_display = ['id', 'name']
+    search_fields = ['name']
+
+
+# 4. Registering the Cancer Types / Subtypes
+@admin.register(CancerType)
+class CancerTypeAdmin(admin.ModelAdmin):
+    list_display = ['id', 'name', 'site']
+    list_filter = ['site']
+    search_fields = ['name']
+    inlines = [RegimenInline]
+    # ✨ PERFORMANCE: Optimizes loading the parent CancerSite row
+    list_select_related = ['site']
+
+
+# 5. Registering the Regimen Protocols (Displays the 3-step hierarchy cleanly)
+@admin.register(Regimen)
+class RegimenAdmin(admin.ModelAdmin):
+    list_display = ['id', 'name', 'get_cancer_type', 'get_primary_site', 'default_cycles']
+    list_filter = ['cancer_type__site', 'cancer_type']
+    search_fields = ['name', 'cancer_type__name']
+    inlines = [RegimenDrugInline]
+    
+    # ✨ PERFORMANCE: Solves the N+1 database problem by pre-fetching foreign data in 1 query
+    list_select_related = ['cancer_type', 'cancer_type__site']
+
+    # Helper columns to display parental data directly on the main summary list
+    @admin.display(ordering='cancer_type__name', description='Cancer Subtype')
+    def get_cancer_type(self, obj):
+        return obj.cancer_type.name
+
+    @admin.display(ordering='cancer_type__site__name', description='Primary Site')
+    def get_primary_site(self, obj):
+        return obj.cancer_type.site.name
+
+
+# 6. Standalone view for individual drugs if needed
+@admin.register(RegimenDrug)
+class RegimenDrugAdmin(admin.ModelAdmin):
+    # ✨ FIX: Added metric_unit and route_pathway columns to the overview list
+    list_display = ['id', 'name', 'base_value', 'metric_unit', 'route_pathway', 'cycle_cost_kes', 'get_regimen_name']
+    list_filter = ['regimen__cancer_type__site']
+    search_fields = ['name', 'regimen__name']
+    
+    # ✨ PERFORMANCE: Optimizes multi-level nested string serialization
+    list_select_related = ['regimen', 'regimen__cancer_type', 'regimen__cancer_type__site']
+
+    @admin.display(ordering='regimen__name', description='Protocol Regimen')
+    def get_regimen_name(self, obj):
+        return obj.regimen.name

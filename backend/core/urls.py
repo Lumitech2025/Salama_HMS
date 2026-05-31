@@ -2,6 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 
+# All viewsets and functions imported cleanly from your local views.py
 from .views import (
     InsuranceCompanyViewSet,
     InsuranceSchemeViewSet,      
@@ -16,6 +17,9 @@ from .views import (
     MarketingRequisitionViewSet,
     PatientViewSet, 
     ProtocolViewSet,
+    CancerSiteViewSet, 
+    CancerTypeViewSet, 
+    RegimenViewSet,
     RequisitionViewSet, 
     TreatmentViewSet, 
     ChemoSessionViewSet, 
@@ -37,18 +41,16 @@ from .views import (
     ReferralPartnerViewSet, 
     SocialMediaPostViewSet,
     ProtocolMasterViewSet,
-    # --- New Point-of-Care Billing Imports ---
     ServiceViewSet,
-    PatientBillableItemViewSet
+    PatientBillableItemViewSet,
+    patient_lookup,
 )
 
 class OptionalSlashRouter(DefaultRouter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Allows endpoints to accept both trailing slashes and slash-less formats natively
         self.trailing_slash = '/?' 
 
-# Initialize our specialized router
 router = OptionalSlashRouter()
 
 # --- 1. Front Desk & Patient Registry ---
@@ -66,10 +68,16 @@ router.register(r'clinical-notes', ClinicalNoteViewSet, basename='clinical-note'
 router.register(r'imaging', ImagingRecordViewSet, basename='imaging')
 
 # --- 4. Protocols & Treatment Plans ---
+# --- 4. Protocols & Treatment Plans ---
 router.register(r'protocols', ProtocolViewSet, basename='protocol')
-router.register(r'protocol-masters', ProtocolMasterViewSet, basename='protocol-master') 
+router.register(r'protocol-masters', ProtocolViewSet, basename='protocol-master') 
 router.register(r'treatments', TreatmentViewSet, basename='treatment')
 router.register(r'chemo-sessions', ChemoSessionViewSet, basename='chemo-session')
+
+# ✨ FIX: The router automatically builds the custom action paths for these viewsets!
+router.register(r'cancer-sites', CancerSiteViewSet, basename='cancer-site')
+router.register(r'cancer-types', CancerTypeViewSet, basename='cancer-type')
+router.register(r'regimens', RegimenViewSet, basename='regimen')
 
 # --- 5. Pharmacy & Inventory ---
 router.register(r'prescriptions', PrescriptionViewSet, basename='prescription')
@@ -110,6 +118,8 @@ urlpatterns = [
     path('token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
-    # Include all auto-generated paths from the router cleanly
+    path('patients/lookup/', patient_lookup, name='patient-lookup'),
+
+    # All generated viewset endpoints (including nested action URLs) are safely included here
     path('', include(router.urls)), 
 ]

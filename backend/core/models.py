@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, transaction
 from django.conf import settings
 from django.utils import timezone
 from datetime import date
@@ -7,6 +7,7 @@ from django.dispatch import receiver
 from django.db import models
 from django.contrib.postgres.fields import ArrayField 
 from datetime import datetime
+from django.utils import timezone
 
 import math
 import random
@@ -66,15 +67,29 @@ class RegistrationRecord(models.Model):
     GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
     PAYMENT_MODE_CHOICES = [('CASH', 'Cash'), ('INSURANCE', 'Insurance')]
     
-    name = models.CharField(max_length=255)
+    RELATIONSHIP_CHOICES = [
+        ('SPOUSE', 'Spouse'),
+        ('PARENT', 'Parent'),
+        ('CHILD', 'Child'),
+        ('SIBLING', 'Sibling'),
+        ('GUARDIAN', 'Legal Guardian'),
+        ('DEPENDENT', 'Dependent'),
+        ('OTHER', 'Other Relative'),
+    ]
+    
+    # Core Identification Components
+    first_name = models.CharField(max_length=100)
+    middle_name = models.CharField(max_length=100, blank=True, null=True)
+    last_name = models.CharField(max_length=100)
+    id_number = models.CharField(max_length=50) 
     phone = models.CharField(max_length=20)
-    id_number = models.CharField(max_length=20) 
+    email = models.EmailField(blank=True, null=True) # Allowed null to prevent unique blank string clashes
     
     age = models.PositiveIntegerField()
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
     
+    # Coverage Allocation
     payment_mode = models.CharField(max_length=15, choices=PAYMENT_MODE_CHOICES, default="CASH")
-    
     insurance_company = models.ForeignKey(
         'InsuranceCompany', 
         on_delete=models.SET_NULL, 
@@ -84,64 +99,86 @@ class RegistrationRecord(models.Model):
     )
     insurance_number = models.CharField(max_length=100, blank=True, null=True)
     
+    # Status Flags
     is_urgent = models.BooleanField(default=False)
     is_returning = models.BooleanField(default=False)
 
+    # Master Data Relations
     patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='registrations')
     
+    # System Managed Identifiers
     queue_id = models.CharField(max_length=15, unique=True, editable=False)
     health_record_number = models.CharField(max_length=30, unique=True, editable=False)
     
     registered_at = models.DateTimeField(auto_now_add=True)
 
+    # Next of Kin / Relational Context
+    next_of_kin_name = models.CharField(max_length=255)
+    next_of_kin_relationship = models.CharField(max_length=20, choices=RELATIONSHIP_CHOICES, default='SPOUSE')
+    next_of_kin_phone = models.CharField(max_length=20)
+
+    @property
+    def full_name(self):
+        """Helper property to cleanly return full designation in serialisers"""
+        if self.middle_name:
+            return f"{self.first_name} {self.middle_name} {self.last_name}"
+        return f"{first_name} {self.last_name}"
+
     def save(self, *args, **kwargs):
         # Cache current timestamp via timezone utility to guarantee uniformity across fields
         now_dt = timezone.now()
-        short_year = str(now_dt.year)[-2:] # E.g., "26"
+        short_year = str(now_dt.year)[-2:] 
 
         # 1. Fallback sync calculations from patient master metadata
         if self.patient:
-            if not self.name:
-                self.name = self.patient.name
+            if not self.first_name:
+                # Assuming your Patient model contains these properties or a split strategy
+                self.first_name = getattr(self.patient, 'first_name', '')
+                self.middle_name = getattr(self.patient, 'middle_name', '')
+                self.last_name = getattr(self.patient, 'last_name', '')
             if not self.phone:
                 self.phone = self.patient.phone
             if not self.gender:
                 self.gender = self.patient.gender
 
-        # 2. Robust Queue ID Generation (E.g., Q26-001)
-        if not self.queue_id:
-            last_record = RegistrationRecord.objects.all().order_by('id').last()
-            if not last_record or not last_record.queue_id:
-                self.queue_id = f"Q{short_year}-001"
-            else:
-                try:
-                    # Safely split format to locate chronological integer tail
-                    last_sequence_part = last_record.queue_id.split('-')[-1]
-                    next_id = int(last_sequence_part) + 1
-                except (ValueError, IndexError):
-                    next_id = RegistrationRecord.objects.count() + 1
+        # 2. Concurrency-Safe Identifier Resolution Block
+        # Wrap sequence lookups inside an atomic atomic transaction with select_for_update if tracking via a counter table,
+        # or use standard pessimistic locking on the table itself to prevent race conditions during high influxes.
+        if not self.queue_id or not self.health_record_number:
+            # Using transaction.atomic to prevent dirty reads across connections
+            with transaction.atomic():
+                # Fetching the trailing instance using select_for_update to lock concurrent evaluation
+                last_record = RegistrationRecord.objects.select_for_update().order_by('id').last()
                 
-                self.queue_id = f"Q{short_year}-{str(next_id).zfill(3)}"
-                
-        # 3. 🚀 FIXED: Robust Health Record Number Generation safely bypassing native import bugs
-        if not self.health_record_number:
-            last_hrn_record = RegistrationRecord.objects.all().order_by('id').last()
-            if not last_hrn_record or not last_hrn_record.health_record_number:
-                next_sequence = "001"
-            else:
-                try:
-                    # Parse string pattern matching 'SCC-[Sequence]/[Year]'
-                    last_sequence_part = last_hrn_record.health_record_number.split('-')[1].split('/')[0]
-                    next_sequence = str(int(last_sequence_part) + 1).zfill(3)
-                except (ValueError, IndexError):
-                    next_sequence = str(RegistrationRecord.objects.count() + 1).zfill(3)
-            
-            self.health_record_number = f"SCC-{next_sequence}/{short_year}"
+                # Assign Queue ID
+                if not self.queue_id:
+                    if not last_record or not last_record.queue_id:
+                        self.queue_id = f"Q{short_year}-001"
+                    else:
+                        try:
+                            last_sequence_part = last_record.queue_id.split('-')[-1]
+                            next_id = int(last_sequence_part) + 1
+                        except (ValueError, IndexError):
+                            next_id = RegistrationRecord.objects.count() + 1
+                        self.queue_id = f"Q{short_year}-{str(next_id).zfill(3)}"
+
+                # Assign Health Record Number
+                if not self.health_record_number:
+                    if not last_record or not last_record.health_record_number:
+                        next_sequence = "001"
+                    else:
+                        try:
+                            last_sequence_part = last_record.health_record_number.split('-')[1].split('/')[0]
+                            next_sequence = str(int(last_sequence_part) + 1).zfill(3)
+                        except (ValueError, IndexError):
+                            next_sequence = str(RegistrationRecord.objects.count() + 1).zfill(3)
+                    
+                    self.health_record_number = f"SCC-{next_sequence}/{short_year}"
             
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.queue_id} - {self.health_record_number} - {self.name}"
+        return f"{self.queue_id} - {self.health_record_number} - {self.first_name} {self.last_name}"
     
 
 # --- Appointment & Triage Workflow ---
@@ -237,9 +274,9 @@ class Queue(models.Model):
 
 
 class VitalSign(models.Model):
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='vitals')
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='vitals')
     visit = models.ForeignKey('RegistrationRecord', on_delete=models.CASCADE, related_name='vitals', null=True)
-    queue_entry = models.ForeignKey(Queue, on_delete=models.SET_NULL, null=True, blank=True)
+    queue_entry = models.ForeignKey('Queue', on_delete=models.SET_NULL, null=True, blank=True)
     
     temperature = models.DecimalField(max_digits=4, decimal_places=1, help_text="°C")
     systolic_bp = models.PositiveIntegerField(help_text="mmHg")
@@ -249,14 +286,17 @@ class VitalSign(models.Model):
     weight = models.DecimalField(max_digits=5, decimal_places=2, help_text="kg")
     height = models.DecimalField(max_digits=5, decimal_places=2, help_text="cm")
     spo2 = models.PositiveIntegerField(verbose_name="Oxygen Saturation %", blank=True, null=True)
-    bmi = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    bsa = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    
     recorded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        ordering = ['-created_at']
+
+    # These dynamic properties handle calculation on the fly, avoiding data conflicts!
     @property
     def bmi(self):
-        if self.weight and self.height:
+        if self.weight and self.height and float(self.height) > 0:
             height_m = float(self.height) / 100
             return round(float(self.weight) / (height_m ** 2), 2)
         return 0.0
@@ -264,25 +304,57 @@ class VitalSign(models.Model):
     @property
     def bsa(self):
         if self.weight and self.height:
-            # Mosteller Formula: SQRT( (Height * Weight) / 3600 )
+            # Mosteller Formula
             bsa_value = math.sqrt((float(self.height) * float(self.weight)) / 3600)
             return round(bsa_value, 2)
         return 0.0
 
-class Meta:
-        # Crucial: Always get the latest recorded vitals first
-        ordering = ['-created_at']
-
-# --- Treatment & Protocol ---
+#2 --- Oncology section Treatment & Protocol ---
 
 class Protocol(models.Model):
-    name = models.CharField(max_length=255)
-    description = models.TextField()
+    # Core identifying attributes
+    name = models.CharField(max_length=255, help_text="e.g., TC, CMF, FOLFOX")
+    description = models.TextField(blank=True, null=True)
     total_cycles = models.PositiveIntegerField(default=1)
+    cycle_duration_days = models.IntegerField(
+        default=21, 
+        help_text="Duration of a single treatment cycle (days)"
+    )
+    
+    # Structural hierarchy link options 
+    primary_site_id = models.IntegerField(help_text="ID of the matching primary anatomical site")
+    cancer_type_id = models.IntegerField(help_text="ID of the specific cancer variant")
+    regimen_template_id = models.IntegerField(blank=True, null=True, help_text="ID of blueprint template if pre-populated")
+    
+    # Applicable stages stored as JSON array (e.g. ['Stage I', 'Stage II'])
+    applicable_stages = models.JSONField(default=list)
+    
+    # Financial fields to be populated by other personnel later
+    total_cost_per_cycle = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True, default=0.00)
+    
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.name
+
+
+class ProtocolIngredient(models.Model):
+    """
+    Holds individual medication elements connected to a parent Protocol.
+    Costs remain optional here so other teams can edit them down the line.
+    """
+    protocol = models.ForeignKey(Protocol, on_delete=models.CASCADE, related_name='components')
+    medication_name = models.CharField(max_length=255)
+    base_dosage = models.DecimalField(max_digits=10, decimal_places=2)
+    dosage_unit = models.CharField(max_length=50, help_text="e.g., mg/m², mg, mcg")
+    route_of_administration = models.CharField(max_length=100, help_text="e.g., IV Infusion, Oral")
+    
+    # Updatable cost per specific drug row
+    cost_per_cycle = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.medication_name} ({self.base_dosage} {self.dosage_unit}) for {self.protocol.name}"
 
 class Treatment(models.Model):
     STATUS_CHOICES = [('ACTIVE', 'Active'), ('COMPLETED', 'Completed'), ('ON_HOLD', 'On Hold'), ('TERMINATED', 'Terminated')]
@@ -299,6 +371,47 @@ class ChemoSession(models.Model):
     administered_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, limit_choices_to={'role': 'NURSE'})
     pre_auth_code = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)
+
+
+class CancerSite(models.Model):
+    """Primary site: e.g., BREAST CANCER, LUNG CANCER, PROSTATE CANCER"""
+    name = models.CharField(max_length=255, unique=True)
+
+    def __str__(self):
+        return self.name
+
+class CancerType(models.Model):
+    """Subtype: e.g., BREAST CANCER HORMONAL THERAPY, GASTROINTESTINAL ADENOCARCINOMA"""
+    site = models.ForeignKey(CancerSite, on_delete=models.CASCADE, related_name="types")
+    name = models.CharField(max_length=255)
+
+    def __str__(self):
+        return f"{self.site.name} - {self.name}"
+
+class Regimen(models.Model):
+    """Protocol acronym: e.g., AC-T, FOLFOX-6, CAPOX"""
+    cancer_type = models.ForeignKey(CancerType, on_delete=models.CASCADE, related_name="regimens")
+    name = models.CharField(max_length=100)
+    default_cycles = models.IntegerField(default=6)
+    
+    def __str__(self):
+        return f"{self.name} ({self.cancer_type.name})"
+
+class RegimenDrug(models.Model):
+    """The individual drugs that load automatically under Dropdown 3"""
+    regimen = models.ForeignKey(Regimen, on_delete=models.CASCADE, related_name="drugs")
+    name = models.CharField(max_length=255)  # e.g., Docetaxel, Pemetrexed
+    base_value = models.CharField(max_length=50, blank=True)  # e.g., 75, 500
+    metric_unit = models.CharField(max_length=50, default="mg/m²")  # e.g., mg, mg/m²
+    route_pathway = models.CharField(max_length=100, default="IV Infusion")
+    cycle_cost_kes = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+
+    def __str__(self):
+        return f"{self.regimen.name} -> {self.name}"
+    
+
+
+# 3. Radiologist Section
 
 
 class ImagingRecord(models.Model):

@@ -11,13 +11,15 @@ from rest_framework.permissions import AllowAny
 from django.utils.dateparse import parse_date
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
-# Add this line near the top of your views.py file:
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters import rest_framework as django_filters
 from django.db.models import Sum, DecimalField
 from django.db.models.functions import Coalesce
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django.db.models import OuterRef, Subquery, ExpressionWrapper, DecimalField, IntegerField
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework import status
+from django.db.models import Q
 
 
 from appointments.utils import dispatch_async_notifications
@@ -28,13 +30,18 @@ from .models import (
     LabResult, LabOrder, Bill, Appointment, VitalSign, Queue, 
     LabInventoryItem, StockAdjustment, Prescription, 
     PrescriptionItem, ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem, PsychologyEnrollment, SessionLog, BereavementLog, 
-    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabReference, LabTestRegistry, ProtocolMaster, ProtocolDrug, DrugGuardrail,
+    OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabReference, LabTestRegistry, 
+    ProtocolMaster, ProtocolDrug, DrugGuardrail, ProtocolIngredient,
+    CancerSite, CancerType, Regimen, RegimenDrug,
     InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, InsuranceScheme,
     Service, PatientBillableItem
 )
 from .serializers import (
-    LabOrderSerializer, LabReferenceSerializer, OncologyClinicalPortalSerializer, PatientSerializer, ProtocolSerializer, TreatmentSerializer, 
-    ChemoSessionSerializer, DrugSerializer, LabResultSerializer, 
+    LabOrderSerializer, LabReferenceSerializer, LabResultSerializer, 
+    OncologyClinicalPortalSerializer, PatientSerializer, 
+    ProtocolSerializer, ProtocolIngredientSerializer, 
+    TreatmentSerializer, ChemoSessionSerializer, DrugSerializer, 
+    CancerSiteSerializer, CancerTypeSerializer, RegimenSerializer, RegimenDrugSerializer,
     BillSerializer, SalamaTokenObtainPairSerializer, LabInventorySerializer, 
     StockAdjustmentSerializer, AppointmentSerializer, VitalSignSerializer, 
     QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer, RegistrationRecordSerializer, InventoryItemSerializer, PsychologyEnrollmentSerializer, 
@@ -63,6 +70,9 @@ class IsFinancialStaff(permissions.BasePermission):
 
 class SalamaTokenObtainPairView(TokenObtainPairView):
     serializer_class = SalamaTokenObtainPairSerializer
+
+
+
 
 # --- 3. QUEUE ORCHESTRATION ---
 
@@ -128,6 +138,8 @@ class QueueViewSet(viewsets.ModelViewSet):
 
 # --- 4. CLINICAL & EMR MODULES ---
 
+
+
 class PatientViewSet(viewsets.ModelViewSet):
     queryset = Patient.objects.all().order_by('-created_at')
     serializer_class = PatientSerializer
@@ -138,10 +150,18 @@ class PatientViewSet(viewsets.ModelViewSet):
     # FIX: Cleaned redundant duplicate queue creations out of standard model mutations
 
 class VitalSignViewSet(viewsets.ModelViewSet):
-    queryset = VitalSign.objects.all().order_by('-created_at')
     serializer_class = VitalSignSerializer
     permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
-    filterset_fields = ['patient']
+
+    def get_queryset(self):
+        # Fallback to query parameter matching regardless of active filter backends
+        queryset = VitalSign.objects.all().order_by('-created_at')
+        patient_id = self.request.query_params.get('patient', None)
+        
+        if patient_id is not None:
+            queryset = queryset.filter(patient_id=patient_id)
+            
+        return queryset
 
     def perform_create(self, serializer):
         with transaction.atomic():
@@ -460,9 +480,67 @@ class DrugViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'batch_number']
 
 class ProtocolViewSet(viewsets.ModelViewSet):
-    queryset = Protocol.objects.all()
+    # Optimized using prefetch_related so reading protocols fetches all drugs in a single database hit
+    queryset = Protocol.objects.all().prefetch_related('components')
     serializer_class = ProtocolSerializer
+    
+    # Keeping it secure; adjust permission classes as per your system roles
     permission_classes = [permissions.IsAuthenticated]
+
+    # OPTIONAL CUSTOM ACTION: 
+    # If other personnel (e.g., finance) want to update only specific drug costs 
+    # without submitting the whole complex protocol form payload again.
+    @action(detail=True, methods=['patch'], url_path='update-costs')
+    def update_costs(self, request, pk=None):
+        """
+        Allows billing/finance teams to submit an array of updated ingredient costs.
+        Payload expectation:
+        {
+            "costs": [
+                {"ingredient_id": 12, "cost_per_cycle": 15000.00},
+                {"ingredient_id": 13, "cost_per_cycle": 8500.00}
+            ]
+        }
+        """
+        protocol = self.get_object()
+        costs_data = request.data.get('costs', [])
+        
+        if not costs_data:
+            return Response(
+                {"error": "No cost data provided"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        updated_ingredients = []
+        running_total = 0.00
+        
+        for item in costs_data:
+            ing_id = item.get('ingredient_id')
+            cost = item.get('cost_per_cycle')
+            
+            try:
+                # Ensure the ingredient actually belongs to this specific protocol
+                ingredient = protocol.components.get(id=ing_id)
+                ingredient.cost_per_cycle = cost
+                ingredient.save()
+                updated_ingredients.append(ingredient)
+            except ProtocolIngredient.DoesNotExist:
+                return Response(
+                    {"error": f"Ingredient ID {ing_id} not found under this protocol"}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        
+        # Automatically recalculate the total cumulative cost for the protocol master
+        for ing in protocol.components.all():
+            if ing.cost_per_cycle:
+                running_total += float(ing.cost_per_cycle)
+                
+        protocol.total_cost_per_cycle = running_total
+        protocol.save()
+        
+        # Return the updated protocol info
+        serializer = self.get_serializer(protocol)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 class ChemoSessionViewSet(viewsets.ModelViewSet):
     queryset = ChemoSession.objects.all()
@@ -474,6 +552,69 @@ class TreatmentViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
     def get_queryset(self):
         return Treatment.objects.select_related('patient', 'protocol', 'oncologist').all()
+    
+
+class CancerSiteViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Handles operations for Primary Cancer Sites.
+    - GET /api/cancer-sites/            -> Returns list for Dropdown 1
+    - GET /api/cancer-sites/{id}/types/  -> Returns filtered types for Dropdown 2
+    """
+    queryset = CancerSite.objects.all()
+    serializer_class = CancerSiteSerializer
+
+    @action(detail=True, methods=['get'])
+    def types(self, request, pk=None):
+        """Get filtered variants for Dropdown 2 based on site selection"""
+        site = self.get_object()
+        # Uses your related_name="types" from CancerType model
+        types = site.types.all() 
+        serializer = CancerTypeSerializer(types, many=True)
+        return Response(serializer.data)
+
+
+class CancerTypeViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Handles operations for Specific Cancer Variants/Subtypes.
+    - GET /api/cancer-types/                -> Returns list of all types
+    - GET /api/cancer-types/{id}/regimens/  -> Returns filtered acronyms for Dropdown 3
+    """
+    queryset = CancerType.objects.all()
+    serializer_class = CancerTypeSerializer
+
+    @action(detail=True, methods=['get'])
+    def regimens(self, request, pk=None):
+        """Get filtered acronym protocols for Dropdown 3 based on type selection"""
+        cancer_type = self.get_object()
+        # Uses your related_name="regimens" from Regimen model
+        regimens = cancer_type.regimens.all()
+        serializer = RegimenSerializer(regimens, many=True)
+        return Response(serializer.data)
+
+
+class RegimenViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Handles operations for Protocol Acronyms.
+    - GET /api/regimens/            -> Returns list of all regimens
+    - GET /api/regimens/{id}/drugs/  -> Returns detailed drug layout to auto-populate rows
+    """
+    queryset = Regimen.objects.all()
+    serializer_class = RegimenSerializer
+
+    @action(detail=True, methods=['get'])
+    def drugs(self, request, pk=None):
+        """Get all pre-mapped drugs to auto-populate the table rows"""
+        regimen = self.get_object()
+        # Uses your related_name="drugs" from RegimenDrug model
+        drugs = regimen.drugs.all()
+        drug_serializer = RegimenDrugSerializer(drugs, many=True)
+        
+        # Matches your exact expected structure: standard cycles + drug rows array
+        return Response({
+            'default_cycles': regimen.default_cycles,
+            'drugs': drug_serializer.data
+        })
+
 
 class RegistrationRecordViewSet(viewsets.ModelViewSet):
     queryset = RegistrationRecord.objects.all().order_by('-registered_at')
@@ -482,15 +623,18 @@ class RegistrationRecordViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
-            # 🚀 FIXED: Capture name/phone variables out of request data BEFORE saving,
-            # because serializer.save() pops them during write_only validation extraction.
+            # 🚀 FIXED & EXPANDED: Capture explicit segment data elements safely before popping
             f_name = request.data.get('first_name', '').strip()
+            m_name = request.data.get('middle_name', '').strip()
             l_name = request.data.get('last_name', '').strip()
-            full_name = f"{f_name} {l_name}".strip() or "Valued Patient"
+            
+            # Combine split components intelligently while removing hanging spaces
+            full_name = f"{f_name} {m_name} {l_name}".replace("  ", " ").strip() or "Valued Patient"
+            
             patient_phone = request.data.get('phone', None)
             patient_email = request.data.get('email', None)
 
-            # Process the transaction database save routines
+            # Process transaction database save routines
             registration_item = serializer.save()
 
             real_hrn = getattr(registration_item, 'health_record_number', 'PENDING')
@@ -498,14 +642,15 @@ class RegistrationRecordViewSet(viewsets.ModelViewSet):
             subject = "Registration Successful - Salama Cancer Care"
             message_body = (
                 f"Hello {full_name},\n\n"
-                f"Thank you for registering. We are pleased to serve you.\n\n"
-                f"Your health record number is {real_hrn}\n\n"
-                f"Proceed to the triage station to have your vitals checked.\n\n"
+                f"Thank you for registering at Salama Cancer Care. We are pleased to serve you.\n\n"
+                f"Your health record number is: {real_hrn}\n\n"
+                f"Please proceed to the triage station to have your vitals checked.\n\n"
                 f"Best regards,\nSalama Medical Team"
             )
 
             if patient_phone or patient_email:
                 try:
+                    # Assuming dispatch_async_notifications is imported globally
                     dispatch_async_notifications(
                         phone=patient_phone,
                         email=patient_email,
@@ -536,11 +681,11 @@ class RegistrationRecordViewSet(viewsets.ModelViewSet):
         gender_data = today_qs.values('gender').annotate(count=Count('gender'))
         gender_map = {item['gender']: item['count'] for item in gender_data}
 
-        # 🚀 FIXED: Aggregate by payment_mode (CASH vs INSURANCE) instead of old text field
+        # Aggregate by payment_mode (CASH vs INSURANCE)
         payment_mode_data = today_qs.values('payment_mode').annotate(count=Count('payment_mode'))
         payment_mode_map = {item['payment_mode']: item['count'] for item in payment_mode_data}
 
-        # 🚀 EXTRA CREDIT: Break down the actual insurance company numbers for today's intake
+        # Break down the actual insurance company numbers for today's intake
         insurance_breakdown = today_qs.filter(payment_mode='INSURANCE')\
                                       .values('insurance_company__name')\
                                       .annotate(count=Count('insurance_company'))
@@ -557,12 +702,53 @@ class RegistrationRecordViewSet(viewsets.ModelViewSet):
             "returning_today": today_qs.filter(is_returning=True).count(),
             "gender_distribution": {
                 "M": gender_map.get('M', 0),
-                "F": gender_map.get('F', 0)
+                "F": gender_map.get('F', 0),
+                "O": gender_map.get('O', 0)
             },
             "age_groups": age_groups,
-            "payment_mode_distribution": payment_mode_map, # New clean breakdown tracker
-            "insurance_distribution": insurance_map        # Dynamic breakdown of carrier names
+            "payment_mode_distribution": payment_mode_map, 
+            "insurance_distribution": insurance_map        
         })
+    
+@api_view(['GET'])
+# Keep AllowAny if it's public, or remove if you've implemented the header authorization tokens successfully
+@permission_classes([AllowAny]) 
+def patient_lookup(request):
+    # Get the raw string parameter (e.g., "SCC-001/26" or "556677883")
+    search_query = request.query_params.get('search', '').strip()
+    
+    if not search_query:
+        return Response(
+            {"detail": "Search query parameter is required."}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        # We look up matching rows where the query hits either ID number or HRN
+        record = RegistrationRecord.objects.filter(
+            Q(health_record_number__iexact=search_query) | 
+            Q(id_number__icontains=search_query)
+        ).latest('registered_at') # Grabs their most recent active registration desk record
+
+        # Structure the payload exactly how your React front-end extracts it
+        payload = {
+            "id": record.id,
+            "health_record_number": record.health_record_number,
+            "queue_id": record.queue_id,
+            "full_name": record.full_name, # Leveraging your model's helper property
+            "id_number": record.id_number,
+            "payment_mode": record.payment_mode,
+            "insurance_number": record.insurance_number,
+            "age": record.age,
+            "gender": record.gender
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+    except RegistrationRecord.DoesNotExist:
+        return Response(
+            {"detail": "No matching active record found."}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
     
 class InventoryItemViewSet(viewsets.ModelViewSet):
     queryset = InventoryItem.objects.all().order_by('-added_at')

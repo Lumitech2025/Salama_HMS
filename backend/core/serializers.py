@@ -3,13 +3,15 @@ from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.db import transaction
 from .models import (
-    LabReference, LabTestRegistry, Patient, Protocol, RequisitionItem, StockAdjustment, Treatment, ChemoSession, 
+    LabReference, LabTestRegistry, Patient, 
+    Protocol, ProtocolIngredient, RequisitionItem, StockAdjustment, Treatment, ChemoSession, 
     Drug, LabResult, Bill, Appointment, VitalSign, Queue,
     LabInventoryItem, Prescription, PrescriptionItem, LabPanel,
+    CancerSite, CancerType, Regimen, RegimenDrug,
     ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem, PsychologyEnrollment, SessionLog, BereavementLog, 
     OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabOrder, ProtocolMaster, ProtocolDrug, DrugGuardrail, Requisition, MarketingRequisitionExtension, OutreachCampaign,
     InsuranceScheme, InsuranceCompany, InsuranceClaim, RemittanceBatch, ClaimDispatchBatch,
-    Service, PatientBillableItem
+    Service, PatientBillableItem, 
 )
 User = get_user_model()
 
@@ -88,27 +90,36 @@ class AppointmentSerializer(serializers.ModelSerializer):
 # 3. REGISTRATION & ANALYTICS
 # ─────────────────────────────────────────────────────────────────────────────
 class RegistrationRecordSerializer(serializers.ModelSerializer):
-    # Field aliases to safely capture incoming multipart payload segments from frontend
-    first_name = serializers.CharField(write_only=True)
-    last_name = serializers.CharField(write_only=True)
-    id_number = serializers.CharField(write_only=True)
-    phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    gender = serializers.CharField(write_only=True, required=False, default='M')
-    age = serializers.IntegerField(write_only=True)
+    # REMOVED write_only=True so fields are serialized in GET responses
+    first_name = serializers.CharField()
+    middle_name = serializers.CharField(required=False, allow_blank=True, default='')
+    last_name = serializers.CharField()
+    id_number = serializers.CharField()
+    phone = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_null=True, default=None)
+    gender = serializers.CharField(required=False, default='M')
+    age = serializers.IntegerField()
     
-    # 🚀 FIXED: Frontend handles "insurance_company_id" (integer id pointer)
+    # Next of Kin captured payload fields (made readable)
+    next_of_kin_name = serializers.CharField()
+    next_of_kin_relationship = serializers.CharField()
+    next_of_kin_phone = serializers.CharField()
+    
+    # Keep this write_only as it's only an incoming ID pointer link
     insurance_company_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     
-    # 🚀 FIXED: Dynamic read representation for your frontend log stream table view columns
+    # Dynamic read representation for frontend rendering
     insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
+    name = serializers.CharField(source='full_name', read_only=True)
 
     class Meta:
         model = RegistrationRecord
         fields = [
             'id', 'queue_id', 'name', 'health_record_number', 'patient', 
-            'id_number', 'first_name', 'last_name', 'phone', 'gender', 'age', 
-            'payment_mode', 'insurance_company_id', 'insurance_company_name', 
-            'insurance_number', 'is_urgent', 'is_returning', 'registered_at'
+            'id_number', 'first_name', 'middle_name', 'last_name', 'phone', 'email', 'gender', 'age', 
+            'payment_mode', 'insurance_company_id', 'insurance_company_name', 'insurance_number', 
+            'is_urgent', 'is_returning', 'next_of_kin_name', 'next_of_kin_relationship', 
+            'next_of_kin_phone', 'registered_at'
         ]
         read_only_fields = ['patient', 'name', 'queue_id', 'health_record_number', 'registered_at']
 
@@ -116,9 +127,7 @@ class RegistrationRecordSerializer(serializers.ModelSerializer):
         id_num = data.get('id_number')
         is_returning = data.get('is_returning', False)
         
-        # Cross-reference with Master Registry mapping inside Patient Model
         patient_exists = Patient.objects.filter(registry_no=id_num).exists()
-        
         if patient_exists and not is_returning:
             raise serializers.ValidationError({
                 "id_number": "A master patient record with this National ID/Passport already exists. Please check 'Returning Patient'."
@@ -126,36 +135,44 @@ class RegistrationRecordSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        # Extract frontend elements out of kwargs pool to avoid model instantiation crash
+        # Using .get() or .pop() with safe defaults so fields remain for create block execution
         id_num = validated_data.pop('id_number')
         f_name = validated_data.pop('first_name')
+        m_name = validated_data.pop('middle_name', '')
         l_name = validated_data.pop('last_name')
         phone_num = validated_data.pop('phone', '')
+        email_val = validated_data.pop('email', None)
         gender_choice = validated_data.pop('gender', 'M')
         insurance_co_id = validated_data.pop('insurance_company_id', None)
         
-        full_name = f"{f_name} {l_name}".strip()
+        nok_name = validated_data.pop('next_of_kin_name')
+        nok_rel = validated_data.pop('next_of_kin_relationship')
+        nok_phone = validated_data.pop('next_of_kin_phone')
+
+        is_returning = validated_data.get('is_returning', False)
+        full_name = f"{f_name} {m_name} {l_name}".replace("  ", " ").strip()
 
         with transaction.atomic():
-            # 1. Look up or assemble patient master entry record
             patient, created = Patient.objects.get_or_create(
                 registry_no=id_num,
                 defaults={
                     'name': full_name,
                     'phone': phone_num,
+                    'email': email_val if email_val else None,
                     'gender': gender_choice,
                     'insurance_no': validated_data.get('insurance_number', '')
                 }
             )
             
-            if not created and validated_data.get('is_returning'):
+            if not created and is_returning:
                 patient.name = full_name
                 patient.phone = phone_num
+                if email_val:
+                    patient.email = email_val
                 patient.save()
 
             patient.refresh_from_db()
 
-            # 2. Match structural corporate database primary keys if payment mode is insurance
             insurance_instance = None
             if validated_data.get('payment_mode') == 'INSURANCE' and insurance_co_id:
                 try:
@@ -165,17 +182,21 @@ class RegistrationRecordSerializer(serializers.ModelSerializer):
                         "insurance_company_id": "Selected insurance provider does not exist in the database."
                     })
 
-            # 3. Formulate and save the fresh local registration transaction
             registration = RegistrationRecord.objects.create(
                 patient=patient,
-                name=full_name,
+                first_name=f_name,
+                middle_name=m_name if m_name else None,
+                last_name=l_name,
                 phone=phone_num,
+                email=email_val if email_val else None,
                 gender=gender_choice,
                 insurance_company=insurance_instance,
+                next_of_kin_name=nok_name,
+                next_of_kin_relationship=nok_rel,
+                next_of_kin_phone=nok_phone,
                 **validated_data
             )
             
-            # 4. Enqueue record transmission directly forward into Triage Boarding
             Queue.objects.create(
                 patient=patient,
                 visit=registration,
@@ -474,6 +495,36 @@ class OncologyClinicalPortalSerializer(serializers.ModelSerializer):
             lab_payload[test_code] = test_data
 
         return lab_payload
+    
+
+class CancerSiteSerializer(serializers.ModelSerializer):
+    """Dropdown 1: Serializes the main cancer groups"""
+    class Meta:
+        model = CancerSite
+        fields = ['id', 'name']
+
+
+class CancerTypeSerializer(serializers.ModelSerializer):
+    """Dropdown 2: Serializes specific sub-types or variants"""
+    class Meta:
+        model = CancerType
+        fields = ['id', 'name', 'site']
+
+
+class RegimenSerializer(serializers.ModelSerializer):
+    """Dropdown 3: Serializes the protocol acronyms (e.g., TC, CMF)"""
+    class Meta:
+        model = Regimen
+        fields = ['id', 'name', 'default_cycles', 'cancer_type']
+
+
+class RegimenDrugSerializer(serializers.ModelSerializer):
+    """Dynamic Rows: Serializes the list of drugs for a chosen protocol"""
+    class Meta:
+        model = RegimenDrug
+        fields = ['id', 'name', 'base_value', 'metric_unit', 'route_pathway', 'cycle_cost_kes']
+
+        
 
 class BillSerializer(serializers.ModelSerializer):
     patient_name = serializers.ReadOnlyField(source='patient.name')
@@ -491,10 +542,55 @@ class StockAdjustmentSerializer(serializers.ModelSerializer):
         model = StockAdjustment
         fields = '__all__'
 
+class ProtocolIngredientSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProtocolIngredient
+        # Exclude 'protocol' foreign key to prevent circular redundancy in incoming validation 
+        exclude = ['protocol']
+
+
 class ProtocolSerializer(serializers.ModelSerializer):
+    # This field name must match 'components' map key sent by the frontend payload
+    components = ProtocolIngredientSerializer(many=True)
+
     class Meta:
         model = Protocol
         fields = '__all__'
+
+    def create(self, validated_data):
+        # 1. Pop out the nested component row records away from the main schema data
+        components_data = validated_data.pop('components', [])
+        
+        # 2. Save the root Protocol master object safely
+        protocol = Protocol.objects.create(**validated_data)
+        
+        # 3. Save each dynamic component line item linked back to this parent instance
+        for component in components_data:
+            ProtocolIngredient.objects.create(protocol=protocol, **component)
+            
+        return protocol
+
+    def update(self, instance, validated_data):
+        # 1. Capture dynamic components if provided in the update sequence
+        components_data = validated_data.pop('components', None)
+        
+        # 2. Update the standard root Protocol attributes
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # 3. If new component tracks are present, update them safely
+        if components_data is not None:
+            # Option A: Wipe existing items clean and rebuild (Simplest for dynamic form tables)
+            instance.components.all().delete()
+            for component in components_data:
+                ProtocolIngredient.objects.create(protocol=instance, **component)
+                
+            # Note: If your finance personnel are updating JUST the costs later via a distinct view, 
+            # they will likely update individual ProtocolIngredient records via an IngredientSerializer, 
+            # preserving any information saved here.
+            
+        return instance
 
 class TreatmentSerializer(serializers.ModelSerializer):
      oncologist_name = serializers.CharField(source='oncologist.get_full_name', read_only=True)
