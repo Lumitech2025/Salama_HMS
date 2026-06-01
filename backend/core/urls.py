@@ -49,7 +49,9 @@ from .views import (
     PatientBillableItemViewSet,
     patient_lookup,
     PatientDiagnosisViewSet,
-    SupplierViewSet
+    SupplierViewSet,
+    PurchaseOrderViewSet, GoodsReceivedNoteViewSet,
+    PurchaseInvoiceViewSet, PaymentVoucherViewSet
 )
 
 class OptionalSlashRouter(DefaultRouter):
@@ -123,6 +125,11 @@ router.register(r'insurance-claims', InsuranceClaimViewSet, basename='insurance-
 router.register(r'claim-dispatch-batches', ClaimDispatchBatchViewSet, basename='claim-dispatch-batch')
 
 router.register(r'suppliers', SupplierViewSet, basename='supplier')
+
+router.register(r'purchase-orders', PurchaseOrderViewSet, basename='purchase-order')
+router.register(r'goods-received-notes', GoodsReceivedNoteViewSet, basename='goods-received-note')
+router.register(r'purchase-invoices', PurchaseInvoiceViewSet, basename='purchase-invoice')
+router.register(r'payment-vouchers', PaymentVoucherViewSet, basename='payment-voucher')
 
 
 urlpatterns = [

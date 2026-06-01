@@ -40,7 +40,9 @@ from .models import (
     InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, InsuranceScheme,
     Service, PatientBillableItem,
     ICD10Diagnosis, PatientDiagnosis,
-    Supplier
+    Supplier,
+    PurchaseOrder, GoodsReceivedNote, 
+    PurchaseInvoice, PaymentVoucher
 )
 from .serializers import (
     LabOrderSerializer, LabReferenceSerializer, LabResultSerializer, 
@@ -56,7 +58,9 @@ from .serializers import (
     InsuranceCompanySerializer, InsuranceClaimSerializer, RemittanceBatchSerializer, DetailedPatientClaimSerializer, ClaimDispatchBatchSerializer, InsuranceSchemeSerializer,
     ServiceSerializer, PatientBillableItemSerializer,
     ICD10DiagnosisSerializer, PatientDiagnosisSerializer,
-    SupplierSerializer
+    SupplierSerializer,
+    PurchaseOrderSerializer, GoodsReceivedNoteSerializer, 
+    PurchaseInvoiceSerializer, PaymentVoucherSerializer
 )
 
 
@@ -1343,3 +1347,90 @@ class SupplierViewSet(viewsets.ModelViewSet):
             "status": "Action Required",
             "flagged_vendors": serializer.data
         }, status=status.HTTP_200_OK)
+    
+
+class PurchaseOrderViewSet(viewsets.ModelViewSet):
+    """
+    Handles all Purchase Order interactions.
+    Provides standard CRUD operations + custom action for quick approval transitions.
+    """
+    queryset = PurchaseOrder.objects.all().order_by('-created_at')
+    serializer_class = PurchaseOrderSerializer
+
+    def create(self, request, *args, **kwargs):
+        # Maps frontend 'items' array payload seamlessly to 'items_raw' expected by serializer
+        data = request.data.copy()
+        if 'items' in data:
+            data['items_raw'] = data.pop('items')
+            
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    @action(detail=True, methods=['patch'], url_path='approve')
+    def approve_order(self, request, pk=None):
+        """Custom endpoint allowing the frontend to trigger 'Approve & Send' instantly"""
+        purchase_order = self.get_object()
+        purchase_order.status = 'APPROVED'
+        purchase_order.save()
+        return Response(
+            {"status": "Purchase Order approved and advanced successfully."},
+            status=status.HTTP_200_OK
+        )
+
+
+# ----------------------------------------------------------------------
+# 2. GOODS RECEIVED NOTE (GRN) VIEWSET
+# ----------------------------------------------------------------------
+class GoodsReceivedNoteViewSet(viewsets.ModelViewSet):
+    """
+    Logs physical delivery receipt updates.
+    Automatically steps associated Purchase Order status forward to 'RECEIVED'.
+    """
+    queryset = GoodsReceivedNote.objects.all().order_by('-created_at')
+    serializer_class = GoodsReceivedNoteSerializer
+
+    def create(self, request, *args, **kwargs):
+        # Maps frontend 'items_received' verified array data cleanly to serializer
+        data = request.data.copy()
+        if 'items_received' in data:
+            data['items_received_raw'] = data.pop('items_received')
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+# ----------------------------------------------------------------------
+# 3. SUPPLIER INVOICE VIEWSET
+# ----------------------------------------------------------------------
+class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
+    """
+    Manages commercial matching calculations for incoming bills.
+    """
+    queryset = PurchaseInvoice.objects.all().order_by('-created_at')
+    serializer_class = PurchaseInvoiceSerializer
+
+    def create(self, request, *args, **kwargs):
+        # Handles binary file payloads safely (multipart/form-data) if user attaches physical scan
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+# ----------------------------------------------------------------------
+# 4. PAYMENT VOUCHER VIEWSET
+# ----------------------------------------------------------------------
+class PaymentVoucherViewSet(viewsets.ModelViewSet):
+    """
+    Documents accounts payable outgoing capital transactions.
+    Automatically steps target Invoice statuses forward to 'PAID'.
+    """
+    queryset = PaymentVoucher.objects.all().order_by('-date_issued')
+    serializer_class = PaymentVoucherSerializer

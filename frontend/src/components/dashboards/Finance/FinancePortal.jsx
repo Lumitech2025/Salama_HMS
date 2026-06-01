@@ -5,6 +5,7 @@ import FinanceDashboard from './FinanceDashboard';
 // Import all functional modules
 import MainStoreLedger from './modules/MainStoreLedger';
 import SupplierManagement from './modules/SupplierManagement';
+import PurchaseOrderManagement from './modules/PurchaseOrderManagement'; // New PO module link
 import InsuranceClaimsHub from './modules/InsuranceClaimsHub';
 import FinanceRequisitionsTab from './modules/FinanceRequisitionsTab';
 import InsuranceProviders from '../billingofficer/modules/InsuranceProviders';
@@ -28,6 +29,9 @@ const FinancePortal = () => {
       
       case 'vendors': 
         return <SupplierManagement />;
+
+      case 'purchase_orders': 
+        return <PurchaseOrderManagement />; // Render endpoint for procurement lifecycles
       
       case 'claims': 
         return <InsuranceClaimsHub />; 

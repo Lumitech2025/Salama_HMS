@@ -987,18 +987,37 @@ class Supplier(models.Model):
 class PurchaseOrder(models.Model):
     PO_STATUS = [
         ('DRAFT', 'Draft'),
-        ('SENT', 'Sent to Vendor'),
+        ('PENDING', 'Pending Approval'),
+        ('APPROVED', 'Approved & Sent'),
+        ('RECEIVED', 'Goods Received'),
         ('PARTIAL', 'Partially Received'),
         ('CLOSED', 'Closed/Fulfilled'),
         ('CANCELLED', 'Cancelled'),
     ]
+    
+    PAYMENT_TERMS = [
+        ('Net 15', 'Net 15'),
+        ('Net 30', 'Net 30'),
+        ('Net 60', 'Net 60'),
+    ]
+
     po_number = models.CharField(max_length=50, unique=True, editable=False)
-    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE)
+    supplier = models.ForeignKey('Supplier', on_delete=models.CASCADE, related_name='purchase_orders')
     issue_date = models.DateField(auto_now_add=True)
-    delivery_deadline = models.DateField()
-    status = models.CharField(max_length=20, choices=PO_STATUS, default='DRAFT')
-    total_estimated_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    delivery_date = models.DateField(help_text="Expected delivery date")
+    payment_terms = models.CharField(max_length=20, choices=PAYMENT_TERMS, default='Net 30')
+    status = models.CharField(max_length=20, choices=PO_STATUS, default='PENDING')
+    notes = models.TextField(blank=True, null=True)
     linked_requisitions = models.ManyToManyField('Requisition', blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.po_number
+
+    @property
+    def total_amount(self):
+        """Dynamically calculates total PO value based on line items"""
+        return sum(item.total_cost for item in self.items.all())
 
     def save(self, *args, **kwargs):
         if not self.po_number:
@@ -1006,23 +1025,114 @@ class PurchaseOrder(models.Model):
             self.po_number = f"SALAMA-PO-{timezone.now().year}-{count:04d}"
         super().save(*args, **kwargs)
 
-class PurchaseInvoice(models.Model):
-    """The formal bill sent by the Supplier after delivery"""
-    invoice_number = models.CharField(max_length=100, unique=True)
-    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE)
-    purchase_order = models.OneToOneField(PurchaseOrder, on_delete=models.SET_NULL, null=True, blank=True)
-    
-    total_amount = models.DecimalField(max_digits=12, decimal_places=2)
-    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    due_date = models.DateField()
-    is_fully_paid = models.BooleanField(default=False)
-    
-    # The Physical Scan of the Invoice
-    invoice_file = models.FileField(upload_to='invoices/', null=True, blank=True)
+
+class PurchaseOrderItem(models.Model):
+    """Line items explicitly ordered inside a Purchase Order"""
+    DEPARTMENT_CHOICES = [
+        ('NURSING', 'Nursing'),
+        ('PHARMACY', 'Pharmacy'),
+        ('RADIOLOGY', 'Radiology'),
+        ('LAB', 'Laboratory'),
+        ('MARKETING', 'Marketing'),
+        ('ADMIN', 'Administration'),
+    ]
+
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='items')
+    item_name = models.CharField(max_length=255)
+    category = models.CharField(max_length=30, choices=DEPARTMENT_CHOICES, default='PHARMACY')
+    quantity = models.PositiveIntegerField(default=1)
+    unit_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+
+    @property
+    def total_cost(self):
+        return self.quantity * self.unit_cost
+
+    def __str__(self):
+        return f"{self.item_name} ({self.quantity} x {self.unit_cost}) for {self.purchase_order.po_number}"
+
+
+class GoodsReceivedNote(models.Model):
+    """The logging entity for physical goods deliveries"""
+    grn_number = models.CharField(max_length=50, unique=True, editable=False)
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='grns')
+    delivery_note_ref = models.CharField(max_length=100, help_text="Vendor Delivery Note Number")
+    date_received = models.DateField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"INV-{self.invoice_number} ({self.supplier.name})"
+        return self.grn_number
+
+    def save(self, *args, **kwargs):
+        if not self.grn_number:
+            count = GoodsReceivedNote.objects.count() + 1
+            self.grn_number = f"SALAMA-GRN-{timezone.now().year}-{count:04d}"
+        super().save(*args, **kwargs)
+
+
+class GRNItem(models.Model):
+    """Granular verification tracking for each received item"""
+    SATISFACTION_CHOICES = [
+        ('GoodCondition', 'Good Condition'),
+        ('Satisfactory', 'Satisfactory'),
+        ('Shortage', 'Shortage / Discrepancy'),
+        ('Damaged', 'Damaged & Rejected'),
+    ]
+
+    goods_received_note = models.ForeignKey(GoodsReceivedNote, on_delete=models.CASCADE, related_name='items_received')
+    item_name = models.CharField(max_length=255)
+    ordered_quantity = models.PositiveIntegerField()
+    quantity_received = models.PositiveIntegerField()
+    damaged_quantity = models.PositiveIntegerField(default=0)
+    satisfaction_level = models.CharField(max_length=30, choices=SATISFACTION_CHOICES, default='GoodCondition')
+
+    def __str__(self):
+        return f"{self.item_name} on {self.goods_received_note.grn_number}"
+
+
+class PurchaseInvoice(models.Model):
+    """The formal bill sent by the Supplier matched against a PO"""
+    INVOICE_STATUS = [
+        ('UNPAID', 'Unpaid'),
+        ('PARTIAL', 'Partially Paid'),
+        ('PAID', 'Paid In Full'),
+    ]
+
+    invoice_number = models.CharField(max_length=100, unique=True)
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.SET_NULL, null=True, blank=True, related_name='invoices')
+    total_billed = models.DecimalField(max_digits=12, decimal_places=2)
+    due_date = models.DateField()
+    status = models.CharField(max_length=20, choices=INVOICE_STATUS, default='UNPAID')
+    invoice_file = models.FileField(upload_to='invoices/%Y/%m/', null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"INV-{self.invoice_number}"
+
+
+class PaymentVoucher(models.Model):
+    """The formal proof of payment issued to clear the invoice balance"""
+    PAYMENT_MODES = [
+        ('Bank Wire', 'Bank Wire'),
+        ('M-Pesa Corporate', 'M-Pesa Corporate Paybill'),
+        ('Cheque', 'Cheque'),
+    ]
+
+    voucher_number = models.CharField(max_length=50, unique=True, editable=False)
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.PROTECT, related_name='vouchers')
+    purchase_invoice = models.ForeignKey(PurchaseInvoice, on_delete=models.PROTECT, related_name='vouchers')
+    amount_paid = models.DecimalField(max_digits=12, decimal_places=2)
+    payment_mode = models.CharField(max_length=30, choices=PAYMENT_MODES, default='Bank Wire')
+    payment_reference = models.CharField(max_length=100, unique=True, help_text="Transaction hash, Cheque No, or M-Pesa Code")
+    date_issued = models.DateField(auto_now_add=True)
+
+    def __str__(self):
+        return self.voucher_number
+
+    def save(self, *args, **kwargs):
+        if not self.voucher_number:
+            count = PaymentVoucher.objects.count() + 1
+            self.voucher_number = f"SALAMA-PV-{timezone.now().year}-{count:04d}"
+        super().save(*args, **kwargs)
 
 class MainStoreBatch(models.Model):
     item = models.ForeignKey('LabInventoryItem', on_delete=models.CASCADE, related_name='batches')

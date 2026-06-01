@@ -16,7 +16,10 @@ from .models import (InsuranceScheme, LabOrder, RegistrationRecord,
     OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabTestRegistry, LabPanel, ProtocolMaster, ProtocolDrug, DrugGuardrail,
     InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, Service, PatientBillableItem,
     ICD10Diagnosis, PatientDiagnosis,
-    Supplier
+    Supplier,
+    PurchaseOrder, PurchaseOrderItem, 
+    GoodsReceivedNote, GRNItem, 
+    PurchaseInvoice, PaymentVoucher
 )
 
 
@@ -1282,3 +1285,86 @@ class SupplierAdmin(admin.ModelAdmin):
     
     is_compliant.boolean = True
     is_compliant.short_description = 'Tax Compliant'
+
+
+class PurchaseOrderItemInline(admin.TabularInline):
+    model = PurchaseOrderItem
+    extra = 1
+    fields = ('item_name', 'category', 'quantity', 'unit_cost', 'get_total_cost')
+    readonly_fields = ('get_total_cost',)
+
+    def get_total_cost(self, obj):
+        if obj.id:
+            return f"KES {obj.total_cost:,.2f}"
+        return "KES 0.00"
+    get_total_cost.short_description = "Total Cost"
+
+
+class GRNItemInline(admin.TabularInline):
+    model = GRNItem
+    extra = 0
+    fields = ('item_name', 'ordered_quantity', 'quantity_received', 'damaged_quantity', 'satisfaction_level')
+    # Prevent tampering with delivery logs once saved
+    readonly_fields = ('item_name', 'ordered_quantity', 'quantity_received', 'damaged_quantity', 'satisfaction_level')
+    can_delete = False
+
+
+# ----------------------------------------------------------------------
+# Purchase Orders, Goods Received Notes, Invoices, and Payment Vouchers Admin Configurations
+# ----------------------------------------------------------------------
+
+@admin.register(PurchaseOrder)
+class PurchaseOrderAdmin(admin.ModelAdmin):
+    list_display = ('po_number', 'supplier', 'issue_date', 'delivery_date', 'status', 'get_total_amount')
+    list_filter = ('status', 'issue_date', 'payment_terms')
+    search_fields = ('po_number', 'supplier__name')
+    readonly_fields = ('po_number', 'issue_date', 'get_total_amount')
+    inlines = [PurchaseOrderItemInline]
+    actions = ['approve_selected_orders', 'cancel_selected_orders']
+
+    def get_total_amount(self, obj):
+        return f"KES {obj.total_amount:,.2f}"
+    get_total_amount.short_description = "Estimated Total Value"
+
+    # Custom Admin Actions for quick overrides
+    @admin.action(description="Mark selected orders as Approved & Sent")
+    def approve_selected_orders(self, request, queryset):
+        updated = queryset.update(status='APPROVED')
+        self.message_user(request, f"{updated} purchase orders successfully moved to APPROVED state.")
+
+    @admin.action(description="Mark selected orders as Cancelled")
+    def cancel_selected_orders(self, request, queryset):
+        updated = queryset.update(status='CANCELLED')
+        self.message_user(request, f"{updated} purchase orders successfully cancelled.")
+
+
+@admin.register(GoodsReceivedNote)
+class GoodsReceivedNoteAdmin(admin.ModelAdmin):
+    list_display = ('grn_number', 'purchase_order', 'delivery_note_ref', 'date_received')
+    list_filter = ('date_received',)
+    search_fields = ('grn_number', 'purchase_order__po_number', 'delivery_note_ref')
+    readonly_fields = ('grn_number', 'date_received')
+    inlines = [GRNItemInline]
+
+
+@admin.register(PurchaseInvoice)
+class PurchaseInvoiceAdmin(admin.ModelAdmin):
+    list_display = ('invoice_number', 'purchase_order', 'total_billed', 'due_date', 'status', 'view_invoice_file')
+    list_filter = ('status', 'due_date')
+    search_fields = ('invoice_number', 'purchase_order__po_number')
+    readonly_fields = ('created_at',)
+
+    def view_invoice_file(self, obj):
+        """Generates a secure anchor link in Django admin to inspect uploaded file scans"""
+        if obj.invoice_file:
+            return format_html('<a href="{}" target="_blank" style="font-weight: bold; color: #2563eb;">View File</a>', obj.invoice_file.url)
+        return "No Upload"
+    view_invoice_file.short_description = "Physical Scan"
+
+
+@admin.register(PaymentVoucher)
+class PaymentVoucherAdmin(admin.ModelAdmin):
+    list_display = ('voucher_number', 'purchase_invoice', 'amount_paid', 'payment_mode', 'payment_reference', 'date_issued')
+    list_filter = ('payment_mode', 'date_issued')
+    search_fields = ('voucher_number', 'payment_reference', 'purchase_invoice__invoice_number')
+    readonly_fields = ('voucher_number', 'date_issued')

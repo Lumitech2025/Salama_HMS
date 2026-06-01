@@ -14,7 +14,10 @@ from .models import (
     InsuranceScheme, InsuranceCompany, InsuranceClaim, RemittanceBatch, ClaimDispatchBatch,
     Service, PatientBillableItem,
     ICD10Diagnosis, PatientDiagnosis,
-    Supplier
+    Supplier,
+    PurchaseOrder, PurchaseOrderItem, 
+    GoodsReceivedNote, GRNItem, 
+    PurchaseInvoice, PaymentVoucher
 
 )
 
@@ -1331,3 +1334,148 @@ class SupplierSerializer(serializers.ModelSerializer):
             })
 
         return data
+    
+
+# Purchases
+
+class PurchaseOrderItemSerializer(serializers.ModelSerializer):
+    total_cost = serializers.ReadOnlyField()
+
+    class Meta:
+        model = PurchaseOrderItem
+        fields = ['id', 'item_name', 'category', 'quantity', 'unit_cost', 'total_cost']
+
+
+class PurchaseOrderSerializer(serializers.ModelSerializer):
+    # Read-only fields to simplify UI consumption
+    items = PurchaseOrderItemSerializer(many=True, read_only=True)
+    supplier_name = serializers.CharField(source='supplier.name', read_only=True)
+    total_amount = serializers.ReadOnlyField()
+    
+    # Write-only fields explicitly exposed for incoming form raw item structures
+    items_raw = serializers.JSONField(write_only=True, required=False)
+
+    class Meta:
+        model = PurchaseOrder
+        fields = [
+            'id', 'po_number', 'supplier', 'supplier_name', 'issue_date', 
+            'delivery_date', 'payment_terms', 'status', 'notes', 
+            'total_amount', 'linked_requisitions', 'items', 'items_raw'
+        ]
+
+    def create(self, validated_data):
+        """Overrides creation logic to automatically handle nested item arrays"""
+        items_data = validated_data.pop('items_raw', [])
+        
+        with transaction.atomic():
+            purchase_order = PurchaseOrder.objects.create(**validated_data)
+            
+            # Unpack items sent by React state structure
+            for item in items_data:
+                PurchaseOrderItem.objects.create(
+                    purchase_order=purchase_order,
+                    item_name=item.get('item_name'),
+                    category=item.get('category', 'PHARMACY'),
+                    quantity=int(item.get('quantity', 1)),
+                    unit_cost=float(item.get('unit_cost', 0.00))
+                )
+                
+        return purchase_order
+
+
+# ----------------------------------------------------------------------
+# 2. GOODS RECEIVED NOTE SERIALIZERS
+# ----------------------------------------------------------------------
+
+class GRNItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GRNItem
+        fields = ['id', 'item_name', 'ordered_quantity', 'quantity_received', 'damaged_quantity', 'satisfaction_level']
+
+
+class GoodsReceivedNoteSerializer(serializers.ModelSerializer):
+    items_received = GRNItemSerializer(many=True, read_only=True)
+    po_number = serializers.CharField(source='purchase_order.po_number', read_only=True)
+    supplier_name = serializers.CharField(source='purchase_order.supplier.name', read_only=True)
+    
+    # Write-only field to receive verified item snapshots directly from front-end
+    items_received_raw = serializers.JSONField(write_only=True, required=False)
+
+    class Meta:
+        model = GoodsReceivedNote
+        fields = [
+            'id', 'grn_number', 'purchase_order', 'po_number', 'supplier_name', 
+            'delivery_note_ref', 'date_received', 'items_received', 'items_received_raw'
+        ]
+
+    def create(self, validated_data):
+        items_data = validated_data.pop('items_received_raw', [])
+        
+        with transaction.atomic():
+            grn = GoodsReceivedNote.objects.create(**validated_data)
+            
+            for item in items_data:
+                GRNItem.objects.create(
+                    goods_received_note=grn,
+                    item_name=item.get('item_name'),
+                    ordered_quantity=int(item.get('ordered_quantity', 0)),
+                    quantity_received=int(item.get('quantity_received', 0)),
+                    damaged_quantity=int(item.get('damaged_quantity', 0)),
+                    satisfaction_level=item.get('satisfaction_level', 'GoodCondition')
+                )
+                
+            # Automatically advance linked PO status on delivery confirmation
+            po = grn.purchase_order
+            po.status = 'RECEIVED'
+            po.save()
+
+        return grn
+
+
+# ----------------------------------------------------------------------
+# 3. SUPPLIER INVOICE SERIALIZERS
+# ----------------------------------------------------------------------
+
+class PurchaseInvoiceSerializer(serializers.ModelSerializer):
+    po_number = serializers.CharField(source='purchase_order.po_number', read_only=True)
+    supplier_name = serializers.CharField(source='purchase_order.supplier.name', read_only=True)
+    file_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PurchaseInvoice
+        fields = ['id', 'invoice_number', 'purchase_order', 'po_number', 'supplier_name', 'total_billed', 'due_date', 'status', 'invoice_file', 'file_name']
+
+    def get_file_name(self, obj):
+        """Extracts fallback string filename for React file badges"""
+        if obj.invoice_file:
+            return obj.invoice_file.name.split('/')[-1]
+        return "invoice.pdf"
+
+
+# ----------------------------------------------------------------------
+# 4. PAYMENT VOUCHER SERIALIZERS
+# ----------------------------------------------------------------------
+
+class PaymentVoucherSerializer(serializers.ModelSerializer):
+    po_number = serializers.CharField(source='purchase_order.po_number', read_only=True)
+    purchase_invoice_number = serializers.CharField(source='purchase_invoice.invoice_number', read_only=True)
+    supplier_name = serializers.CharField(source='purchase_order.supplier.name', read_only=True)
+
+    class Meta:
+        model = PaymentVoucher
+        fields = [
+            'id', 'voucher_number', 'purchase_order', 'po_number', 'purchase_invoice', 
+            'purchase_invoice_number', 'supplier_name', 'amount_paid', 'payment_mode', 
+            'payment_reference', 'date_issued'
+        ]
+
+    def create(self, validated_data):
+        with transaction.atomic():
+            voucher = PaymentVoucher.objects.create(**validated_data)
+            
+            # Automatically push Invoice billing state to PAID upon allocation
+            invoice = voucher.purchase_invoice
+            invoice.status = 'PAID'
+            invoice.save()
+            
+        return voucher

@@ -50,12 +50,13 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
     { id: 'insurance_providers', label: 'Insurance Providers', icon: Building2  },
     { id: 'claims', label: 'Claims', icon: Receipt  },
     { id: 'service-catalogue', label: 'Service Catalogue', icon: FileText },
+    { id: 'purchase_orders', label: 'Purchase Orders', icon: ClipboardList }, 
   ];
 
   return (
-    <aside className="h-screen w-80 bg-[#020617] text-white flex flex-col p-8 fixed left-0 top-0 shadow-2xl z-50 font-sans antialiased">
+    <aside className="h-screen w-80 bg-[#020617] text-white flex flex-col p-6 fixed left-0 top-0 shadow-2xl z-50 font-sans antialiased">
       {/* BRANDING */}
-      <div className="mb-12 px-2 flex items-center gap-3">
+      <div className="mb-10 px-2 flex items-center gap-3">
         <div className="bg-teal-500 p-2.5 rounded-xl shadow-lg shadow-teal-500/20">
           <ShieldCheck size={24} className="text-white" />
         </div>
@@ -76,7 +77,7 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full group relative flex items-center gap-4 p-5 rounded-[1.5rem] transition-all duration-300 text-left focus:outline-none cursor-pointer ${
+              className={`w-full group relative flex items-center gap-4 p-4 rounded-[1.5rem] transition-all duration-300 text-left focus:outline-none cursor-pointer ${
                 isActive ? 'bg-white/10 border border-white/10 shadow-xl' : 'hover:bg-white/5 border border-transparent'
               }`}
             >
@@ -101,7 +102,7 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
                 }`}>
                   {item.label}
                 </p>
-                <p className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter mt-0.5 group-hover:text-slate-400 transition-colors">
+                <p className="text-[7px] font-bold text-slate-500 uppercase tracking-tighter mt-0.5 group-hover:text-slate-400 transition-colors">
                   {item.desc}
                 </p>
               </div>
@@ -120,7 +121,7 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
       <div className="pt-8 border-t border-white/5">
         <button 
           onClick={onLogout} 
-          className="w-full flex items-center gap-4 p-5 rounded-3xl bg-rose-500/5 border border-rose-500/10 text-rose-500 hover:bg-rose-50 hover:text-white transition-all duration-300 group cursor-pointer"
+          className="w-full flex items-center gap-4 p-4 rounded-3xl bg-rose-500/5 border border-rose-500/10 text-rose-500 hover:bg-rose-50 hover:text-white transition-all duration-300 group cursor-pointer"
         >
           <LogOut size={20} className="group-hover:scale-110 transition-transform" />
           <span className="text-[10px] font-black uppercase tracking-[0.2em]">Logout</span>
