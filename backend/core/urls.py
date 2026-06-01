@@ -3,6 +3,9 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import ICD11TokenProxyView
 from core.views import ICD10DiagnosisViewSet
+from django.conf.urls.static import static
+from django.conf import settings
+from django.contrib import admin
 
 
 # All viewsets and functions imported cleanly from your local views.py
@@ -135,6 +138,7 @@ router.register(r'payment-vouchers', PaymentVoucherViewSet, basename='payment-vo
 urlpatterns = [
     path('token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('admin/', admin.site.urls),
 
     path('patients/lookup/', patient_lookup, name='patient-lookup'),
 
@@ -143,3 +147,7 @@ urlpatterns = [
     # All generated viewset endpoints (including nested action URLs) are safely included here
     path('', include(router.urls)), 
 ]
+
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

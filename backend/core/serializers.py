@@ -1393,6 +1393,38 @@ class GRNItemSerializer(serializers.ModelSerializer):
         fields = ['id', 'item_name', 'ordered_quantity', 'quantity_received', 'damaged_quantity', 'satisfaction_level']
 
 
+def generate_next_batch_number():
+    """
+    Scans the existing inventory lots to atomically extract, compute, 
+    and increment the sequential serial lot identification indexes.
+    Example output format: SCC-INV-001/2026
+    """
+    # Import locally to avoid potential model initialization state loops
+    from core.models import InventoryItem
+    
+    current_year = timezone.now().year
+    prefix = "SCC-INV-"
+    suffix = f"/{current_year}"
+    
+    # Extract the highest primary ID item matching the current calendar layout sequence
+    latest_item = InventoryItem.objects.filter(
+        batch_number__startswith=prefix,
+        batch_number__endswith=suffix
+    ).order_by('-id').first()
+    
+    if latest_item:
+        try:
+            # Strip prefixes/suffixes to isolate raw numbers e.g. "SCC-INV-012/2026" -> "012" -> 12
+            current_num_str = latest_item.batch_number.replace(prefix, "").replace(suffix, "")
+            next_num = int(current_num_str) + 1
+        except (ValueError, TypeError):
+            next_num = 1
+    else:
+        next_num = 1
+        
+    return f"{prefix}{str(next_num).zfill(3)}{suffix}"
+
+
 class GoodsReceivedNoteSerializer(serializers.ModelSerializer):
     items_received = GRNItemSerializer(many=True, read_only=True)
     po_number = serializers.CharField(source='purchase_order.po_number', read_only=True)
@@ -1409,23 +1441,64 @@ class GoodsReceivedNoteSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
+        from core.models import InventoryItem, PurchaseOrderItem
+        
         items_data = validated_data.pop('items_received_raw', [])
         
         with transaction.atomic():
+            # 1. Save the master Goods Received Note entry
             grn = GoodsReceivedNote.objects.create(**validated_data)
+            po = grn.purchase_order
             
+            # 2. Iterate through incoming items to log arrival details and update inventory counters
             for item in items_data:
+                item_name = item.get('item_name')
+                qty_received = int(item.get('quantity_received', 0))
+                damaged_qty = int(item.get('damaged_quantity', 0))
+                ordered_qty = int(item.get('ordered_quantity', 0))
+                satisfaction = item.get('satisfaction_level', 'GoodCondition')
+                
+                # Dynamic field collection mapped straight from frontend date pickers
+                expiry_date = item.get('expiry_date') or None
+
+                # Create the receipt audit item line row
                 GRNItem.objects.create(
                     goods_received_note=grn,
-                    item_name=item.get('item_name'),
-                    ordered_quantity=int(item.get('ordered_quantity', 0)),
-                    quantity_received=int(item.get('quantity_received', 0)),
-                    damaged_quantity=int(item.get('damaged_quantity', 0)),
-                    satisfaction_level=item.get('satisfaction_level', 'GoodCondition')
+                    item_name=item_name,
+                    ordered_quantity=ordered_qty,
+                    quantity_received=qty_received,
+                    damaged_quantity=damaged_qty,
+                    satisfaction_level=satisfaction
                 )
                 
-            # Automatically advance linked PO status on delivery confirmation
-            po = grn.purchase_order
+                # If zero usable units arrived, skip updating the physical asset inventory
+                if qty_received <= 0:
+                    continue
+                
+                # Look up matching procurement line item details from the original PO
+                po_line_item = PurchaseOrderItem.objects.filter(
+                    purchase_order=po, 
+                    item_name=item_name
+                ).first()
+                
+                # Fallbacks if items don't have an exact structural match in the PO line
+                unit_cost = po_line_item.unit_cost if po_line_item else 0.00
+                department = po_line_item.category if po_line_item else 'PHARMACY'
+                
+                # Generate tracking index sequentially
+                assigned_batch_id = generate_next_batch_number()
+                
+                # 3. Commit unique trace lot line directly to the stock inventory ledger table
+                InventoryItem.objects.create(
+                    name=item_name,
+                    batch_number=assigned_batch_id,
+                    department=department,
+                    quantity_available=qty_received,
+                    cost_per_unit=unit_cost,
+                    expiry_date=expiry_date
+                )
+                
+            # 4. Advance linked PO status to prevent double-processing delivery workflows
             po.status = 'RECEIVED'
             po.save()
 

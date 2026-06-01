@@ -766,6 +766,15 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
     queryset = InventoryItem.objects.all().order_by('-added_at')
     serializer_class = InventoryItemSerializer
 
+    @action(detail=False, methods=['get'], url_path='unique-catalog')
+    def unique_catalog(self):
+        """
+        Returns a clean list of unique product names, grouped by department 
+        and bundled with their default baseline unit costs for the procurement engine.
+        """
+        items = InventoryItem.objects.values('name', 'department', 'cost_per_unit').distinct()
+        return Response(items)
+
 class PsychologyEnrollmentViewSet(viewsets.ModelViewSet):
     queryset = PsychologyEnrollment.objects.all().order_by('-created_at')
     serializer_class = PsychologyEnrollmentSerializer
