@@ -5,7 +5,7 @@ import sys
 import django
 
 # Setup Django environment
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings') # Adjust if your folder is named config.settings
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django.setup()
 
 from core.models import ICD10Diagnosis
@@ -36,13 +36,12 @@ def get_anatomical_site_mapping(code):
         return 'GYNAECOLOGICAL'
     if code.startswith(('C91', 'C92', 'C93', 'C94', 'C95')):
         return 'LEUKEMIA'
-    if code.startswith(('C81', 'C82', 'C83', 'C84', 'C85', 'C86', 'C88', 'C90', 'C96')):
-        return 'ADULT HAEMATOLOGICAL'
         
     return None
 
 def run_import():
     csv_file_path = r"C:\Users\Collins\Downloads\ICDCODES.csv"
+    export_file_path = r"C:\Users\Collins\Downloads\MAPPED_ICD10_SITES.csv"
     
     if not os.path.exists(csv_file_path):
         print(f"❌ Target source file missing at: {csv_file_path}")
@@ -52,13 +51,13 @@ def run_import():
     
     grouping_stats = {choice[0]: 0 for choice in ICD10Diagnosis.PRIMARY_SITE_CHOICES}
     batch_records = []
+    export_rows = []
     seen_codes = set()
 
     with open(csv_file_path, mode='r', encoding='utf-8') as f:
         reader = csv.reader(f)
         header = [h.strip().upper() for h in next(reader)]
         
-        # Flexibly pinpoint where columns sit inside the file
         try:
             code_idx = header.index('CODE')
             desc_idx = -1
@@ -86,19 +85,25 @@ def run_import():
                 seen_codes.add(clean_code)
                 grouping_stats[site_group] += 1
                 
-                # Format code string representation visually (e.g. C509 to C50.9)
                 display_code = raw_code.upper()
                 if '.' not in display_code and len(display_code) > 3:
                     display_code = f"{display_code[:3]}.{display_code[3:]}"
 
+                # Aligned with your new model design
                 batch_records.append(
                     ICD10Diagnosis(
                         primary_site=site_group,
                         code=display_code,
-                        short_description=raw_desc[:255],
-                        long_description=raw_desc
+                        short_description=raw_desc[:255], # Kept safely within CharField limits
+                        long_description=raw_desc          # Takes full text cleanly without truncation
                     )
                 )
+
+                export_rows.append({
+                    'PRIMARY_SITE': site_group,
+                    'CODE': display_code,
+                    'DESCRIPTION': raw_desc
+                })
 
     print("\n📊 --- Primary Site Grouping Statistics ---")
     for site, count in grouping_stats.items():
@@ -106,6 +111,21 @@ def run_import():
         
     print(f"\nTotal targeted records extracted: {len(batch_records)}")
 
+    # Write backup mapped file
+    if export_rows:
+        print(f"💾 Writing filtered anatomical mappings out to file target: {export_file_path}")
+        try:
+            with open(export_file_path, mode='w', encoding='utf-8', newline='') as out_f:
+                fieldnames = ['PRIMARY_SITE', 'CODE', 'DESCRIPTION']
+                writer = csv.DictWriter(out_f, fieldnames=fieldnames)
+                
+                writer.writeheader()
+                writer.writerows(export_rows)
+            print("💾 CSV export tracking completed successfully.")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not write file to filesystem destination path: {e}")
+
+    # Write to local PostgreSQL/MySQL/SQLite DB using Bulk Create
     if batch_records:
         print("\n⏳ Reindexing local definitions table...")
         ICD10Diagnosis.objects.all().delete()

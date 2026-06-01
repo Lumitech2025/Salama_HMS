@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Clipboard, 
-  FileText, 
   User, 
   Stethoscope, 
   FlaskConical, 
@@ -13,31 +12,41 @@ import {
   HeartHandshake,
   Search,
   Eye,
-  Calendar,
-  Layers
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 
-const RecordsTab = ({ 
-  patientName = "COLLINS MWITI",
-  healthRecordNumber = "SHA-2026-9931",
-  visitCount = 0,
-  nextAppointment = "N/A",
-  nextAppointmentPlace = "N/A",
-  nextAppointmentPractitioner = "N/A",
-  activeMedicationsCount = 0,
-  diagnoses = [],
-  doctorNotes = [],
-  nurseNotes = [],
-  orderedLabs = [],
-  labResults = [], 
-  prescriptions = [],
-  psychologyNotes = [],
-  imaging = [], 
-  chemoSessions = [],
-  palliativeNotes = []
-}) => {
-  // Navigation tracking state controller matching reference sub-headers
+const RecordsTab = () => {
+  // Navigation tracking state controller
   const [activeSubTab, setActiveSubTab] = useState('diagnoses');
+  
+  // Patient list & selection state
+  const [patients, setPatients] = useState([]);
+  const [selectedPatientId, setSelectedPatientId] = useState('');
+  const [loadingPatients, setLoadingPatients] = useState(true);
+  
+  // Tracking global request error statuses (Authentication, 404, etc)
+  const [apiError, setApiError] = useState('');
+  
+  // Real clinical records state containers (populated via direct API views)
+  const [clinicalData, setClinicalData] = useState({
+    visitCount: 0,
+    nextAppointment: "N/A",
+    nextAppointmentPlace: "N/A",
+    nextAppointmentPractitioner: "N/A",
+    activeMedicationsCount: 0,
+    diagnoses: [],
+    doctorNotes: [],
+    nurseNotes: [],
+    orderedLabs: [],
+    labResults: [], 
+    prescriptions: [],
+    psychologyNotes: [],
+    imaging: [], 
+    chemoSessions: [],
+    palliativeNotes: []
+  });
+  const [loadingRecords, setLoadingRecords] = useState(false);
 
   const subTabs = [
     { id: 'diagnoses', label: 'Diagnosed Conditions', icon: Clipboard },
@@ -52,94 +61,188 @@ const RecordsTab = ({
     { id: 'palliative', label: 'Palliative Care', icon: HeartHandshake },
   ];
 
+  // Helper function to dynamically construct headers with auth credentials
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('token') || localStorage.getItem('access_token');
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  };
+
+  // 1. Fetch available patient registry on initial mount
+  useEffect(() => {
+    const fetchPatientRegistry = async () => {
+      try {
+        setLoadingPatients(true);
+        setApiError('');
+        
+        const response = await fetch('/api/patients/', {
+          method: 'GET',
+          headers: getAuthHeaders()
+        }); 
+
+        if (response.status === 401 || response.status === 403) {
+          throw new Error("Authentication failed. Please log out and back in again.");
+        }
+        if (!response.ok) throw new Error("Could not pull patient lists from database registry.");
+
+        const data = await response.json();
+        setPatients(data);
+        
+        if (data.length > 0) {
+          setSelectedPatientId(data[0].id); 
+        }
+      } catch (error) {
+        console.error("Error connecting to Salama HMS Patient registry:", error);
+        setApiError(error.message || "Failed connecting to system directory components.");
+      } finally {
+        setLoadingPatients(false);
+      }
+    };
+
+    fetchPatientRegistry();
+  }, []);
+
+  // 2. Reactive parallel queries whenever selectedPatientId updates
+  useEffect(() => {
+    if (!selectedPatientId) return;
+
+    const fetchPatientMedicalHistory = async () => {
+      try {
+        setLoadingRecords(true);
+        setApiError('');
+        
+        // Query target viewset endpoints concurrently using Promise.all
+        const [
+          diagnosesRes,
+          notesRes,
+          ordersRes,
+          resultsRes,
+          prescriptionsRes,
+          imagingRes,
+          chemoRes,
+          appointmentsRes
+        ] = await Promise.all([
+          fetch(`/api/patient-diagnoses/?patient=${selectedPatientId}`, { headers: getAuthHeaders() }),
+          fetch(`/api/clinical-notes/?patient=${selectedPatientId}`, { headers: getAuthHeaders() }),
+          fetch(`/api/lab-orders/?patient=${selectedPatientId}`, { headers: getAuthHeaders() }),
+          fetch(`/api/lab-results/?patient=${selectedPatientId}`, { headers: getAuthHeaders() }),
+          fetch(`/api/prescriptions/?patient=${selectedPatientId}`, { headers: getAuthHeaders() }),
+          fetch(`/api/imaging/?patient=${selectedPatientId}`, { headers: getAuthHeaders() }),
+          fetch(`/api/chemo-sessions/?patient=${selectedPatientId}`, { headers: getAuthHeaders() }),
+          fetch(`/api/appointments/?patient=${selectedPatientId}`, { headers: getAuthHeaders() })
+        ]);
+
+        // Safely evaluate responses or fallback to empty lists if any endpoint fails
+        const diagnoses = diagnosesRes.ok ? await diagnosesRes.json() : [];
+        const clinicalNotes = notesRes.ok ? await notesRes.json() : [];
+        const orderedLabs = ordersRes.ok ? await ordersRes.json() : [];
+        const labResults = resultsRes.ok ? await resultsRes.json() : [];
+        const prescriptions = prescriptionsRes.ok ? await prescriptionsRes.json() : [];
+        const imaging = imagingRes.ok ? await imagingRes.json() : [];
+        const chemoSessions = chemoRes.ok ? await chemoRes.json() : [];
+        const appointments = appointmentsRes.ok ? await appointmentsRes.json() : [];
+
+        // Identify next up-coming scheduled encounter if available
+        const nextAppt = appointments.length > 0 ? appointments[0] : null;
+
+        setClinicalData({
+          visitCount: diagnoses.length + clinicalNotes.length,
+          nextAppointment: nextAppt ? (nextAppt.formatted_date || nextAppt.appointment_date) : "N/A",
+          nextAppointmentPlace: nextAppt ? (nextAppt.department || "General Clinic") : "N/A",
+          nextAppointmentPractitioner: nextAppt ? (nextAppt.doctor_name || "Assigned Consultant") : "N/A",
+          activeMedicationsCount: prescriptions.length,
+          diagnoses: diagnoses, 
+          doctorNotes: clinicalNotes,
+          nurseNotes: clinicalNotes,   
+          orderedLabs: orderedLabs,
+          labResults: labResults,
+          prescriptions: prescriptions,
+          psychologyNotes: [], 
+          imaging: imaging,
+          chemoSessions: chemoSessions,
+          palliativeNotes: []
+        });
+      } catch (error) {
+        console.error(`Failed loading records for Patient ID: ${selectedPatientId}`, error);
+        setApiError(error.message || "Failed linking historical diagnostic profiles.");
+      } finally {
+        setLoadingRecords(false);
+      }
+    };
+
+    fetchPatientMedicalHistory();
+  }, [selectedPatientId]);
+
   return (
-    <div className="space-y-8 text-left animate-in fade-in duration-300 font-sans w-full max-w-none px-2 pb-12 antialiased">
+    <div className="space-y-6 text-left animate-in fade-in duration-300 font-sans w-full max-w-none px-2 pb-12 antialiased">
       
       {/* 1. TITLE HEADER */}
       <div>
-        <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">Health records</h2>
-        <p className="text-sm md:text-base text-slate-500 mt-1">
-          This is a history detailing your hospital visits and medical history.
+        <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Health records</h2>
+        <p className="text-sm text-slate-500 mt-1">
+          This is a history detailing hospital visits and medical history.
         </p>
       </div>
 
-      {/* 2. PATIENT REGISTRY IDENTIFIER BAR (Mirrors image_f32e81.png layout) */}
+      {/* ERROR BANNER DISPLAY */}
+      {apiError && (
+        <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 font-semibold text-sm rounded-xl flex items-center gap-3">
+          <AlertCircle size={20} className="text-rose-600 shrink-0" />
+          <span>{apiError}</span>
+        </div>
+      )}
+
+      {/* 2. PATIENT REGISTRY IDENTIFIER BAR */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full max-w-xl">
         <div className="relative flex-1">
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
-            <Search size={18} />
+            {loadingPatients ? <Loader2 size={18} className="animate-spin text-blue-500" /> : <Search size={18} />}
           </div>
           <select 
-            disabled
-            className="w-full pl-11 pr-4 py-3 bg-white border border-slate-300 text-slate-900 text-base font-bold rounded-xl shadow-xs appearance-none cursor-not-allowed"
+            value={selectedPatientId}
+            onChange={(e) => setSelectedPatientId(e.target.value)}
+            disabled={loadingPatients || patients.length === 0}
+            className="w-full pl-11 pr-10 py-2.5 bg-white border border-slate-300 text-slate-800 text-sm font-medium rounded-xl shadow-xs appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-50 disabled:cursor-not-allowed"
           >
-            <option>{patientName} ({healthRecordNumber})</option>
+            {loadingPatients ? (
+              <option>Loading systems registries...</option>
+            ) : patients.length === 0 ? (
+              <option>No medical profiles found in database</option>
+            ) : (
+              patients.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.full_name || p.name} ({p.health_record_number || p.id})
+                </option>
+              ))
+            )}
           </select>
+          <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none text-slate-500">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+          </div>
         </div>
         <button 
           type="button" 
-          className="bg-slate-50 border border-slate-300 p-3 rounded-xl text-slate-700 hover:bg-slate-100 transition-colors flex items-center justify-center shrink-0"
+          className="bg-slate-50 border border-slate-300 p-2.5 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors flex items-center justify-center shrink-0"
           title="Verify identity details"
         >
-          <Eye size={20} />
+          <Eye size={18} />
         </button>
-      </div>
-
-      {/* 3. TOP LEVEL ANALYTICS METRIC CARDS LAYER */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        {/* Total Visits Card */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex items-start gap-4">
-          <div className="p-3 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 shrink-0">
-            <Layers size={22} />
-          </div>
-          <div className="space-y-1">
-            <h4 className="text-sm font-bold text-slate-800 tracking-tight">Number of Visits</h4>
-            <p className="text-xs text-slate-400 font-medium">Encounter count (last year)</p>
-            <p className="text-3xl font-black text-slate-900 pt-1">{visitCount}</p>
-          </div>
-        </div>
-
-        {/* Next Appointment Card */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex items-start gap-4">
-          <div className="p-3 rounded-xl bg-amber-50 text-amber-600 border border-amber-100 shrink-0">
-            <Calendar size={22} />
-          </div>
-          <div className="space-y-1 flex-1 min-w-0">
-            <h4 className="text-sm font-bold text-slate-800 tracking-tight">Next Appointment</h4>
-            <p className="text-xs text-slate-400 font-medium">Scheduled for</p>
-            <p className="text-2xl font-black text-slate-900 pt-1 truncate">{nextAppointment}</p>
-            {nextAppointment !== "N/A" && (
-              <p className="text-xs text-slate-500 font-medium mt-1">
-                <span className="font-bold text-slate-700">Place:</span> {nextAppointmentPlace} • <span className="font-bold text-slate-700">Doctor:</span> {nextAppointmentPractitioner}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Active Medications Card */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex items-start gap-4">
-          <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100 shrink-0">
-            <Pill size={22} />
-          </div>
-          <div className="space-y-1">
-            <h4 className="text-sm font-bold text-slate-800 tracking-tight">Active Medications</h4>
-            <p className="text-xs text-slate-400 font-medium">Active prescriptions count</p>
-            <p className="text-3xl font-black text-slate-900 pt-1">{activeMedicationsCount}</p>
-          </div>
-        </div>
-
       </div>
 
       <hr className="border-slate-200" />
 
       {/* Hospital Visits Header Label */}
       <div>
-        <h3 className="text-lg font-black text-slate-900 tracking-tight">Hospital Visits</h3>
-        <p className="text-xs md:text-sm text-slate-400">Select a visit tab module below to read filtered data registries.</p>
+        <h3 className="text-lg font-semibold text-slate-900 tracking-tight">Hospital Visits</h3>
+        <p className="text-xs text-slate-400">Select a visit tab module below to read filtered data registries.</p>
       </div>
 
-      {/* 4. HORIZONTAL TOGGLE SUB-TABS MATRIX BAR */}
+      {/* 3. HORIZONTAL TOGGLE SUB-TABS MATRIX BAR */}
       <div className="flex items-center gap-1.5 overflow-x-auto border-b border-slate-200 pb-2 scrollbar-none w-full">
         {subTabs.map((tab) => {
           const IconComponent = tab.icon;
@@ -149,7 +252,7 @@ const RecordsTab = ({
               key={tab.id}
               type="button"
               onClick={() => setActiveSubTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm whitespace-nowrap transition-all border ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm whitespace-nowrap transition-all border ${
                 isActive
                   ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
                   : 'bg-white text-slate-600 border-transparent hover:bg-slate-50 hover:text-slate-900'
@@ -162,27 +265,42 @@ const RecordsTab = ({
         })}
       </div>
 
-      {/* 5. GRANULAR DETAILS ROUTED CANVAS */}
-      <div className="w-full bg-white border border-slate-200 rounded-2xl p-6 shadow-xs min-h-[350px]">
+      {/* 4. GRANULAR DETAILS ROUTED CANVAS */}
+      <div className="w-full bg-white border border-slate-200 rounded-2xl p-6 shadow-xs min-h-[350px] relative">
         
+        {loadingRecords && (
+          <div className="absolute inset-0 bg-white/70 rounded-2xl flex items-center justify-center z-10">
+            <div className="flex items-center gap-2 font-medium text-slate-600">
+              <Loader2 className="animate-spin text-blue-600" size={24} />
+              <span>Querying Clinical Registries...</span>
+            </div>
+          </div>
+        )}
+
         {/* SUB-TAB 1: DIAGNOSED CONDITIONS */}
         {activeSubTab === 'diagnoses' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                 <Clipboard size={18} className="text-blue-600" /> Diagnosed Clinical Pathology Records
               </h3>
             </div>
-            <div className="space-y-4">
-              {diagnoses.length > 0 ? diagnoses.map((diag, idx) => (
-                <div key={idx} className="p-5 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-3">
+              {clinicalData.diagnoses.length > 0 ? clinicalData.diagnoses.map((diag, idx) => (
+                <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="space-y-1">
-                    <p className="text-base font-black text-slate-900 uppercase tracking-tight">{diag.condition_name || 'Condition Description File'}</p>
-                    <p className="text-xs text-slate-500 font-medium">System Entry Date: {diag.created_at?.slice(0, 10) || '—'}</p>
+                    <p className="text-sm font-normal text-slate-700">
+                      {diag.icd10_description || diag.long_description}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      System Entry Date: {diag.formatted_date || diag.created_at?.slice(0, 10) || '—'}
+                    </p>
                   </div>
-                  <div className="sm:text-right shrink-0">
-                    <span className="text-xs uppercase bg-slate-200 font-bold px-2 py-0.5 rounded text-slate-700 block mb-1 w-fit sm:ml-auto">ICD-10 Code</span>
-                    <span className="text-base font-mono font-black text-slate-900 bg-white border border-slate-200 px-3 py-1 rounded-lg shadow-2xs block">{diag.diagnosis_code || '—'}</span>
+                  <div className="sm:text-right shrink-0 flex sm:flex-col items-center sm:items-end justify-between gap-2">
+                    <span className="text-[10px] bg-slate-200 font-normal px-1.5 py-0.5 rounded text-slate-500">ICD-10 Code</span>
+                    <span className="text-sm font-mono text-slate-600 bg-white border border-slate-200 px-2.5 py-0.5 rounded-md shadow-2xs">
+                      {diag.icd10_code || '—'}
+                    </span>
                   </div>
                 </div>
               )) : (
@@ -192,22 +310,22 @@ const RecordsTab = ({
           </div>
         )}
 
-        {/* SUB-TAB 2: DOCTOR VISITS (NOTES) */}
+        {/* SUB-TAB 2: DOCTOR VISITS */}
         {activeSubTab === 'doctor-notes' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                 <Stethoscope size={18} className="text-indigo-600" /> Physician Clinical Narratives
               </h3>
             </div>
             <div className="space-y-4">
-              {doctorNotes.length > 0 ? doctorNotes.map((note, idx) => (
-                <div key={idx} className="p-5 bg-slate-50/50 border border-slate-200 rounded-xl space-y-2">
-                  <div className="flex justify-between text-xs text-slate-500 font-bold">
+              {clinicalData.doctorNotes.length > 0 ? clinicalData.doctorNotes.map((note, idx) => (
+                <div key={idx} className="p-4 bg-slate-50/50 border border-slate-200 rounded-xl space-y-2">
+                  <div className="flex justify-between text-xs text-slate-400">
                     <span>Medical Consultant Evaluation Logs</span>
-                    <span className="font-mono bg-white border px-2 py-0.5 rounded shadow-2xs">{note.created_at?.slice(0, 10) || '—'}</span>
+                    <span className="font-mono bg-white border px-2 py-0.5 rounded shadow-2xs">{note.formatted_date || note.created_at?.slice(0, 10) || '—'}</span>
                   </div>
-                  <p className="text-slate-800 text-base font-medium leading-relaxed bg-white p-4 border border-slate-200 rounded-lg shadow-2xs">
+                  <p className="text-slate-700 text-sm leading-relaxed bg-white p-3 border border-slate-200 rounded-lg shadow-2xs">
                     {note.note_text || note.notes}
                   </p>
                 </div>
@@ -222,18 +340,18 @@ const RecordsTab = ({
         {activeSubTab === 'nurse-notes' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                 <User size={18} className="text-teal-600" /> Nursing Observations & Triage Notes
               </h3>
             </div>
             <div className="space-y-4">
-              {nurseNotes.length > 0 ? nurseNotes.map((note, idx) => (
-                <div key={idx} className="p-5 bg-slate-50/50 border border-slate-200 rounded-xl space-y-2">
-                  <div className="flex justify-between text-xs text-slate-500 font-bold">
+              {clinicalData.nurseNotes.length > 0 ? clinicalData.nurseNotes.map((note, idx) => (
+                <div key={idx} className="p-4 bg-slate-50/50 border border-slate-200 rounded-xl space-y-2">
+                  <div className="flex justify-between text-xs text-slate-400">
                     <span>Clinical Nursing Unit Notes</span>
-                    <span className="font-mono bg-white border px-2 py-0.5 rounded shadow-2xs">{note.created_at?.slice(0, 10) || '—'}</span>
+                    <span className="font-mono bg-white border px-2 py-0.5 rounded shadow-2xs">{note.formatted_date || note.created_at?.slice(0, 10) || '—'}</span>
                   </div>
-                  <p className="text-slate-800 text-base font-medium leading-relaxed bg-white p-4 border border-slate-200 rounded-lg shadow-2xs">
+                  <p className="text-slate-700 text-sm leading-relaxed bg-white p-3 border border-slate-200 rounded-lg shadow-2xs">
                     {note.remarks || note.note_text}
                   </p>
                 </div>
@@ -244,30 +362,30 @@ const RecordsTab = ({
           </div>
         )}
 
-        {/* SUB-TAB 4: TESTS & PROCEDURES ORDERED */}
+        {/* SUB-TAB 4: ORDERED LABS */}
         {activeSubTab === 'ordered-labs' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                 <FileSpreadsheet size={18} className="text-amber-600" /> Pending Lab Panels & Orders In-Flight
               </h3>
             </div>
             <div className="overflow-x-auto rounded-xl border border-slate-200">
               <table className="w-full text-sm text-slate-600 border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider bg-slate-50">
-                    <th className="p-4 text-left font-bold">Order Placement Date</th>
-                    <th className="p-4 text-left font-bold">Test/Procedure Parameters</th>
-                    <th className="p-4 text-center font-bold">Status Pipeline</th>
+                  <tr className="border-b border-slate-200 text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">
+                    <th className="p-3 text-left">Order Placement Date</th>
+                    <th className="p-3 text-left">Test/Procedure Parameters</th>
+                    <th className="p-3 text-center">Status Pipeline</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {orderedLabs.length > 0 ? orderedLabs.map((order, idx) => (
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {clinicalData.orderedLabs.length > 0 ? clinicalData.orderedLabs.map((order, idx) => (
                     <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-4 font-mono font-semibold text-slate-900">{order.created_at?.slice(0, 10) || '—'}</td>
-                      <td className="p-4 text-left font-bold text-slate-900 text-base uppercase tracking-tight">{order.test_type || 'Diagnostic Panel'}</td>
-                      <td className="p-4 text-center">
-                        <span className="px-2.5 py-1 rounded text-xs font-bold uppercase bg-amber-50 text-amber-700 border border-amber-200">
+                      <td className="p-3 font-mono text-slate-600">{order.formatted_date || order.created_at?.slice(0, 10) || '—'}</td>
+                      <td className="p-3 text-left text-slate-800">{order.test_type || 'Diagnostic Panel'}</td>
+                      <td className="p-3 text-center">
+                        <span className="px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-700 border border-amber-200">
                           {order.status || 'Processing Specimen'}
                         </span>
                       </td>
@@ -283,35 +401,35 @@ const RecordsTab = ({
           </div>
         )}
 
-        {/* SUB-TAB 5: LAB & TEST RESULTS */}
+        {/* SUB-TAB 5: LAB RESULTS */}
         {activeSubTab === 'lab-results' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                 <FlaskConical size={18} className="text-emerald-600" /> Released Pathology Laboratory Result Ledger
               </h3>
             </div>
             <div className="overflow-x-auto rounded-xl border border-slate-200">
               <table className="w-full text-sm text-slate-600 border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider bg-slate-50">
-                    <th className="p-4 text-left font-bold">Release Timestamp</th>
-                    <th className="p-4 text-left font-bold">Lab Test Conducted</th>
-                    <th className="p-4 text-center font-bold">Reference Flags</th>
-                    <th className="p-4 text-right px-6 font-bold">Observed Result Value</th>
+                  <tr className="border-b border-slate-200 text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">
+                    <th className="p-3 text-left">Release Timestamp</th>
+                    <th className="p-3 text-left">Lab Test Conducted</th>
+                    <th className="p-3 text-center">Reference Flags</th>
+                    <th className="p-3 text-right px-6">Observed Result Value</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {labResults.length > 0 ? labResults.map((lab, i) => (
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {clinicalData.labResults.length > 0 ? clinicalData.labResults.map((lab, i) => (
                     <tr key={i} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-4 font-mono font-semibold text-slate-900">{lab.created_at?.slice(0, 10) || '—'}</td>
-                      <td className="p-4 text-left font-black text-slate-900 text-base uppercase tracking-tight">{lab.test_type}</td>
-                      <td className="p-4 text-center">
-                        <span className={`px-2.5 py-1 rounded text-xs font-bold border ${lab.is_abnormal ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
+                      <td className="p-3 font-mono text-slate-600">{lab.formatted_date || lab.created_at?.slice(0, 10) || '—'}</td>
+                      <td className="p-3 text-left text-slate-800">{lab.test_type}</td>
+                      <td className="p-3 text-center">
+                        <span className={`px-2 py-0.5 rounded text-xs border ${lab.is_abnormal ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
                           {lab.is_abnormal ? 'CRITICAL ABNORMAL' : 'NORMAL RANGE'}
                         </span>
                       </td>
-                      <td className="p-4 text-right px-6 font-mono font-black text-blue-600 text-lg bg-blue-50/10">{lab.result_value || 'Passed'}</td>
+                      <td className="p-3 text-right px-6 font-mono text-blue-600 bg-blue-50/10">{lab.result_value || 'Passed'}</td>
                     </tr>
                   )) : (
                     <tr>
@@ -324,32 +442,32 @@ const RecordsTab = ({
           </div>
         )}
 
-        {/* SUB-TAB 6: MEDICATIONS PRESCRIBED */}
+        {/* SUB-TAB 6: PHARMACOLOGICAL PRESCRIPTIONS */}
         {activeSubTab === 'prescriptions' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                 <Pill size={18} className="text-rose-600" /> Pharmacological Prescriptions & Instructions
               </h3>
             </div>
             <div className="overflow-x-auto rounded-xl border border-slate-200">
               <table className="w-full text-sm text-slate-600 border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider bg-slate-50">
-                    <th className="p-4 text-left font-bold">Authorized Date</th>
-                    <th className="p-4 text-left font-bold">Medication Name & Strength</th>
-                    <th className="p-4 text-left font-bold">Dosing & Frequency Directives</th>
-                    <th className="p-4 text-right px-6 font-bold">Status</th>
+                  <tr className="border-b border-slate-200 text-xs font-medium text-slate-500 uppercase tracking-wider bg-slate-50">
+                    <th className="p-3 text-left">Authorized Date</th>
+                    <th className="p-3 text-left">Medication Name & Strength</th>
+                    <th className="p-3 text-left">Dosing & Frequency Directives</th>
+                    <th className="p-3 text-right px-6">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {prescriptions.length > 0 ? prescriptions.map((pres, i) => (
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {clinicalData.prescriptions.length > 0 ? clinicalData.prescriptions.map((pres, i) => (
                     <tr key={i} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-4 font-mono font-semibold text-slate-900">{pres.created_at?.slice(0, 10) || '—'}</td>
-                      <td className="p-4 text-left font-black text-slate-900 text-base tracking-tight">{pres.medication_name}</td>
-                      <td className="p-4 text-left font-medium text-slate-700 text-sm">{pres.dosage_instruction || 'As written by specialist.'}</td>
-                      <td className="p-4 text-right px-6">
-                        <span className="px-2.5 py-1 rounded text-xs font-bold bg-green-50 text-green-700 border border-green-200">Active Dispensation</span>
+                      <td className="p-3 font-mono text-slate-600">{pres.formatted_date || pres.created_at?.slice(0, 10) || '—'}</td>
+                      <td className="p-3 text-left text-slate-800">{pres.medication_name}</td>
+                      <td className="p-3 text-left text-slate-600">{pres.dosage_instruction || 'As written by specialist.'}</td>
+                      <td className="p-3 text-right px-6">
+                        <span className="px-2 py-0.5 rounded text-xs bg-green-50 text-green-700 border border-green-200">Active Dispensation</span>
                       </td>
                     </tr>
                   )) : (
@@ -367,18 +485,18 @@ const RecordsTab = ({
         {activeSubTab === 'psychology' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                 <BrainCircuit size={18} className="text-pink-600" /> Counselling Psychologist Sessions & Notes
               </h3>
             </div>
             <div className="space-y-4">
-              {psychologyNotes.length > 0 ? psychologyNotes.map((session, idx) => (
-                <div key={idx} className="p-5 bg-slate-50/50 border border-slate-200 rounded-xl space-y-2">
-                  <div className="flex justify-between text-xs text-slate-500 font-bold">
+              {clinicalData.psychologyNotes.length > 0 ? clinicalData.psychologyNotes.map((session, idx) => (
+                <div key={idx} className="p-4 bg-slate-50/50 border border-slate-200 rounded-xl space-y-2">
+                  <div className="flex justify-between text-xs text-slate-400">
                     <span>Psycho-Social Consult Log</span>
-                    <span className="font-mono bg-white border px-2 py-0.5 rounded shadow-2xs">{session.created_at?.slice(0, 10) || '—'}</span>
+                    <span className="font-mono bg-white border px-2 py-0.5 rounded shadow-2xs">{session.formatted_date || session.created_at?.slice(0, 10) || '—'}</span>
                   </div>
-                  <p className="text-slate-800 text-base font-medium leading-relaxed bg-white p-4 border border-slate-200 rounded-lg shadow-2xs">
+                  <p className="text-slate-700 text-sm leading-relaxed bg-white p-3 border border-slate-200 rounded-lg shadow-2xs">
                     {session.session_notes || session.notes}
                   </p>
                 </div>
@@ -393,18 +511,18 @@ const RecordsTab = ({
         {activeSubTab === 'imaging' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                 <ImageIcon size={18} className="text-purple-600" /> Radiographic Scans & Advanced Imagery Files
               </h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {imaging.length > 0 ? imaging.map((img, i) => (
+              {clinicalData.imaging.length > 0 ? clinicalData.imaging.map((img, i) => (
                 <div key={i} className="p-4 border border-slate-200 rounded-xl bg-slate-50 flex items-start gap-4">
-                  <div className="p-3 rounded-lg bg-purple-100 text-purple-700 shrink-0"><ImageIcon size={24} /></div>
+                  <div className="p-2.5 rounded-lg bg-purple-100 text-purple-700 shrink-0"><ImageIcon size={22} /></div>
                   <div className="space-y-1 flex-1 min-w-0 text-left">
-                    <h4 className="font-bold text-slate-900 text-base truncate uppercase">{img.scan_type || 'Radiology File'}</h4>
-                    <p className="text-xs font-mono text-slate-500 font-medium">Captured: {img.created_at?.slice(0, 10)}</p>
-                    <p className="text-sm text-slate-600 line-clamp-2 mt-1"><strong>Remarks:</strong> {img.radiologist_remarks || 'Awaiting image reading notes.'}</p>
+                    <h4 className="text-sm font-medium text-slate-900 truncate">{img.scan_type || 'Radiology File'}</h4>
+                    <p className="text-xs font-mono text-slate-400">Captured: {img.formatted_date || img.created_at?.slice(0, 10)}</p>
+                    <p className="text-xs text-slate-600 mt-1"><span className="text-slate-400 font-medium">Remarks:</span> {img.radiologist_remarks || 'Awaiting image reading notes.'}</p>
                   </div>
                 </div>
               )) : (
@@ -418,60 +536,34 @@ const RecordsTab = ({
         {activeSubTab === 'oncology' && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                 <Activity size={18} className="text-rose-600" /> Oncology Care Registry & Chemotherapy Cycles
               </h3>
             </div>
             <div className="space-y-4">
-              {chemoSessions.length > 0 ? chemoSessions.map((session, i) => (
+              {clinicalData.chemoSessions.length > 0 ? clinicalData.chemoSessions.map((session, i) => (
                 <div key={i} className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-                  <div className="bg-slate-900 text-white p-4 flex justify-between items-center text-sm font-bold">
-                    <span className="text-base font-black">Regimen Course: {session.regimen_name}</span>
-                    <span className="font-mono text-teal-400 font-black bg-slate-800 px-3 py-1 rounded">{session.date || '—'}</span>
+                  <div className="bg-slate-900 text-white p-3 flex justify-between items-center text-xs font-medium">
+                    <span className="text-sm">Regimen Course: {session.regimen_name}</span>
+                    <span className="font-mono text-teal-400 bg-slate-800 px-2.5 py-0.5 rounded">{session.date || '—'}</span>
                   </div>
-                  <div className="p-5 bg-white grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                  <div className="p-4 bg-white grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                     <div>
-                      <span className="block text-xs font-bold text-slate-400 uppercase">Drugs Administered</span>
-                      <p className="font-black text-slate-900 text-base mt-0.5">{session.drugs_administered}</p>
+                      <span className="block text-slate-400 font-medium">Drugs Administered</span>
+                      <p className="text-slate-800 text-sm mt-0.5">{session.drugs_administered}</p>
                     </div>
                     <div>
-                      <span className="block text-xs font-bold text-slate-400 uppercase">Dosage Specification</span>
-                      <p className="font-mono font-bold text-rose-600 text-base mt-0.5">{session.dosage_value}</p>
+                      <span className="block text-slate-400 font-medium">Dosage Specification</span>
+                      <p className="font-mono text-rose-600 text-sm mt-0.5">{session.dosage_value}</p>
                     </div>
                     <div>
-                      <span className="block text-xs font-bold text-slate-400 uppercase">Toxicity / Side Effects</span>
-                      <p className="font-medium text-slate-700 mt-0.5">{session.toxicity_reported || 'None Documented'}</p>
+                      <span className="block text-slate-400 font-medium">Toxicity / Side Effects</span>
+                      <p className="text-slate-700 mt-0.5">{session.toxicity_reported || 'None Documented'}</p>
                     </div>
                   </div>
                 </div>
               )) : (
-                <div className="text-center py-16 text-slate-400 font-mono text-sm">No oncological infusion cycles verified in system.</div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* SUB-TAB 10: PALLIATIVE CARE NOTES */}
-        {activeSubTab === 'palliative' && (
-          <div className="space-y-6 animate-in fade-in duration-200">
-            <div className="pb-2 border-b border-slate-100">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <HeartHandshake size={18} className="text-cyan-600" /> Comfort-Focused Palliative Care Logs
-              </h3>
-            </div>
-            <div className="space-y-4">
-              {palliativeNotes.length > 0 ? palliativeNotes.map((note, i) => (
-                <div key={i} className="p-5 border border-dashed border-slate-300 rounded-xl bg-cyan-50/10 text-left space-y-2">
-                  <div className="flex justify-between items-center font-mono text-xs text-slate-500">
-                    <span className="font-bold text-cyan-800 uppercase tracking-wider bg-cyan-50 px-2 py-0.5 rounded border border-cyan-200">Symptom Management</span>
-                    <strong>Logged: {note.created_at?.slice(0, 10)}</strong>
-                  </div>
-                  <p className="text-slate-800 text-base font-medium leading-relaxed bg-white p-4 border border-slate-200 rounded-lg shadow-2xs">
-                    {note.summary_text || note.notes}
-                  </p>
-                </div>
-              )) : (
-                <div className="text-center py-16 text-slate-400 font-mono text-sm">No records logged in palliative frameworks.</div>
+                <div className="text-center py-16 text-slate-400 font-mono text-sm">No tracked oncology records discovered.</div>
               )}
             </div>
           </div>

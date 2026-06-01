@@ -15,7 +15,8 @@ from .models import (InsuranceScheme, LabOrder, RegistrationRecord,
     Prescription, PrescriptionItem, ClinicalNote, ImagingRecord, PsychologyEnrollment, SessionLog, BereavementLog, 
     OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabTestRegistry, LabPanel, ProtocolMaster, ProtocolDrug, DrugGuardrail,
     InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, Service, PatientBillableItem,
-    ICD10Diagnosis
+    ICD10Diagnosis, PatientDiagnosis,
+    Supplier
 )
 
 
@@ -1199,3 +1200,85 @@ class ICD10DiagnosisAdmin(admin.ModelAdmin):
             'fields': ('short_description', 'long_description'),
         }),
     )
+
+@admin.register(PatientDiagnosis)
+class PatientDiagnosisAdmin(admin.ModelAdmin):
+    # 1. Columns displayed in the change list dashboard grid
+    list_display = (
+        'get_health_record_number', 
+        'patient', 
+        'primary_site', 
+        'icd10_code', 
+        'icd10_description', 
+        'created_at'
+    )
+    
+    # 2. Sidebar filter widgets to narrow down records instantly
+    list_filter = ('primary_site', 'created_at')
+    
+    # 3. Dynamic search bar mapping across codes, descriptions, and linked models
+    search_fields = (
+        'icd10_code', 
+        'icd10_description', 
+        'visit__health_record_number',
+        'patient__first_name',
+        'patient__last_name'
+    )
+    
+    # 4. Protect the auto-timestamp from being manually edited inside the detail view
+    readonly_fields = ('created_at',)
+    
+    # 5. Default sorting layout to prioritize the newest clinical records
+    ordering = ('-created_at',)
+
+    # ⭐ Custom display function to safely map and show the Health Record Number
+    @admin.display(ordering='visit__health_record_number', description='Health Record Number')
+    def get_health_record_number(self, obj):
+        return obj.visit.health_record_number
+    
+
+@admin.register(Supplier)
+class SupplierAdmin(admin.ModelAdmin):
+    # Searchable and filterable fields for quick audit
+    list_display = (
+        'name', 
+        'category', 
+        'is_compliant', 
+        'tax_compliance_expiry', 
+        'is_active'
+    )
+    list_filter = ('category', 'is_active')
+    search_fields = ('name', 'tin_number', 'contact_person')
+    
+    # Keep sensitive banking and meta data separate in the UI
+    fieldsets = (
+        ('Corporate Identity', {
+            'fields': ('name', 'category', 'contact_person', 'email', 'phone', 'tin_number', 'license_number', 'is_active')
+        }),
+        ('Compliance Documents', {
+            'fields': (
+                'kra_pin_doc', 
+                'incorporation_doc', 
+                'regulatory_license_doc', 
+                'bank_confirmation_doc', 
+                'tax_compliance_doc', 
+                'tax_compliance_expiry'
+            )
+        }),
+        ('Financial Details', {
+            'fields': ('bank_name', 'account_name', 'account_number', 'branch_code', 'swift_code', 'payment_terms', 'performance_rating')
+        }),
+        ('Administrative', {
+            'fields': ('notes', 'contract_document', 'contract_start', 'contract_end')
+        }),
+    )
+
+    # Custom logic to show compliance status in the Admin list view
+    def is_compliant(self, obj):
+        from django.utils import timezone
+        if not obj.tax_compliance_expiry:
+            return False
+        return obj.tax_compliance_expiry >= timezone.now().date()
+    
+    is_compliant.boolean = True
+    is_compliant.short_description = 'Tax Compliant'

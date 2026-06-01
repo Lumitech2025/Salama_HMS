@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.db import transaction
+from django.utils import timezone
 from .models import (
     LabReference, LabTestRegistry, Patient, 
     Protocol, ProtocolIngredient, RequisitionItem, StockAdjustment, Treatment, ChemoSession, 
@@ -12,8 +13,11 @@ from .models import (
     OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabOrder, ProtocolMaster, ProtocolDrug, DrugGuardrail, Requisition, MarketingRequisitionExtension, OutreachCampaign,
     InsuranceScheme, InsuranceCompany, InsuranceClaim, RemittanceBatch, ClaimDispatchBatch,
     Service, PatientBillableItem,
-    ICD10Diagnosis 
+    ICD10Diagnosis, PatientDiagnosis,
+    Supplier
+
 )
+
 User = get_user_model()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1255,3 +1259,75 @@ class ICD10DiagnosisSerializer(serializers.ModelSerializer):
         Example: "[C50.4] Malignant neoplasm of upper-outer quadrant of breast"
         """
         return f"[{obj.code}] {obj.short_description}"
+    
+class PatientDiagnosisSerializer(serializers.ModelSerializer):
+    # Formats the auto_now_add datetime field nicely
+    formatted_date = serializers.DateTimeField(source='created_at', format='%Y-%m-%d %H:%M', read_only=True)
+    
+    # ⭐ Pulls the custom assigned health record number straight from the referenced RegistrationRecord
+    health_record_number = serializers.CharField(source='visit.health_record_number', read_only=True)
+
+    class Meta:
+        model = PatientDiagnosis
+        fields = [
+            'id', 
+            'patient', 
+            'visit', 
+            'health_record_number',  # Included in output payloads automatically
+            'primary_site', 
+            'icd10_code', 
+            'icd10_description', 
+            'long_description', 
+            'created_at',
+            'formatted_date'
+        ]
+        read_only_fields = ['id', 'created_at', 'formatted_date', 'health_record_number']
+
+
+# Suppliers
+
+
+class SupplierSerializer(serializers.ModelSerializer):
+    # Read-only field for rendering pretty labels on the React directory cards
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    
+    # We can explicitly mark compliance files as optional at serializer layer, 
+    # but handle multi-part file payloads safely.
+    kra_pin_doc = serializers.FileField(required=False, allow_null=True)
+    incorporation_doc = serializers.FileField(required=False, allow_null=True)
+    regulatory_license_doc = serializers.FileField(required=False, allow_null=True)
+    bank_confirmation_doc = serializers.FileField(required=False, allow_null=True)
+    tax_compliance_doc = serializers.FileField(required=False, allow_null=True)
+
+    class Meta:
+        model = Supplier
+        fields = [
+            'id', 'name', 'category', 'category_display', 'contact_person', 
+            'email', 'phone', 'tin_number', 'license_number',
+            'bank_name', 'account_name', 'account_number', 'branch_code', 'swift_code',
+            'contract_document', 'contract_start', 'contract_end', 'payment_terms', 
+            'performance_rating', 'kra_pin_doc', 'incorporation_doc', 
+            'regulatory_license_doc', 'bank_confirmation_doc', 
+            'tax_compliance_doc', 'tax_compliance_expiry', 'notes', 'is_active'
+        ]
+
+    def validate(self, data):
+        """
+        Object-level validation to safeguard our compliance workflows.
+        """
+        tax_doc = data.get('tax_compliance_doc')
+        expiry_date = data.get('tax_compliance_expiry')
+
+        # Rule 1: If TCC is uploaded, the expiration date must be supplied for Dorcas' system to track it
+        if tax_doc and not expiry_date:
+            raise serializers.ValidationError({
+                "tax_compliance_expiry": "You must provide an expiration date when uploading a Tax Compliance Certificate."
+            })
+            
+        # Rule 2: Warning validation flag if they try to onboard an already expired document
+        if expiry_date and expiry_date < timezone.now().date():
+            raise serializers.ValidationError({
+                "tax_compliance_expiry": "The provided Tax Compliance Certificate has already expired."
+            })
+
+        return data

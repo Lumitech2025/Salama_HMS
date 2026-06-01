@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
 from .views import ICD11TokenProxyView
-from core.views import ICD10DiagnosisView
+from core.views import ICD10DiagnosisViewSet
 
 
 # All viewsets and functions imported cleanly from your local views.py
@@ -48,6 +48,8 @@ from .views import (
     ServiceViewSet,
     PatientBillableItemViewSet,
     patient_lookup,
+    PatientDiagnosisViewSet,
+    SupplierViewSet
 )
 
 class OptionalSlashRouter(DefaultRouter):
@@ -83,6 +85,9 @@ router.register(r'cancer-sites', CancerSiteViewSet, basename='cancer-site')
 router.register(r'cancer-types', CancerTypeViewSet, basename='cancer-type')
 router.register(r'regimens', RegimenViewSet, basename='regimen')
 
+router.register(r'icd10-diagnoses', ICD10DiagnosisViewSet, basename='icd10-diagnoses')
+router.register(r'patient-diagnoses', PatientDiagnosisViewSet, basename='patient-diagnoses')
+
 # --- 5. Pharmacy & Inventory ---
 router.register(r'prescriptions', PrescriptionViewSet, basename='prescription')
 router.register(r'drugs', DrugViewSet, basename='drug')
@@ -116,6 +121,8 @@ router.register(r'insurance-schemes', InsuranceSchemeViewSet, basename='insuranc
 router.register(r'remittance-batches', RemittanceBatchViewSet, basename='remittance-batch')
 router.register(r'insurance-claims', InsuranceClaimViewSet, basename='insurance-claim')
 router.register(r'claim-dispatch-batches', ClaimDispatchBatchViewSet, basename='claim-dispatch-batch')
+
+router.register(r'suppliers', SupplierViewSet, basename='supplier')
 
 
 urlpatterns = [

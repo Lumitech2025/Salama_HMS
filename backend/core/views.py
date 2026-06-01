@@ -26,10 +26,7 @@ import requests
 from django.conf import settings
 from django.core.cache import cache
 
-
 from appointments.utils import dispatch_async_notifications
-
-
 
 # Import local models and serializers
 from .models import (
@@ -42,7 +39,8 @@ from .models import (
     CancerSite, CancerType, Regimen, RegimenDrug,
     InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, InsuranceScheme,
     Service, PatientBillableItem,
-    ICD10Diagnosis
+    ICD10Diagnosis, PatientDiagnosis,
+    Supplier
 )
 from .serializers import (
     LabOrderSerializer, LabReferenceSerializer, LabResultSerializer, 
@@ -57,8 +55,10 @@ from .serializers import (
     BereavementLogSerializer, OutreachCampaignSerializer, ReferralPartnerSerializer, SocialMediaPostSerializer,RequisitionSerializer, MarketingRequisitionSerializer, LabTestRegistrySerializer, ProtocolMasterSerializer,
     InsuranceCompanySerializer, InsuranceClaimSerializer, RemittanceBatchSerializer, DetailedPatientClaimSerializer, ClaimDispatchBatchSerializer, InsuranceSchemeSerializer,
     ServiceSerializer, PatientBillableItemSerializer,
-    ICD10DiagnosisSerializer
+    ICD10DiagnosisSerializer, PatientDiagnosisSerializer,
+    SupplierSerializer
 )
+
 
 # --- 1. PERMISSION LOGIC ---
 
@@ -1232,34 +1232,114 @@ class ICD11TokenProxyView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY
             )
         
-class ICD10DiagnosisView(APIView):
+class ICD10DiagnosisViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    Handles retrieval of localized ICD-10 medical codes grouped by 
-    anatomical primary site, mapping out full clinical long descriptions.
+    Exposes full search capability against mapped ICD10 codes grouped by primary anatomical site.
     """
-    def get(self, request):
-        # Normalize and clean inputs
-        site = request.query_params.get('site', '').strip().upper()
-        search_query = request.query_params.get('q', '').strip()
+    queryset = ICD10Diagnosis.objects.all()
+    serializer_class = ICD10DiagnosisSerializer
+    
+    # Enable query parameter filtering and string lookups
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['code', 'short_description', 'long_description']
 
-        if not site:
-            return Response(
-                {"error": "The 'site' parameter is required. Example: ?site=BREAST"}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Base database query using the indexed primary_site field
-        queryset = ICD10Diagnosis.objects.filter(primary_site=site)
-
-        # Autocomplete lookups matching code numbers or description tokens
-        if search_query:
-            queryset = queryset.filter(
-                Q(code__icontains=search_query) | 
-                Q(long_description__icontains=search_query)
-            )
-
-        # Apply strict query limit (50) to prevent payload bloat and maintain fast render speeds
-        queryset = queryset.order_by('code')[:50]
+    def get_queryset(self):
+        queryset = super().get_queryset()
         
-        serializer = ICD10DiagnosisSerializer(queryset, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        # Explicitly filter down records if a specific primary site is targeted
+        primary_site = self.request.query_params.get('primary_site', None)
+        if primary_site:
+            queryset = queryset.filter(primary_site__iexact=primary_site)
+            
+        return queryset
+    
+class PatientDiagnosisViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet to log, list, and audit patient diagnosis records 
+    linked to unique Registration health record numbers.
+    """
+    queryset = PatientDiagnosis.objects.select_related('patient', 'visit').all()
+    serializer_class = PatientDiagnosisSerializer
+    
+    # Enable standard filtering and search backends
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    
+    # Fields that can be directly searched via ?search=
+    search_fields = ['icd10_code', 'icd10_description', 'visit__health_record_number']
+    
+    # Default order showing the most recent diagnosis logs first
+    ordering_fields = ['created_at']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # 1. Extract potential lookup query parameters from the request URL
+        patient_id = self.request.query_params.get('patient', None)
+        visit_id = self.request.query_params.get('visit', None)
+        health_record_number = self.request.query_params.get('health_record_number', None)
+        
+        # 2. Apply filtering chains sequentially if values are provided
+        if patient_id:
+            queryset = queryset.filter(patient_id=patient_id)
+            
+        if visit_id:
+            queryset = queryset.filter(visit_id=visit_id)
+            
+        if health_record_number:
+            # Traverses the RegistrationRecord relation to find the exact health record match
+            queryset = queryset.filter(visit__health_record_number__iexact=health_record_number)
+            
+        return queryset
+    
+
+class SupplierViewSet(viewsets.ModelViewSet):
+    """
+    Unified registry viewset to handle legal onboarding, 
+    compliance file processing, and vendor monitoring.
+    """
+    queryset = Supplier.objects.all().order_by('-id')
+    serializer_class = SupplierSerializer
+    
+    # Crucial for receiving file uploads (FileField / FormData) from React
+    parser_classes = [MultiPartParser, FormParser]
+
+    def create(self, request, *args, **kwargs):
+        """
+        Intercepts creation to gracefully handle file stream data
+        and return crisp validation errors back to our UI.
+        """
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            self.perform_create(serializer)
+            return Response(
+                {
+                    "message": "Supplier corporate registry created with document packages.",
+                    "data": serializer.data
+                }, 
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'], url_path='compliance-alerts')
+    def compliance_alerts(self, request):
+        """
+        Custom endpoint: /api/suppliers/compliance-alerts/
+        Instantly surfaces vendors whose Tax Compliance Certificate (TCC) 
+        has expired or is missing completely.
+        """
+        today = timezone.now().date()
+        
+        # Pull suppliers where TCC is missing OR past its valid expiry window
+        compromised_suppliers = Supplier.objects.filter(
+            models.Q(tax_compliance_expiry__isnull=True) | 
+            models.Q(tax_compliance_expiry__lt=today),
+            is_active=True
+        )
+        
+        serializer = self.get_serializer(compromised_suppliers, many=True)
+        return Response({
+            "count": compromised_suppliers.count(),
+            "status": "Action Required",
+            "flagged_vendors": serializer.data
+        }, status=status.HTTP_200_OK)

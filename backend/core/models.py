@@ -900,6 +900,7 @@ class RequisitionItem(models.Model):
 
 
 # --- SUPPLIER & VENDOR MANAGEMENT ---
+
 class Supplier(models.Model):
     CATEGORY_CHOICES = [
         ('PHARMA', 'Pharmaceuticals & Oncology Drugs'),
@@ -913,21 +914,67 @@ class Supplier(models.Model):
     contact_person = models.CharField(max_length=100)
     email = models.EmailField()
     phone = models.CharField(max_length=20)
-    tin_number = models.CharField(max_length=50, blank=True, help_text="Tax ID Number")
     
-    # Banking (Crucial for Dorcas to process payments)
+    # --- Identification & Regulatory Meta ---
+    tin_number = models.CharField(max_length=50, blank=True, help_text="Tax ID Number / KRA PIN")
+    license_number = models.CharField(
+        max_length=100, 
+        blank=True, 
+        help_text="Regulatory Operating License Number (e.g., PPB or County License)"
+    )
+    
+    # --- Banking (Crucial for Dorcas to process payments) ---
     bank_name = models.CharField(max_length=100, blank=True)
     account_name = models.CharField(max_length=255, blank=True)
     account_number = models.CharField(max_length=50, blank=True)
     branch_code = models.CharField(max_length=20, blank=True)
     swift_code = models.CharField(max_length=20, blank=True)
 
-    # Contract & Terms
+    # --- Contract & Terms ---
     contract_document = models.FileField(upload_to='supplier_contracts/', null=True, blank=True)
     contract_start = models.DateField(null=True, blank=True)
     contract_end = models.DateField(null=True, blank=True)
     payment_terms = models.CharField(max_length=100, default="Net 30") 
     performance_rating = models.IntegerField(default=5, help_text="1 to 5 stars")
+    
+    # --- New Core Compliance Document Repository ---
+    kra_pin_doc = models.FileField(
+        upload_to='supplier_compliance/kra_pin/', 
+        null=True, 
+        blank=True, 
+        help_text="Uploaded KRA PIN/TIN Document (PDF)"
+    )
+    incorporation_doc = models.FileField(
+        upload_to='supplier_compliance/incorporation/', 
+        null=True, 
+        blank=True, 
+        help_text="Certificate of Incorporation or Registration (PDF)"
+    )
+    regulatory_license_doc = models.FileField(
+        upload_to='supplier_compliance/licenses/', 
+        null=True, 
+        blank=True, 
+        help_text="Valid PPB / Commercial Trade License Document (PDF)"
+    )
+    bank_confirmation_doc = models.FileField(
+        upload_to='supplier_compliance/bank_verification/', 
+        null=True, 
+        blank=True, 
+        help_text="Bank Confirmation Letter or Cancelled Cheque (PDF)"
+    )
+    
+    # Tax Compliance Certificate (TCC) + Time-sensitive tracking
+    tax_compliance_doc = models.FileField(
+        upload_to='supplier_compliance/tcc/', 
+        null=True, 
+        blank=True, 
+        help_text="Valid Tax Compliance Certificate (PDF)"
+    )
+    tax_compliance_expiry = models.DateField(
+        null=True, 
+        blank=True, 
+        help_text="Expiry date of the current Tax Compliance Certificate"
+    )
     
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
@@ -1621,7 +1668,6 @@ class ICD10Diagnosis(models.Model):
         ('LUNG', 'Lung'),
         ('UROLOGICAL', 'Urological'),
         ('KAPOSI SARCOMA', 'Kaposi Sarcoma'),
-        ('ADULT HAEMATOLOGICAL', 'Adult Haematological'),
         ('GYNAECOLOGICAL', 'Gynaecological'),
         ('LEUKEMIA', 'Leukemia'),
     ]
@@ -1637,3 +1683,34 @@ class ICD10Diagnosis(models.Model):
 
     def __str__(self):
         return f"[{self.code}] {self.short_description}"
+    
+
+class PatientDiagnosis(models.Model):
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='diagnoses')
+    
+    # 🔗 Point explicitly to RegistrationRecord while keeping the field name 'visit' 
+    # to maintain compatibility with the frontend API payloads
+    visit = models.ForeignKey(RegistrationRecord, on_delete=models.CASCADE, related_name='diagnoses')
+    
+    primary_site = models.CharField(
+        max_length=50, 
+        choices=ICD10Diagnosis.PRIMARY_SITE_CHOICES, 
+        db_index=True
+    )
+    
+    # Snapshot details of the selected diagnosis code
+    icd10_code = models.CharField(max_length=15, db_index=True)
+    icd10_description = models.CharField(max_length=255)
+    long_description = models.TextField(blank=True, null=True)
+    
+    # Automatically tracks date and time of the entry
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = "Patient Diagnosis Record"
+        verbose_name_plural = "Patient Diagnosis Records"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        # Displays the assigned health record number cleanly in the Django Admin portal
+        return f"[{self.icd10_code}] - {self.visit.health_record_number} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
