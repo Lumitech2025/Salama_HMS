@@ -5,10 +5,11 @@ import {
     XCircle, 
     Clock, 
     Building2, 
-    Search
+    Search,
+    ShoppingCart 
 } from 'lucide-react';
 
-const FinanceRequisitionsTab = () => {
+const FinanceRequisitionsTab = ({ onCreatePO }) => {
     // Pipeline data state arrays
     const [requisitions, setRequisitions] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -73,6 +74,35 @@ const FinanceRequisitionsTab = () => {
         }
     };
 
+    // Helper function to extract cleanly parsed values for the Purchase Order creation
+    const handleInitiatePurchaseOrder = (req) => {
+        const fullSummary = req.itemSummary || req.item_summary || req.description || '';
+        const rawDept = req.dept || req.department || 'GENERAL ADMIN';
+
+        // Robust parsing regex to isolate text values from brackets and quantity qualifiers (e.g., "[POSTERS_PRINTING] Poster (x1)")
+        const qtyMatch = fullSummary.match(/\(x(\d+)\)/i);
+        const parsedQty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+
+        // Strip off bracket qualifiers and quantity labels to isolate clean product terms
+        let cleanItemName = fullSummary.replace(/\[.*?\]/g, '').replace(/\(x\d+\)/i, '').trim();
+        
+        if (!cleanItemName) {
+            cleanItemName = fullSummary;
+        }
+
+        // Trigger the programmatic dashboard route shift callback if available
+        if (typeof onCreatePO === 'function') {
+            onCreatePO({
+                itemName: cleanItemName,
+                department: rawDept.toUpperCase(),
+                quantity: parsedQty,
+                requisitionId: req.id
+            });
+        } else {
+            console.warn("Navigation execution property 'onCreatePO' is missing or unmapped in dashboard context scope.");
+        }
+    };
+
     // Logical UI filtering arrays evaluation
     const filteredLedger = requisitions.filter(req => {
         // Map backend 'department' fields uniformly regardless of string casing variances
@@ -100,7 +130,6 @@ const FinanceRequisitionsTab = () => {
             {/* COMPACT HEADLINE BAR */}
             <div>
                 <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Requisition Hub</h2>
-                
             </div>
 
             {/* REAL FINANCIAL BALANCE SUMMARY CARDS */}
@@ -135,7 +164,7 @@ const FinanceRequisitionsTab = () => {
             {/* FILTERS & CONTROL STRIP */}
             <div className="bg-white border border-slate-200 p-4 rounded-xl shadow-xs flex flex-col md:flex-row gap-4 items-center justify-between">
                 
-                {/* Department filtering toggles matching your infrastructure */}
+                {/* Department filtering toggles */}
                 <div className="flex flex-wrap gap-1 bg-slate-100 p-1 rounded-lg w-full md:w-auto">
                     {['ALL', 'NURSING', 'LABORATORY', 'PHARMACY', 'MARKETING'].map((dept) => (
                         <button
@@ -260,6 +289,16 @@ const FinanceRequisitionsTab = () => {
                                                             className="px-3 py-1 bg-rose-600 text-white rounded font-bold text-xs hover:bg-rose-700 transition-colors cursor-pointer shadow-xs focus:outline-none"
                                                         >
                                                             Reject
+                                                        </button>
+                                                    </div>
+                                                ) : currentStatus === 'APPROVED' ? (
+                                                    <div className="flex items-center justify-end gap-3">
+                                                        <button
+                                                            onClick={() => handleInitiatePurchaseOrder(req)} 
+                                                            className="bg-[#020617] text-white font-bold text-xs py-2 px-4 rounded flex items-center gap-2 hover:bg-slate-800 transition-all cursor-pointer"
+                                                        >
+                                                            <ShoppingCart size={14} className="text-teal-400" />
+                                                            <span>Create PO</span>
                                                         </button>
                                                     </div>
                                                 ) : (

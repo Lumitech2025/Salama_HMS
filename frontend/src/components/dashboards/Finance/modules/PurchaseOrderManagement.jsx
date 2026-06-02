@@ -14,7 +14,9 @@ const MASTER_TABS = [
   { id: 'VOUCHERS', name: '4. Payments Made' }
 ];
 
-export default function PurchaseOrderManagement() {
+
+export default function PurchaseOrderManagement({ prefilledData, clearPrefilledData }) {
+
   // Navigation State
   const [currentMasterTab, setCurrentMasterTab] = useState('POS');
   const [activeTab, setActiveTab] = useState('ALL');
@@ -33,6 +35,8 @@ export default function PurchaseOrderManagement() {
   const [selectedGRN, setSelectedGRN] = useState(null);
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [selectedVoucher, setSelectedVoucher] = useState(null);
+
+  const [catalog, setCatalog] = useState([]);
 
   // File Upload State
   const [attachedFile, setAttachedFile] = useState(null);
@@ -63,6 +67,12 @@ export default function PurchaseOrderManagement() {
     const token = localStorage.getItem('access_token');
     return token ? { headers: { Authorization: `Bearer ${token}` } } : {};
   };
+
+  useEffect(() => {
+    API.get('/inventory-items/unique-catalog/')
+        .then(res => setCatalog(res.data))
+        .catch(err => console.error(err));
+  }, []);
 
   useEffect(() => {
     fetchPurchaseOrders();
@@ -133,6 +143,7 @@ export default function PurchaseOrderManagement() {
           ordered_quantity: item.quantity,
           quantity_received: item.quantity, 
           damaged_quantity: 0,
+          expiry_date: '',
           satisfaction_level: 'GoodCondition',
           category: item.category
         }));
@@ -142,6 +153,65 @@ export default function PurchaseOrderManagement() {
       setGrnForm(prev => ({ ...prev, items_received: [] }));
     }
   }, [grnForm.purchase_order, purchaseOrders]);
+
+  useEffect(() => {
+    if (!prefilledData) return;
+
+    // 1. Force the active tab workspace and form popup modal to display
+    setShowCreateModal(true);
+    setCurrentMasterTab('POS');
+
+    let parsedItems = [];
+
+    // 2. Parse structural branch choices built directly in your Python data models
+    if (prefilledData.department === 'MARKETING' && prefilledData.marketing_meta) {
+      const meta = prefilledData.marketing_meta;
+      parsedItems.push({
+        item_name: `Campaign Outreach Support: ${meta.category_display || meta.category || 'Services'}`,
+        category: 'MARKETING',
+        quantity: 1,
+        unit_cost: parseFloat(meta.requested_amount || prefilledData.total_cost || 0)
+      });
+    } else if (prefilledData.items && prefilledData.items.length > 0) {
+      parsedItems = prefilledData.items.map(lineItem => {
+        let resolvedName = lineItem.non_inventory_title || 'Unspecified Line Item';
+        
+        if (lineItem.pharmacy_item && typeof lineItem.pharmacy_item === 'object') {
+          resolvedName = lineItem.pharmacy_item.name || resolvedName;
+        } else if (lineItem.lab_item && typeof lineItem.lab_item === 'object') {
+          resolvedName = lineItem.lab_item.name || resolvedName;
+        }
+
+        return {
+          item_name: resolvedName,
+          category: prefilledData.department, 
+          quantity: parseInt(lineItem.quantity || 1),
+          unit_cost: parseFloat(lineItem.unit_price || 0)
+        };
+      });
+    } else {
+      parsedItems.push({
+        item_name: `Balance Fulfillment for Request Ref: REQ-${prefilledData.id}`,
+        category: prefilledData.department || 'ADMIN',
+        quantity: 1,
+        unit_cost: parseFloat(prefilledData.total_cost || 0)
+      });
+    }
+
+    // 3. Drop data straight into your working poForm state fields seamlessly
+    setPoForm({
+      supplier: '', 
+      payment_terms: 'Net 30',
+      delivery_date: '',
+      notes: `Linked automatically to origin system record: REQ-${prefilledData.id}. Reason: ${prefilledData.reason || ''}`,
+      items: parsedItems,
+      origin_requisition_id: prefilledData.id 
+    });
+
+    // 4. Safely release the pointer state on the portal container layout wrapper
+    if (clearPrefilledData) clearPrefilledData();
+  }, [prefilledData]);
+
 
   const handleEmailNotification = (docType, docNumber) => {
     alert(`Email Notification:\nA copy of ${docType} (${docNumber}) has been sent to the vendor.`);
@@ -189,7 +259,6 @@ export default function PurchaseOrderManagement() {
     e.preventDefault();
     setLoading(true);
     try {
-      // Structure explicitly targets custom "items_raw" key within Django Serializer layer
       const payload = {
         supplier: poForm.supplier,
         payment_terms: poForm.payment_terms,
@@ -224,7 +293,7 @@ export default function PurchaseOrderManagement() {
       setShowCreateModal(false);
       setGrnForm({ purchase_order: '', delivery_note_ref: '', date_received: new Date().toISOString().split('T')[0], items_received: [] });
       fetchGRNs();
-      fetchPurchaseOrders(); // Refresh order status change
+      fetchPurchaseOrders();
     } catch (err) {
       console.error("Failed logging goods delivery note: ", err);
       alert("Error logging Goods Received Note.");
@@ -235,7 +304,6 @@ export default function PurchaseOrderManagement() {
     e.preventDefault();
     setLoading(true);
     try {
-      // Use FormData to allow physical file upload attachments
       const formData = new FormData();
       formData.append('purchase_order', invoiceForm.purchase_order);
       formData.append('invoice_number', invoiceForm.invoice_number);
@@ -275,7 +343,7 @@ export default function PurchaseOrderManagement() {
       setShowCreateModal(false);
       setVoucherForm({ purchase_order: '', purchase_invoice: '', payment_reference: '', amount_paid: 0, payment_mode: 'Bank Wire' });
       fetchVouchers();
-      fetchInvoices(); // Refresh paid flags state checks
+      fetchInvoices();
     } catch (err) {
       console.error("Failed executing voucher logging pipeline: ", err);
       alert("Error processing payment voucher.");
@@ -284,7 +352,6 @@ export default function PurchaseOrderManagement() {
 
   const updatePOStatus = async (id, newStatus) => {
     try {
-      // Hits custom router action built into Viewset class architecture
       if (newStatus === 'APPROVED') {
         await API.patch(`/purchase-orders/${id}/approve/`, {}, getAuthConfig());
       } else {
@@ -311,17 +378,15 @@ export default function PurchaseOrderManagement() {
               KES {filteredOrders.reduce((acc, po) => acc + parseFloat(po.total_amount || 0), 0).toLocaleString()}
             </h3>
           </div>
-          
         </div>
 
-         <div className="bg-blue-100 p-8 rounded-[2.5rem] border border-slate-100 shadow-xl flex flex-col justify-between">
+        <div className="bg-blue-100 p-8 rounded-[2.5rem] border border-slate-100 shadow-xl flex flex-col justify-between">
           <div>
             <p className="text-[12px] font-bold text-slate-600 uppercase tracking-wider mb-1">Deliveries Received</p>
             <h3 className="text-xl font-bold text-teal-600 tracking-tight">
               {grns.length}
             </h3>
           </div>
-          
         </div>
 
         <div className="bg-blue-100 p-8 rounded-[2.5rem] border border-slate-100 shadow-xl flex flex-col justify-between">
@@ -331,7 +396,6 @@ export default function PurchaseOrderManagement() {
               KES {invoices.filter(i => i.status === 'UNPAID' || i.status === 'PARTIAL').reduce((sum, i) => sum + parseFloat(i.total_billed || 0), 0).toLocaleString()}
             </h3>
           </div>
-          
         </div>
 
         <div className="bg-blue-100 p-8 rounded-[2.5rem] border border-slate-100 shadow-xl flex flex-col justify-between">
@@ -394,6 +458,248 @@ export default function PurchaseOrderManagement() {
           </div>
         )}
       </div>
+
+      {/* CREATION WORKSPACE FOR ACTIVE CREATION WORKFLOWS (MOVED ABOVE THE MAIN TABLES) */}
+      {showCreateModal && (
+        <div className="bg-white border border-slate-100 rounded-[3rem] shadow-2xl overflow-hidden animate-in slide-in-from-top duration-300">
+          <div className="px-12 pt-8 flex justify-between items-center border-b pb-4">
+            <h3 className="text-sm font-black uppercase tracking-wider text-slate-700">
+              {currentMasterTab === 'POS' && 'Draft New Purchase Order Request'}
+              {currentMasterTab === 'GRNS' && 'Log Physical Quantities Received (GRN)'}
+              {currentMasterTab === 'INVOICES' && 'Record Supplier Financial Invoice Document'}
+              {currentMasterTab === 'VOUCHERS' && 'Authorize Capital Disbursement Voucher'}
+            </h3>
+            <button onClick={() => setShowCreateModal(false)} className="text-slate-400 hover:text-rose-600 p-2 rounded-full bg-slate-50"><X size={16}/></button>
+          </div>
+
+          {/* FORM 1: CREATE PURCHASE ORDER */}
+          {currentMasterTab === 'POS' && (
+            <form onSubmit={handlePOSubmit} className="p-12 space-y-6 text-left">
+              <div className="grid grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Select Vendor</label>
+                  <select required value={poForm.supplier} onChange={(e) => setPoForm({...poForm, supplier: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
+                    <option value="">-- Choose Supplier --</option>
+                    {suppliers.map(s => (<option key={s.id} value={s.id}>{s.name.toUpperCase()}</option>))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Payment Terms</label>
+                  <select value={poForm.payment_terms} onChange={(e) => setPoForm({...poForm, payment_terms: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
+                    <option value="Immediate">Immediate Cash</option>
+                    <option value="Net 15">Net 15 Days</option>
+                    <option value="Net 30">Net 30 Days</option>
+                    <option value="Net 60">Net 60 Days</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Expected Delivery Date</label>
+                  <input required type="date" value={poForm.delivery_date} onChange={(e) => setPoForm({...poForm, delivery_date: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Requested Line Items</h4>
+                  <button type="button" onClick={handleAddItemRow} className="text-xs bg-slate-900 text-teal-400 font-bold uppercase px-4 py-2 rounded-xl flex items-center gap-2"><Plus size={14}/> Add Row</button>
+                </div>
+                {poForm.items.map((item, index) => (
+                  <div key={index} className="grid grid-cols-12 gap-3 items-center bg-slate-50 p-3 rounded-2xl border">
+                    <div className="col-span-4">
+                      <input list="catalog-items" required placeholder="Item description or SKU" value={item.item_name} onChange={(e) => handleItemChange(index, 'item_name', e.target.value)} className="w-full bg-white border rounded-xl py-3 px-4 text-xs font-bold outline-none" />
+                      <datalist id="catalog-items">
+                        {catalog.map((c, i) => <option key={i} value={c} />)}
+                      </datalist>
+                    </div>
+                    <div className="col-span-2">
+                      <select value={item.category} onChange={(e) => handleItemChange(index, 'category', e.target.value)} className="w-full bg-white border rounded-xl py-3 px-2 text-xs font-bold outline-none">
+                        {DEPARTMENTS.filter(d => d !== 'ALL').map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <input required type="number" min="1" placeholder="Qty" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 1)} className="w-full bg-white border rounded-xl py-3 px-3 text-xs font-bold text-center outline-none" />
+                    </div>
+                    <div className="col-span-3">
+                      <input required type="number" min="0" step="0.01" placeholder="Unit Price (KES)" value={item.unit_cost} onChange={(e) => handleItemChange(index, 'unit_cost', parseFloat(e.target.value) || 0)} className="w-full bg-white border rounded-xl py-3 px-3 text-xs font-bold outline-none" />
+                    </div>
+                    <div className="col-span-1 text-center">
+                      <button type="button" disabled={poForm.items.length === 1} onClick={() => handleRemoveItemRow(index)} className="text-slate-300 hover:text-rose-600 disabled:opacity-30"><Trash2 size={16}/></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-between items-center border-t pt-6">
+                <div className="text-left">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">Estimated Total Capital Required</p>
+                  <p className="text-2xl font-black text-slate-900">KES {calculatePOTotal().toLocaleString()}</p>
+                </div>
+                <button type="submit" className="bg-[#020617] text-teal-400 py-4 px-12 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-slate-900 shadow-xl">Commit Purchase Requisition</button>
+              </div>
+            </form>
+          )}
+
+          {/* FORM 2: LOG INCOMING GOODS (GRN) */}
+          {currentMasterTab === 'GRNS' && (
+            <form onSubmit={handleGRNSubmit} className="p-12 space-y-6 text-left max-h-[75vh] overflow-y-auto">
+              <div className="grid grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Source Purchase Order</label>
+                  <select required value={grnForm.purchase_order} onChange={(e) => setGrnForm({...grnForm, purchase_order: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
+                    <option value="">-- Choose Approved PO --</option>
+                    {purchaseOrders.filter(p => p.status === 'APPROVED' || p.status === 'PENDING').map(po => (
+                      <option key={po.id} value={po.id}>{po.po_number} ({po.supplier_name})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Delivery Note / Waybill Ref</label>
+                  <input required type="text" placeholder="e.g. DN-88120" value={grnForm.delivery_note_ref} onChange={(e) => setGrnForm({...grnForm, delivery_note_ref: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date Received</label>
+                  <input required type="date" value={grnForm.date_received} onChange={(e) => setGrnForm({...grnForm, date_received: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
+                </div>
+              </div>
+
+              {grnForm.items_received.length > 0 && (
+                <div className="space-y-4 border-t pt-6">
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Item Quantities, Expiries & Condition Check</h4>
+                  {grnForm.items_received.map((item, index) => (
+                    <div key={index} className="grid grid-cols-12 gap-3 items-end bg-slate-50 p-4 rounded-2xl border">
+                      
+                      <div className="col-span-3 space-y-1">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase">Item Description</label>
+                        <div className="text-xs font-bold text-slate-800 bg-white p-3 rounded-xl border border-slate-100 truncate">{item.item_name}</div>
+                      </div>
+                      
+                      <div className="col-span-1.5 space-y-1">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase block text-center">Ordered</label>
+                        <div className="text-xs font-bold text-slate-500 bg-white p-3 rounded-xl border border-slate-100 text-center">{item.ordered_quantity}</div>
+                      </div>
+                      
+                      <div className="col-span-1.5 space-y-1">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase block text-center">Received</label>
+                        <input type="number" required min="0" value={item.quantity_received} onChange={(e) => handleGrnItemChange(index, 'quantity_received', parseInt(e.target.value) || 0)} className="w-full bg-white border rounded-xl py-2.5 px-2 text-xs font-bold text-center outline-none border-teal-200 focus:border-teal-500" />
+                      </div>
+                      
+                      <div className="col-span-1.5 space-y-1">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase block text-center">Damaged</label>
+                        <input type="number" required min="0" value={item.damaged_quantity} onChange={(e) => handleGrnItemChange(index, 'damaged_quantity', parseInt(e.target.value) || 0)} className="w-full bg-white border rounded-xl py-2.5 px-2 text-xs font-bold text-center outline-none border-rose-200 focus:border-rose-500" />
+                      </div>
+
+                      <div className="col-span-2.5 space-y-1">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase">Expiry Date</label>
+                        <input 
+                          type="date" 
+                          required 
+                          value={item.expiry_date || ''} 
+                          className="w-full bg-white border rounded-xl py-2.5 px-2 text-xs font-bold outline-none border-slate-200 focus:border-teal-500" 
+                          onChange={(e) => handleGrnItemChange(index, 'expiry_date', e.target.value)} 
+                        />
+                      </div>
+
+                      <div className="col-span-2 space-y-1">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase">Satisfaction</label>
+                        <select value={item.satisfaction_level} onChange={(e) => handleGrnItemChange(index, 'satisfaction_level', e.target.value)} className="w-full bg-white border rounded-xl py-2.5 px-1 text-xs font-bold outline-none">
+                          <option value="GoodCondition">Good</option>
+                          <option value="Satisfactory">Satisfactory</option>
+                          <option value="Shortage">Shortage</option>
+                          <option value="Damaged">Damaged</option>
+                        </select>
+                      </div>
+
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button type="submit" className="w-full bg-teal-600 text-white py-4 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-teal-700 transition-colors mt-4">Save Goods Received Note</button>
+            </form>
+          )}
+
+          {/* FORM 3: RECORD SUPPLIER INVOICE */}
+          {currentMasterTab === 'INVOICES' && (
+            <form onSubmit={handleInvoiceSubmit} className="p-12 space-y-6 text-left">
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Associated Purchase Order</label>
+                  <select required value={invoiceForm.purchase_order} onChange={(e) => setInvoiceForm({...invoiceForm, purchase_order: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
+                    <option value="">-- Choose PO --</option>
+                    {purchaseOrders.map(po => (<option key={po.id} value={po.id}>{po.po_number} ({po.supplier_name})</option>))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Supplier Invoice Serial Code</label>
+                  <input required type="text" placeholder="e.g. INV-2024-99" value={invoiceForm.invoice_number} onChange={(e) => setInvoiceForm({...invoiceForm, invoice_number: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Billed Sum (KES)</label>
+                  <input required type="number" step="0.01" placeholder="0.00" value={invoiceForm.total_billed} onChange={(e) => setInvoiceForm({...invoiceForm, total_billed: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Payment Due Deadline</label>
+                  <input required type="date" value={invoiceForm.due_date} onChange={(e) => setInvoiceForm({...invoiceForm, due_date: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
+                </div>
+              </div>
+              <div className="space-y-2 border border-dashed border-slate-200 rounded-3xl p-6 bg-slate-50 text-center">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-2">Upload Digitized PDF Copy</label>
+                <div className="flex justify-center items-center gap-3">
+                  <Upload size={16} className="text-slate-400" />
+                  <input type="file" onChange={handleFileUpload} className="text-xs text-slate-600" />
+                </div>
+              </div>
+              <button type="submit" className="w-full bg-[#020617] text-white py-4 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-slate-900">Process Supplier Bill Details</button>
+            </form>
+          )}
+
+          {/* FORM 4: CREATE PAYMENT VOUCHER */}
+          {currentMasterTab === 'VOUCHERS' && (
+            <form onSubmit={handleVoucherSubmit} className="p-12 space-y-6 text-left">
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Target Purchase Order</label>
+                  <select required value={voucherForm.purchase_order} onChange={(e) => setVoucherForm({...voucherForm, purchase_order: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
+                    <option value="">-- Choose PO --</option>
+                    {purchaseOrders.map(po => (<option key={po.id} value={po.id}>{po.po_number} ({po.supplier_name})</option>))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Target Invoice</label>
+                  <select required value={voucherForm.purchase_invoice} onChange={(e) => setVoucherForm({...voucherForm, purchase_invoice: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
+                    <option value="">-- Choose Invoice --</option>
+                    {invoices.filter(inv => inv.purchase_order === parseInt(voucherForm.purchase_order || 0)).map(inv => (
+                      <option key={inv.id} value={inv.id}>{inv.invoice_number} - KES {parseFloat(inv.total_billed || 0).toLocaleString()}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Amount Paid (KES)</label>
+                  <input required type="number" placeholder="0.00" value={voucherForm.amount_paid} onChange={(e) => setVoucherForm({...voucherForm, amount_paid: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Payment Method</label>
+                  <select value={voucherForm.payment_mode} onChange={(e) => setVoucherForm({...voucherForm, payment_mode: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
+                    <option value="Bank Wire">Bank Wire</option>
+                    <option value="M-Pesa Corporate">M-Pesa Corporate Paybill</option>
+                    <option value="Cheque">Cheque</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Transaction Reference ID</label>
+                  <input required type="text" placeholder="e.g. FT-99120-CBK" value={voucherForm.payment_reference} onChange={(e) => setVoucherForm({...voucherForm, payment_reference: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
+                </div>
+              </div>
+              <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-700">Issue Payment Voucher</button>
+            </form>
+          )}
+
+        </div>
+      )}
 
       {/* Main Data View Panels */}
       <div className="bg-white border border-slate-100 rounded-[3rem] shadow-2xl min-h-[450px] overflow-hidden">
@@ -616,298 +922,7 @@ export default function PurchaseOrderManagement() {
           )
         )}
 
-        {/* TAB 4: PAYMENTS MADE */}
-        {!loading && currentMasterTab === 'VOUCHERS' && (
-          selectedVoucher ? (
-            <div className="p-12 animate-in fade-in duration-300">
-              <button onClick={() => setSelectedVoucher(null)} className="text-slate-400 mb-6 hover:text-slate-900 uppercase font-bold text-[10px] tracking-wider flex items-center gap-2 cursor-pointer">← Back to List</button>
-              <div className="bg-emerald-950/5 border border-emerald-500/20 rounded-[2.5rem] p-10 space-y-6">
-                <div className="flex justify-between items-start border-b border-emerald-900/10 pb-6">
-                  <div>
-                    <span className="bg-emerald-600 text-white text-[9px] font-bold tracking-wider uppercase px-3 py-1 rounded">Payment Advice Receipt</span>
-                    <h2 className="text-3xl font-bold mt-2 text-slate-900">{selectedVoucher.voucher_number}</h2>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">Payment Date: {selectedVoucher.date_issued}</p>
-                  </div>
-                  <button onClick={() => handleEmailNotification('Payment Voucher', selectedVoucher.voucher_number)} className="bg-emerald-600 text-white text-[9px] font-bold uppercase px-4 py-3 rounded-xl flex items-center gap-2"><Send size={12}/> Email Receipt</button>
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-medium text-slate-700">
-                  <div><p className="text-[10px] uppercase text-slate-400 font-bold">Paid Invoice</p><p className="text-slate-900 font-bold">{selectedVoucher.purchase_invoice_number}</p></div>
-                  <div><p className="text-[10px] uppercase text-slate-400 font-bold">PO Number</p><p className="text-slate-900 font-bold">{selectedVoucher.po_number}</p></div>
-                  <div><p className="text-[10px] uppercase text-slate-400 font-bold">Payment Method</p><p className="text-slate-900 font-bold">{selectedVoucher.payment_mode}</p></div>
-                  <div><p className="text-[10px] uppercase text-slate-400 font-bold">Reference Code</p><p className="text-emerald-700 font-mono font-bold">{selectedVoucher.payment_reference}</p></div>
-                </div>
-                <div className="pt-4 border-t border-dashed border-emerald-900/10 flex justify-between items-center">
-                  <span className="text-xs uppercase font-bold text-slate-400">Total Paid Amount:</span>
-                  <span className="text-2xl font-bold text-emerald-600">KES {parseFloat(selectedVoucher.amount_paid || 0).toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="text-[9px] font-bold text-slate-400 uppercase tracking-wider border-b">
-                    <th className="px-8 py-6">Voucher Number</th>
-                    <th className="px-4 py-6">Vendor Name</th>
-                    <th className="px-4 py-6">Invoice Paid</th>
-                    <th className="px-4 py-6">Payment Method</th>
-                    <th className="px-4 py-6">Reference ID</th>
-                    <th className="px-8 py-6 text-right">Amount Paid</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vouchers.map(v => (
-                    <tr key={v.id} onClick={() => setSelectedVoucher(v)} className="border-b hover:bg-slate-50/50 cursor-pointer">
-                      <td className="px-8 py-6 font-bold text-emerald-600">{v.voucher_number}</td>
-                      <td className="px-4 py-6 text-xs font-bold text-slate-700 uppercase">{v.supplier_name}</td>
-                      <td className="px-4 py-6 text-xs font-mono text-slate-600">{v.purchase_invoice_number}</td>
-                      <td className="px-4 py-6 text-xs text-slate-500">{v.payment_mode}</td>
-                      <td className="px-4 py-6 text-xs font-mono font-bold text-slate-800">{v.payment_reference}</td>
-                      <td className="px-8 py-6 text-right text-xs font-bold text-emerald-600">KES {parseFloat(v.amount_paid || 0).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                  {vouchers.length === 0 && (
-                    <tr><td colSpan="6" className="text-center p-12 text-xs text-slate-400 uppercase tracking-wide">No Payment Remittances issued via accounting system yet.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )
-        )}
       </div>
-
-      {/* MODAL CONFIGURATION PANELS */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm" onClick={() => { setShowCreateModal(false); setAttachedFile(null); }}></div>
-          <div className="relative bg-white w-full max-w-4xl rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-            <div className="p-10 border-b flex justify-between items-center bg-slate-50/50 px-12">
-              <h3 className="text-2xl font-bold text-slate-900 uppercase italic">
-                {currentMasterTab === 'POS' && 'Create Purchase Order'}
-                {currentMasterTab === 'GRNS' && 'Log Goods Received Note (GRN)'}
-                {currentMasterTab === 'INVOICES' && 'Record Supplier Invoice'}
-                {currentMasterTab === 'VOUCHERS' && 'Create Payment Voucher'}
-              </h3>
-              <button onClick={() => { setShowCreateModal(false); setAttachedFile(null); }} className="text-slate-400 hover:text-rose-500"><X size={24}/></button>
-            </div>
-
-            {/* FORM 1: CREATE PO */}
-            {currentMasterTab === 'POS' && (
-              <form onSubmit={handlePOSubmit} className="p-12 space-y-8 max-h-[75vh] overflow-y-auto">
-                <div className="grid grid-cols-3 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Select Vendor</label>
-                    <select required value={poForm.supplier} onChange={(e) => setPoForm({...poForm, supplier: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none uppercase">
-                      <option value="">-- Choose Vendor --</option>
-                      {suppliers.map(sup => (<option key={sup.id} value={sup.id}>{sup.name}</option>))}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Payment Terms</label>
-                    <select value={poForm.payment_terms} onChange={(e) => setPoForm({...poForm, payment_terms: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
-                      <option value="Net 15">Net 15</option>
-                      <option value="Net 30">Net 30</option>
-                      <option value="Net 60">Net 60</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Delivery Date</label>
-                    <input type="date" required value={poForm.delivery_date} onChange={(e) => setPoForm({...poForm, delivery_date: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center px-2">
-                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Order Items</h4>
-                    <button type="button" onClick={handleAddItemRow} className="text-teal-600 font-bold text-[10px] uppercase flex items-center gap-1"><Plus size={14}/> Add New Item</button>
-                  </div>
-                  {poForm.items.map((item, index) => (
-                    <div key={index} className="grid grid-cols-12 gap-4 items-end bg-slate-50 p-4 rounded-2xl border">
-                      <div className="col-span-4 space-y-1.5">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase ml-1">Item Details</label>
-                        <input required type="text" placeholder="Name or Description" value={item.item_name} onChange={(e) => handleItemChange(index, 'item_name', e.target.value)} className="w-full bg-white border rounded-xl py-3 px-4 text-xs font-bold outline-none" />
-                      </div>
-                      <div className="col-span-3 space-y-1.5">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase ml-1">Department</label>
-                        <select value={item.category} onChange={(e) => handleItemChange(index, 'category', e.target.value)} className="w-full bg-white border rounded-xl py-3 px-4 text-xs font-bold outline-none uppercase">
-                          {DEPARTMENTS.filter(d => d !== 'ALL').map(dept => (<option key={dept} value={dept}>{dept}</option>))}
-                        </select>
-                      </div>
-                      <div className="col-span-2 space-y-1.5">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase ml-1 block text-center">Quantity</label>
-                        <input required type="number" min="1" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 0)} className="w-full bg-white border rounded-xl py-3 px-4 text-xs font-bold text-center outline-none" />
-                      </div>
-                      <div className="col-span-2 space-y-1.5">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase ml-1 block text-right">Unit Price</label>
-                        <input required type="number" min="0" value={item.unit_cost} onChange={(e) => handleItemChange(index, 'unit_cost', parseFloat(e.target.value) || 0)} className="w-full bg-white border rounded-xl py-3 px-4 text-xs font-bold text-right outline-none" />
-                      </div>
-                      <div className="col-span-1 text-center pb-3">
-                        {poForm.items.length > 1 && (<button type="button" onClick={() => handleRemoveItemRow(index)} className="text-rose-400 hover:text-rose-600"><Trash2 size={16}/></button>)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="border-t pt-6 flex justify-between items-center px-2">
-                  <div>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Total Value</span>
-                    <span className="text-xl font-bold text-rose-600">KES {calculatePOTotal().toLocaleString()}</span>
-                  </div>
-                  <button type="submit" className="bg-[#020617] text-teal-400 px-10 py-5 rounded-[2rem] font-bold uppercase tracking-wider text-[10px] flex items-center gap-2 shadow-2xl"><Save size={16}/> Save Purchase Order</button>
-                </div>
-              </form>
-            )}
-
-            {/* FORM 2: LOG INCOMING GOODS */}
-            {currentMasterTab === 'GRNS' && (
-              <form onSubmit={handleGRNSubmit} className="p-12 space-y-6 text-left max-h-[75vh] overflow-y-auto">
-                <div className="grid grid-cols-3 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Select Purchase Order</label>
-                    <select required value={grnForm.purchase_order} onChange={(e) => setGrnForm({...grnForm, purchase_order: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
-                      <option value="">-- Choose PO --</option>
-                      {purchaseOrders.map(po => (<option key={po.id} value={po.id}>{po.po_number} ({po.supplier_name})</option>))}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Delivery Note Ref</label>
-                    <input type="text" required placeholder="e.g. DN-88192A" value={grnForm.delivery_note_ref} onChange={(e) => setGrnForm({...grnForm, delivery_note_ref: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date Received</label>
-                    <input type="date" required value={grnForm.date_received} onChange={(e) => setGrnForm({...grnForm, date_received: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
-                  </div>
-                </div>
-
-                {grnForm.items_received.length > 0 && (
-                  <div className="space-y-4 border-t pt-6">
-                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Item Quantities & Condition Check</h4>
-                    {grnForm.items_received.map((item, index) => (
-                      <div key={index} className="grid grid-cols-12 gap-4 items-end bg-slate-50 p-4 rounded-2xl border">
-                        <div className="col-span-3 space-y-1">
-                          <label className="text-[9px] font-bold text-slate-400 uppercase">Item Description</label>
-                          <div className="text-xs font-bold text-slate-800 bg-white p-3 rounded-xl border border-slate-100">{item.item_name}</div>
-                        </div>
-                        <div className="col-span-2 space-y-1">
-                          <label className="text-[9px] font-bold text-slate-400 uppercase block text-center">Ordered Qty</label>
-                          <div className="text-xs font-bold text-slate-500 bg-white p-3 rounded-xl border border-slate-100 text-center">{item.ordered_quantity}</div>
-                        </div>
-                        <div className="col-span-2 space-y-1">
-                          <label className="text-[9px] font-bold text-slate-400 uppercase block text-center">Received Qty</label>
-                          <input type="number" required min="0" value={item.quantity_received} onChange={(e) => handleGrnItemChange(index, 'quantity_received', parseInt(e.target.value) || 0)} className="w-full bg-white border rounded-xl py-2.5 px-3 text-xs font-bold text-center outline-none border-teal-200 focus:border-teal-500" />
-                        </div>
-                        <div className="col-span-2 space-y-1">
-                          <label className="text-[9px] font-bold text-slate-400 uppercase block text-center">Damaged Qty</label>
-                          <input type="number" required min="0" value={item.damaged_quantity} onChange={(e) => handleGrnItemChange(index, 'damaged_quantity', parseInt(e.target.value) || 0)} className="w-full bg-white border rounded-xl py-2.5 px-3 text-xs font-bold text-center outline-none border-rose-200 focus:border-rose-500" />
-                        </div>
-                        <div className="col-span-3 space-y-1">
-                          <label className="text-[9px] font-bold text-slate-400 uppercase">Satisfaction Level</label>
-                          <select value={item.satisfaction_level} onChange={(e) => handleGrnItemChange(index, 'satisfaction_level', e.target.value)} className="w-full bg-white border rounded-xl py-2.5 px-3 text-xs font-bold outline-none">
-                            <option value="GoodCondition">Good Condition</option>
-                            <option value="Satisfactory">Satisfactory</option>
-                            <option value="Shortage">Shortage / Discrepancy</option>
-                            <option value="Damaged">Damaged & Rejected</option>
-                          </select>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <button type="submit" className="w-full bg-teal-600 text-white py-4 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-teal-700 transition-colors mt-4">Save Goods Received Note</button>
-              </form>
-            )}
-
-            {/* FORM 3: RECORD SUPPLIER INVOICE */}
-            {currentMasterTab === 'INVOICES' && (
-              <form onSubmit={handleInvoiceSubmit} className="p-12 space-y-6 text-left">
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Link to Purchase Order</label>
-                    <select required value={invoiceForm.purchase_order} onChange={(e) => setInvoiceForm({...invoiceForm, purchase_order: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
-                      <option value="">-- Choose Matching PO --</option>
-                      {purchaseOrders.map(po => (<option key={po.id} value={po.id}>{po.po_number} ({po.supplier_name})</option>))}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Invoice Number</label>
-                    <input required type="text" placeholder="e.g. INV-2026-99" value={invoiceForm.invoice_number} onChange={(e) => setInvoiceForm({...invoiceForm, invoice_number: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Billed Amount (KES)</label>
-                    <input required type="number" placeholder="0.00" value={invoiceForm.total_billed} onChange={(e) => setInvoiceForm({...invoiceForm, total_billed: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Payment Due Date</label>
-                    <input required type="date" value={invoiceForm.due_date} onChange={(e) => setInvoiceForm({...invoiceForm, due_date: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Attach Scanned Invoice File</label>
-                  <div className="border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center hover:bg-slate-50/50 transition-colors relative">
-                    <input type="file" required accept=".pdf,.png,.jpg" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                    <div className="flex flex-col items-center gap-2">
-                      <Upload size={24} className="text-slate-400" />
-                      <span className="text-xs font-bold text-slate-700">{attachedFile ? attachedFile.name : 'Click or drag invoice file here'}</span>
-                      <span className="text-[9px] text-slate-400 uppercase">PDF, PNG, JPG accepted (Max 10MB)</span>
-                    </div>
-                  </div>
-                </div>
-
-                <button type="submit" className="w-full bg-[#020617] text-teal-400 py-4 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-slate-900">Save Supplier Invoice</button>
-              </form>
-            )}
-
-            {/* FORM 4: CREATE PAYMENT VOUCHER */}
-            {currentMasterTab === 'VOUCHERS' && (
-              <form onSubmit={handleVoucherSubmit} className="p-12 space-y-6 text-left">
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Target Purchase Order</label>
-                    <select required value={voucherForm.purchase_order} onChange={(e) => setVoucherForm({...voucherForm, purchase_order: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
-                      <option value="">-- Choose PO --</option>
-                      {purchaseOrders.map(po => (<option key={po.id} value={po.id}>{po.po_number} ({po.supplier_name})</option>))}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Target Invoice</label>
-                    <select required value={voucherForm.purchase_invoice} onChange={(e) => setVoucherForm({...voucherForm, purchase_invoice: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
-                      <option value="">-- Choose Invoice --</option>
-                      {invoices.filter(inv => inv.purchase_order === parseInt(voucherForm.purchase_order || 0)).map(inv => (
-                        <option key={inv.id} value={inv.id}>{inv.invoice_number} - KES {parseFloat(inv.total_billed || 0).toLocaleString()}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Amount Paid (KES)</label>
-                    <input required type="number" placeholder="0.00" value={voucherForm.amount_paid} onChange={(e) => setVoucherForm({...voucherForm, amount_paid: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Payment Method</label>
-                    <select value={voucherForm.payment_mode} onChange={(e) => setVoucherForm({...voucherForm, payment_mode: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none">
-                      <option value="Bank Wire">Bank Wire</option>
-                      <option value="M-Pesa Corporate">M-Pesa Corporate Paybill</option>
-                      <option value="Cheque">Cheque</option>
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Transaction Reference ID</label>
-                    <input required type="text" placeholder="e.g. FT-99120-CBK" value={voucherForm.payment_reference} onChange={(e) => setVoucherForm({...voucherForm, payment_reference: e.target.value})} className="w-full bg-slate-50 border rounded-2xl py-4 px-5 text-xs font-bold outline-none" />
-                  </div>
-                </div>
-                <button type="submit" className="w-full bg-emerald-600 text-white py-4 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-emerald-700">Issue Payment Voucher</button>
-              </form>
-            )}
-
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }

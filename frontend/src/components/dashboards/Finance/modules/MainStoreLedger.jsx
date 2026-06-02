@@ -36,7 +36,9 @@ const MainStoreLedger = () => {
   const fetchInventory = async () => {
     try {
       const res = await API.get('/inventory-items/');
-      setInventory(res.data.results || res.data || []);
+      // Safely unpacks standard lists OR DRF paginated structure blocks
+      const extractedData = res.data?.results || res.data || [];
+      setInventory(Array.isArray(extractedData) ? extractedData : []);
     } catch (err) {
       console.error("Fetch error - check if API route exists", err);
     }
@@ -91,7 +93,7 @@ const MainStoreLedger = () => {
             {activeDeptFilter === 'ALL' ? 'Total Assets Value' : `${activeDeptFilter} Asset Value`}
           </p>
           <h3 className="text-3xl font-black text-slate-900 tracking-tighter italic uppercase leading-none">
-            KES {filteredInventory.reduce((acc, curr) => acc + (Number(curr.quantity_available) * Number(curr.cost_per_unit)), 0).toLocaleString()}
+            KES {filteredInventory.reduce((acc, curr) => acc + (typeof curr === 'object' ? (Number(curr.quantity_available || 0) * Number(curr.cost_per_unit || 0)) : 0), 0).toLocaleString()}
           </h3>
         </div>
 
@@ -99,7 +101,7 @@ const MainStoreLedger = () => {
           <div className="p-3 bg-amber-50 text-amber-600 rounded-xl w-fit mb-4"><Box size={20}/></div>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none">Items In Stock</p>
           <h3 className="text-3xl font-black text-slate-900 tracking-tighter italic uppercase leading-none">
-            {filteredInventory.reduce((acc, curr) => acc + Number(curr.quantity_available), 0).toLocaleString()} <span className="text-sm">Units</span>
+            {filteredInventory.reduce((acc, curr) => acc + (typeof curr === 'object' ? Number(curr.quantity_available || 0) : 0), 0).toLocaleString()} <span className="text-sm">Units</span>
           </h3>
         </div>
 
@@ -107,7 +109,7 @@ const MainStoreLedger = () => {
           <div className="p-3 bg-rose-50 text-rose-600 rounded-xl w-fit mb-4"><Calendar size={20}/></div>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none">Expiring Soon</p>
           <h3 className="text-3xl font-black text-rose-500 tracking-tighter italic uppercase leading-none">
-             {filteredInventory.filter(i => i.expiry_date && new Date(i.expiry_date) < new Date(Date.now() + 90*24*60*60*1000)).length} Batches
+             {filteredInventory.filter(i => i && i.expiry_date && new Date(i.expiry_date) < new Date(Date.now() + 90*24*60*60*1000)).length} Batches
           </h3>
         </div>
       </div>
@@ -152,35 +154,40 @@ const MainStoreLedger = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50 text-left">
-            {filteredInventory.length > 0 ? filteredInventory.map((item, idx) => (
-              <tr key={item.id || idx} className="hover:bg-slate-50/50 transition-all group animate-in fade-in duration-300">
-                <td className="p-8 px-10">
-                  <p className="font-black text-slate-900 uppercase italic text-sm">{item.name}</p>
-                  <p className="text-[9px] font-bold text-teal-600 uppercase tracking-widest mt-1 italic">
-                    {item.department === 'LAB' ? 'LABORATORY' : item.department === 'ADMIN' ? 'GENERAL ADMIN' : item.department}
-                  </p>
-                </td>
-                <td className="p-8 text-center">
-                  <span className="bg-slate-100 text-slate-600 px-3 py-1 rounded-lg text-[10px] font-black italic uppercase tracking-tighter">#{item.batch_number}</span>
-                </td>
-                <td className="p-8 text-center font-black text-slate-900 italic text-base">
-                  {Number(item.quantity_available).toLocaleString()} <span className="text-[10px] text-slate-400 ml-1 font-bold">Units</span>
-                </td>
-                <td className="p-8 text-center text-xs font-bold text-slate-500 italic uppercase tracking-tighter">
-                  KES {Number(item.cost_per_unit).toLocaleString()}
-                </td>
-                <td className="p-8">
-                   <p className={`font-black italic text-xs ${item.expiry_date && new Date(item.expiry_date) < new Date() ? 'text-rose-600' : 'text-slate-900'}`}>
-                      {item.expiry_date || ' '}
-                   </p>
-                </td>
-                <td className="p-8 text-right pr-10">
-                  <p className="font-black text-slate-900 italic text-sm">
-                    KES {(Number(item.quantity_available) * Number(item.cost_per_unit)).toLocaleString()}
-                  </p>
-                </td>
-              </tr>
-            )) : (
+            {filteredInventory.length > 0 ? filteredInventory.map((item, idx) => {
+              if (!item) return null;
+              return (
+                <tr key={item.id || idx} className="hover:bg-slate-50/50 transition-all group animate-in fade-in duration-300">
+                  <td className="p-8 px-10">
+                    <p className="font-black text-slate-900 uppercase italic text-sm">{item.name || 'Unnamed Item'}</p>
+                    <p className="text-[9px] font-bold text-teal-600 uppercase tracking-widest mt-1 italic">
+                      {item.department === 'LAB' ? 'LABORATORY' : item.department === 'ADMIN' ? 'GENERAL ADMIN' : item.department}
+                    </p>
+                  </td>
+                  <td className="p-8 text-center">
+                    <span className="bg-slate-100 text-slate-600 px-3 py-1 rounded-lg text-[10px] font-black italic uppercase tracking-tighter">
+                      #{item.batch_number || 'N/A'}
+                    </span>
+                  </td>
+                  <td className="p-8 text-center font-black text-slate-900 italic text-base">
+                    {Number(item.quantity_available || 0).toLocaleString()} <span className="text-[10px] text-slate-400 ml-1 font-bold">Units</span>
+                  </td>
+                  <td className="p-8 text-center text-xs font-bold text-slate-500 italic uppercase tracking-tighter">
+                    KES {Number(item.cost_per_unit || 0).toLocaleString()}
+                  </td>
+                  <td className="p-8">
+                     <p className={`font-black italic text-xs ${item.expiry_date && new Date(item.expiry_date) < new Date() ? 'text-rose-600' : 'text-slate-900'}`}>
+                        {item.expiry_date || '—'}
+                     </p>
+                  </td>
+                  <td className="p-8 text-right pr-10">
+                    <p className="font-black text-slate-900 italic text-sm">
+                      KES {(Number(item.quantity_available || 0) * Number(item.cost_per_unit || 0)).toLocaleString()}
+                    </p>
+                  </td>
+                </tr>
+              );
+            }) : (
               <tr>
                 <td colSpan="6" className="p-40 text-center text-slate-300 font-black uppercase italic tracking-[0.3em]">
                   No tracking records found under {activeDeptFilter === 'ALL' ? 'any storage point' : `the ${activeDeptFilter} registry`}.

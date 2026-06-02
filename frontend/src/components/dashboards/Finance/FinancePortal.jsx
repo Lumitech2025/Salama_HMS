@@ -14,6 +14,15 @@ import ServiceCatalogue from '../billingofficer/modules/ServiceCatalogue';
 const FinancePortal = () => {
   const [activeTab, setActiveTab] = useState('overview');
 
+const [prefilledRequisition, setPrefilledRequisition] = useState(null);
+
+  const handleNavigateToCreatePO = (requisitionData) => {
+    setPrefilledRequisition(requisitionData);
+    setActiveTab('purchase_orders');
+  };
+
+
+
   const handleLogout = () => {
     localStorage.clear();
     window.location.href = '/login';
@@ -31,14 +40,18 @@ const FinancePortal = () => {
         return <SupplierManagement />;
 
       case 'purchase_orders': 
-        return <PurchaseOrderManagement />; // Render endpoint for procurement lifecycles
+        return (
+          <PurchaseOrderManagement 
+            prefilledData={prefilledRequisition} 
+            clearPrefilledData={() => setPrefilledRequisition(null)}
+          />
+        ); 
+      
+      case 'finance_requisitions':
+        return <FinanceRequisitionsTab onCreatePO={handleNavigateToCreatePO} />;
       
       case 'claims': 
         return <InsuranceClaimsHub />; 
-
-      case 'finance_requisitions':
-        // The unread polling badge is handled directly inside the Sidebar independently now
-        return <FinanceRequisitionsTab />;
       
       case 'insurance_providers':
         return <InsuranceProviders />;
