@@ -488,7 +488,7 @@ class DrugViewSet(viewsets.ModelViewSet):
     serializer_class = DrugSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['store_location']
+    filterset_fields = ['dosage_form', 'sku']
     search_fields = ['name', 'batch_number']
 
 class ProtocolViewSet(viewsets.ModelViewSet):

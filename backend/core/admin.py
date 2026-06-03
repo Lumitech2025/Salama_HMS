@@ -191,26 +191,25 @@ class PrescriptionAdmin(admin.ModelAdmin):
 
 @admin.register(Drug)
 class DrugAdmin(admin.ModelAdmin):
-    list_display = ('name', 'manufacturer', 'strength', 'store_location', 'stock_status', 'expiry_status', 'price_tag')
-    list_filter = ('store_location', 'is_hazardous', 'expiry_date')
-    search_fields = ('name', 'generic_name', 'batch_number', 'manufacturer')
-    list_editable = ('store_location',)
-
-    def stock_status(self, obj):
-        if obj.quantity_in_stock <= obj.reorder_level:
-            return format_html('<b style="color: #dc3545;">🚨 {} (Low)</b>', obj.quantity_in_stock)
-        return format_html('<span style="color: #28a745;">{}</span>', obj.quantity_in_stock)
-    stock_status.short_description = "Qty in Stock"
-
-    def expiry_status(self, obj):
-        if obj.is_expired:
-            return format_html('<b style="color: white; background: #dc3545; padding: 2px 5px; border-radius: 3px;">EXPIRED</b>')
-        return obj.expiry_date
-    expiry_status.short_description = "Expiry"
-
-    def price_tag(self, obj):
-        return format_html('<b>Ksh {:,.2f}</b>', obj.selling_price_kes)
-    price_tag.short_description = "Price"
+    # display the fields that ACTUALLY exist on your new model setup
+    list_display = [
+        'name', 
+        'sku', 
+        'batch_no', 
+        'dosage_form', 
+        'strength', 
+        'stock_quantity', 
+        'selling_price_kes'
+    ]
+    
+    # Filter by existing fields like Type (dosage_form) or Expiry
+    list_filter = ['dosage_form', 'expiry_date']
+    
+    # Search by fields that are text-based
+    search_fields = ['name', 'sku', 'batch_no']
+    
+    # If you want fields directly editable in the table list view
+    list_editable = ['stock_quantity', 'selling_price_kes']
 
 # --- 4. LONGITUDINAL EMR ---
 

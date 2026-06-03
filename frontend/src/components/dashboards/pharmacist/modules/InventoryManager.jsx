@@ -1,263 +1,457 @@
 import React, { useState, useEffect } from 'react';
 import API from '@/api/api';
 import { 
-  Package, TrendingDown, PlusCircle, 
-  Store, AlertTriangle, Search, ArrowRightLeft, 
-  Loader2, X, Save, Factory, Edit3, ClipboardList, Send
+  Package, TrendingDown, Search, ArrowRightLeft, PlusCircle,
+  Loader2, X, Edit3, Store
 } from 'lucide-react';
 
-const InventoryManager = () => {
+const PharmacyInventory = ({ setActiveTab }) => {
   const [inventory, setInventory] = useState([]);
+  const [mainStorePharmacyItems, setMainStorePharmacyItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Modal States
+  // Modals
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showRequisitionModal, setShowRequisitionModal] = useState(false);
-  const [showAmendmentModal, setShowAmendmentModal] = useState(false);
-  
-  const [selectedItem, setSelectedPatient] = useState(null);
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [selectedItem, setSelectedItem] = useState(null);
 
-  // Form States
+  // Maximum quantity boundary and reference tracking state
+  const [maxAvailableQty, setMaxAvailableQty] = useState(0);
+  const [selectedMainStoreId, setSelectedMainStoreId] = useState(null);
+
+  // Precision Form State
   const [formData, setFormData] = useState({
-    name: '', manufacturer: '', expiry_date: '', strength: '', 
-    quantity_in_stock: '', reorder_level: '', selling_price_kes: '', 
-    is_hazardous: false, batch_number: ''
-  });
-
-  const [requisitionData, setRequisitionData] = useState({
-    drug_name: '', quantity: '', priority: 'Normal', notes: ''
+    name: '',
+    sku: '',
+    batch_no: '',
+    dosage_form: 'TABLET', 
+    strength: '', 
+    stock_quantity: '', 
+    reorder_level: '50', 
+    cost_price_unit: '', 
+    selling_price_kes: '',
+    expiry_date: ''
   });
 
   const fetchInventory = async () => {
     setLoading(true);
     try {
-      const res = await API.get('/drugs/?store_location=pharmacy');
-      setInventory(res.data.results || res.data || []);
+      const res = await API.get('/drugs/');
+      setInventory(res.data?.results || res.data || []);
     } catch (err) {
-      console.error("Inventory sync error", err);
+      console.error("Ledger acquisition failure", err);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { fetchInventory(); }, []);
-
-  // --- Handlers ---
-  const handleSaveStock = async (e) => {
-    e.preventDefault();
+  const fetchMainStorePharmacyItems = async () => {
     try {
-      await API.post('/drugs/', { ...formData, store_location: 'pharmacy' });
+      const res = await API.get('/inventory-items/');
+      const items = res.data?.results || res.data || [];
+      setMainStorePharmacyItems(items.filter(item => item.department === 'PHARMACY'));
+    } catch (err) {
+      console.error("Main store sync failure", err);
+    }
+  };
+
+  useEffect(() => { 
+    fetchInventory(); 
+    fetchMainStorePharmacyItems();
+  }, []);
+
+  // Autofill, Stock Boundaries, and DB Primary Key Tracking Engine
+  const handleMainStoreSelection = (selectedItemName) => {
+    if (!selectedItemName) {
+      resetAddForm();
+      setMaxAvailableQty(0);
+      setSelectedMainStoreId(null);
+      return;
+    }
+
+    const matchedItem = mainStorePharmacyItems.find(item => item.name === selectedItemName);
+    
+    if (matchedItem) {
+      const suggestedRetail = parseFloat(matchedItem.cost_per_unit || 0) * 1.33;
+      
+      // Lock down the max available stock and track its primary database ID
+      setMaxAvailableQty(parseInt(matchedItem.quantity_available) || 0);
+      setSelectedMainStoreId(matchedItem.id);
+
+      setFormData(prev => ({
+        ...prev,
+        name: matchedItem.name,
+        sku: matchedItem.sku || '',
+        batch_no: matchedItem.batch_number || '',
+        dosage_form: matchedItem.dosage_form || 'TABLET',
+        strength: matchedItem.strength || '',
+        cost_price_unit: matchedItem.cost_per_unit || '',
+        expiry_date: matchedItem.expiry_date || '',
+        selling_price_kes: suggestedRetail.toFixed(2)
+      }));
+    }
+  };
+
+  // Dual-stage Stock Transaction Handler
+  const handleCreateProduct = async (e) => {
+    e.preventDefault();
+    
+    const requestedQty = parseInt(formData.stock_quantity) || 0;
+
+    // Guard Check: Absolute allocation boundary condition
+    if (requestedQty > maxAvailableQty) {
+      alert(`Stock Allocation Error: Requested quantity (${requestedQty}) exceeds available Main Store stock (${maxAvailableQty}).`);
+      return;
+    }
+
+    try {
+      // Phase 1: Onboard or update the item on the Pharmacy Shop Floor
+      const payload = {
+        ...formData,
+        stock_quantity: requestedQty,
+        reorder_level: parseInt(formData.reorder_level) || 0,
+        cost_price_unit: parseFloat(formData.cost_price_unit) || 0,
+        selling_price_kes: parseFloat(formData.selling_price_kes) || 0,
+        expiry_date: formData.expiry_date || null 
+      };
+
+      await API.post('/drugs/', payload);
+
+      // Phase 2: Deduct allocated quantity from the Main Store Inventory record
+      if (selectedMainStoreId) {
+        const remainingStoreQty = maxAvailableQty - requestedQty;
+        
+        await API.patch(`/inventory-items/${selectedMainStoreId}/`, {
+          quantity_available: remainingStoreQty
+        });
+      }
+
+      // Close transaction modal, clean state variables, and trigger interface sync
       setShowAddModal(false);
+      resetAddForm();
       fetchInventory();
-    } catch (err) { alert("Error saving stock entry."); }
+      fetchMainStorePharmacyItems(); // Vital: Pulls real-time balanced quantities from the store pool
+    } catch (err) {
+      console.error("Stock allocation transaction failure:", err);
+      alert("Database error: Failed to complete the dual stock allocation routine.");
+    }
   };
 
-  const handleSendRequisition = async (e) => {
+  const handleUpdateProductData = async (e) => {
     e.preventDefault();
     try {
-      // Logic for internal requisition to Main Store
-      console.log("Requisition Sent:", requisitionData);
-      alert(`Requisition for ${requisitionData.quantity} units of ${requisitionData.drug_name} sent to Main Store.`);
-      setShowRequisitionModal(false);
-      setRequisitionData({ drug_name: '', quantity: '', priority: 'Normal', notes: '' });
-    } catch (err) { alert("Failed to send requisition."); }
-  };
-
-  const handleUpdateAmendment = async (e) => {
-    e.preventDefault();
-    try {
-      await API.patch(`/drugs/${selectedItem.id}/`, formData);
-      setShowAmendmentModal(false);
+      await API.patch(`/drugs/${selectedItem.id}/`, {
+        name: formData.name,
+        dosage_form: formData.dosage_form,
+        strength: formData.strength,
+        reorder_level: parseInt(formData.reorder_level) || 0,
+        selling_price_kes: parseFloat(formData.selling_price_kes) || 0
+      });
+      setShowPricingModal(false);
       fetchInventory();
-    } catch (err) { alert("Amendment failed."); }
+    } catch (err) { 
+      alert("Error updating product properties."); 
+    }
   };
 
-  const openAmendment = (item) => {
-    setSelectedPatient(item);
-    setFormData({ ...item });
-    setShowAmendmentModal(true);
+  const resetAddForm = () => {
+    setFormData({
+      name: '', sku: '', batch_no: '', dosage_form: 'TABLET',
+      strength: '', stock_quantity: '', reorder_level: '50',
+      cost_price_unit: '', selling_price_kes: '', expiry_date: ''
+    });
+    setMaxAvailableQty(0);
+    setSelectedMainStoreId(null);
   };
 
-  const openDrugRequisition = (item) => {
-    setRequisitionData({ ...requisitionData, drug_name: item.name });
-    setShowRequisitionModal(true);
+  const openEditMatrix = (item) => {
+    setSelectedItem(item);
+    setFormData({
+      name: item.name,
+      sku: item.sku,
+      batch_no: item.batch_no,
+      dosage_form: item.dosage_form || 'TABLET',
+      strength: item.strength || '',
+      stock_quantity: item.stock_quantity,
+      reorder_level: item.reorder_level,
+      cost_price_unit: item.cost_price_unit,
+      selling_price_kes: item.selling_price_kes,
+      expiry_date: item.expiry_date || ''
+    });
+    setShowPricingModal(true);
   };
 
-  const lowStockCount = inventory.filter(item => item.quantity_in_stock <= item.reorder_level).length;
+  const handleInitializeRequisition = (item) => {
+    const prefilledData = {
+      drug_name: item.name,
+      sku: item.sku,
+      batch_number: item.batch_no,
+      dosage_form: item.dosage_form,
+      strength: item.strength,
+      suggested_quantity: Math.max(0, (parseInt(item.reorder_level || 50) * 2) - parseInt(item.stock_quantity || 0)),
+      notes: `Auto stock alert trigger for batch: ${item.batch_no}`
+    };
+    localStorage.setItem('salama_prefilled_requisition', JSON.stringify(prefilledData));
+    if (setActiveTab) setActiveTab('requisitions');
+  };
+
+  const filteredInventory = inventory.filter(item => 
+    item.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.sku?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.batch_no?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const lowStockCount = inventory.filter(item => (parseInt(item.stock_quantity) || 0) <= (parseInt(item.reorder_level) || 50)).length;
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-700 font-['Inter'] pb-20">
+    <div className="space-y-8 font-['Inter'] p-6 bg-[#fafafa] rounded-3xl min-h-screen">
       
-      {/* TIER 1: HEADER */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+      {/* HEADER ROW */}
+      <div className="flex flex-col md:flex-row justify-between items-center gap-6">
         <div>
             <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic flex items-center gap-3">
-                <Store className="text-teal-500" size={32} /> Pharmacy Shop Inventory
+                <Store className="text-teal-600" size={32} /> Pharmacy Shop Floor
             </h2>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Dispensing Point Ledger Matrix</p>
         </div>
+        <button 
+          onClick={() => { resetAddForm(); setShowAddModal(true); }}
+          className="bg-[#020617] text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest flex items-center gap-3 hover:bg-teal-600 transition-all shadow-xl"
+        >
+          <PlusCircle size={18} /> Add Shop Stock
+        </button>
+      </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto">
-            <button 
-                onClick={() => setShowRequisitionModal(true)}
-                className="flex-1 md:flex-none bg-white border border-slate-200 p-4 rounded-2xl text-slate-600 hover:bg-slate-50 transition-all shadow-sm flex items-center justify-center gap-2 font-bold text-xs uppercase"
-            >
-                <ArrowRightLeft size={16} /> Requisition From Main
-            </button>
-            <button 
-                onClick={() => { setFormData({ name: '', manufacturer: '', expiry_date: '', strength: '', quantity_in_stock: '', reorder_level: '', selling_price_kes: '', is_hazardous: false, batch_number: '' }); setShowAddModal(true); }}
-                className="flex-1 md:flex-none bg-[#020617] text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-teal-600 transition-all shadow-xl active:scale-95"
-            >
-                <PlusCircle size={18} /> Add Shop Stock
-            </button>
+      {/* STATS BANNER */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-sm flex items-center gap-5">
+          <div className="p-4 rounded-xl bg-red-50 text-red-600 border border-red-100"><TrendingDown size={24}/></div>
+          <div>
+            <h4 className="text-2xl font-black text-slate-900 font-mono">{String(lowStockCount).padStart(2, '0')}</h4>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Threshold Breach Alerts</p>
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-sm flex items-center gap-5">
+          <div className="p-4 rounded-xl bg-teal-50 text-teal-600 border border-teal-100"><Package size={24}/></div>
+          <div>
+            <h4 className="text-2xl font-black text-slate-900 font-mono">Ksh {(filteredInventory.reduce((acc, curr) => acc + (parseFloat(curr.selling_price_kes || 0) * parseInt(curr.stock_quantity || 0)), 0)).toLocaleString()}</h4>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Shop Floor Value (Retail)</p>
+          </div>
         </div>
       </div>
 
-      {/* TIER 2: ANALYTICS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <AnalyticsCard label="Low Stock Alerts" value={String(lowStockCount).padStart(2, '0')} icon={<TrendingDown size={24}/>} color={lowStockCount > 0 ? "red" : "slate"} />
-        <AnalyticsCard label="Total Shop Value" value={`Ksh ${(inventory.reduce((acc, curr) => acc + (parseFloat(curr.selling_price_kes) * curr.quantity_in_stock), 0)).toLocaleString()}`} icon={<Package size={24}/>} color="teal" />
-        <AnalyticsCard label="Storage Alerts" value={inventory.filter(i => i.is_hazardous).length} icon={<AlertTriangle size={24}/>} color="amber" />
-      </div>
-
-      {/* TIER 3: TABLE */}
-      <div className="bg-white rounded-[3rem] border border-slate-100 shadow-2xl overflow-hidden">
-        <div className="p-10 border-b border-slate-50 bg-slate-50/30">
-            <div className="relative max-w-2xl">
+      {/* SEARCH PANEL */}
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden">
+        <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+            <div className="relative max-w-xl w-full">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input type="text" placeholder="Search shop inventory..." className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-teal-500/5 transition-all text-sm font-medium" />
+                <input 
+                  type="text" placeholder="Search pharmacy stock..." value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-12 pr-4 py-3.5 bg-white border border-slate-200 rounded-xl outline-none text-sm font-medium" 
+                />
             </div>
         </div>
 
+        {/* LEDGER DATA TABLE */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
+          <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] bg-slate-50/50">
-                <th className="px-10 py-6">Drug & Manufacturer</th>
-                <th className="px-10 py-6">Stock Level</th>
-                <th className="px-10 py-6">Retail Price</th>
-                <th className="px-10 py-6 text-right pr-14">Actions</th>
+              <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50/70 border-b border-slate-100">
+                <th className="px-8 py-5">Product</th>
+                <th className="px-8 py-5">SKU</th>
+                <th className="px-8 py-5">Type</th>
+                <th className="px-8 py-5">Strength</th>
+                <th className="px-8 py-5">Batch No</th>
+                <th className="px-8 py-5">Qty</th>
+                <th className="px-8 py-5">Min Level</th>
+                <th className="px-8 py-5">Cost Price</th>
+                <th className="px-8 py-5">Retail Price</th>
+                <th className="px-8 py-5 text-right pr-12">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50 font-medium text-slate-700">
+            <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
               {loading ? (
-                <tr><td colSpan="4" className="py-32 text-center"><Loader2 className="animate-spin mx-auto text-teal-500" size={40} /></td></tr>
-              ) : inventory.map((item) => (
-                <tr key={item.id} className="group hover:bg-slate-50/80 transition-all">
-                  <td className="px-10 py-8">
-                    <p className="font-black text-slate-900 uppercase tracking-tight">{item.name}</p>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase">{item.manufacturer}</p>
-                  </td>
-                  <td className="px-10 py-8">
-                    <span className={`text-xl font-black ${item.quantity_in_stock <= item.reorder_level ? 'text-red-500' : 'text-slate-900'}`}>{item.quantity_in_stock}</span>
-                    <span className="text-[9px] font-black text-slate-400 uppercase ml-2">Min: {item.reorder_level}</span>
-                  </td>
-                  <td className="px-10 py-8 font-mono font-black text-teal-600">Ksh {parseFloat(item.selling_price_kes).toLocaleString()}</td>
-                  <td className="px-10 py-8 text-right pr-14">
-                    <div className="flex justify-end gap-2">
-                        <button onClick={() => openAmendment(item)} className="p-3 bg-slate-100 text-slate-600 rounded-xl hover:bg-blue-500 hover:text-white transition-all shadow-sm" title="Amend Data">
-                            <Edit3 size={16} />
+                <tr><td colSpan="10" className="py-24 text-center"><Loader2 className="animate-spin mx-auto text-teal-600" size={36} /></td></tr>
+              ) : filteredInventory.length === 0 ? (
+                <tr><td colSpan="10" className="py-16 text-center text-xs font-bold text-slate-400 uppercase tracking-wider">No stock floor records found.</td></tr>
+              ) : filteredInventory.map((item) => {
+                const stockQty = parseInt(item.stock_quantity) || 0;
+                const minThreshold = parseInt(item.reorder_level) || 50;
+                const isBreached = stockQty <= minThreshold;
+
+                return (
+                  <tr key={item.id} className={`hover:bg-slate-50/60 transition-colors ${isBreached ? 'bg-red-50/20' : ''}`}>
+                    <td className="px-8 py-6 font-black text-slate-900 uppercase tracking-tight">{item.name}</td>
+                    <td className="px-8 py-6 font-mono text-xs font-bold text-slate-600">{item.sku}</td>
+                    <td className="px-8 py-6">
+                      <span className="text-[10px] bg-slate-100 px-2 py-1 rounded text-slate-600 font-black uppercase">
+                        {item.dosage_form || 'TABLET'}
+                      </span>
+                    </td>
+                    <td className="px-8 py-6 font-bold text-slate-800 font-mono text-sm">{item.strength || 'N/A'}</td>
+                    <td className="px-8 py-6 font-mono text-xs text-slate-500 font-bold">{item.batch_no || 'N/A'}</td>
+                    <td className="px-8 py-6"><span className={`text-base font-black ${isBreached ? 'text-red-600' : 'text-slate-900'}`}>{stockQty}</span></td>
+                    <td className="px-8 py-6 font-mono text-sm text-slate-600 font-bold">{minThreshold}</td>
+                    <td className="px-8 py-6 font-mono text-xs text-slate-400">Ksh {parseFloat(item.cost_price_unit || 0).toLocaleString()}</td>
+                    <td className="px-8 py-6 font-mono font-black text-teal-600">Ksh {parseFloat(item.selling_price_kes || 0).toLocaleString()}</td>
+                    <td className="px-8 py-6 text-right pr-12">
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => openEditMatrix(item)} className="p-2 border border-slate-200 bg-white text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-900 hover:text-white transition-all"><Edit3 size={14}/></button>
+                        <button 
+                          onClick={() => handleInitializeRequisition(item)} 
+                          className={`p-2 rounded-xl border text-xs font-black transition-all flex items-center gap-1.5 ${
+                            isBreached ? 'bg-red-600 text-white border-red-600 animate-pulse' : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-teal-600 hover:text-white'
+                          }`}
+                        >
+                          <ArrowRightLeft size={14} />
+                          {isBreached && <span>Requisition</span>}
                         </button>
-                        <button onClick={() => openDrugRequisition(item)} className="p-3 bg-slate-900 text-white rounded-xl hover:bg-teal-600 transition-all shadow-sm" title="Requisition Stock">
-                            <ArrowRightLeft size={16} />
-                        </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* --- MODALS --- */}
-
-      {/* REQUISITION MODAL */}
-      {showRequisitionModal && (
-        <Modal title="Inventory Requisition" close={() => setShowRequisitionModal(false)}>
-            <form onSubmit={handleSendRequisition} className="p-10 space-y-6">
-                <Input label="Drug Name" value={requisitionData.drug_name} onChange={e => setRequisitionData({...requisitionData, drug_name: e.target.value})} placeholder="Enter drug name" />
-                <div className="grid grid-cols-2 gap-6">
-                    <Input label="Quantity Requesting" type="number" value={requisitionData.quantity} onChange={e => setRequisitionData({...requisitionData, quantity: e.target.value})} />
-                    <div className="space-y-2">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Priority</label>
-                        <select className="w-full bg-slate-50 rounded-2xl p-4 font-bold text-slate-900 outline-none border-none focus:ring-2 focus:ring-teal-500" value={requisitionData.priority} onChange={e => setRequisitionData({...requisitionData, priority: e.target.value})}>
-                            <option>Normal</option>
-                            <option>Urgent</option>
-                            <option>Critical (Stock Out)</option>
-                        </select>
-                    </div>
-                </div>
-                <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Internal Notes</label>
-                    <textarea className="w-full bg-slate-50 rounded-2xl p-4 font-medium text-slate-900 outline-none border-none min-h-[100px]" placeholder="Reason for requisition..." value={requisitionData.notes} onChange={e => setRequisitionData({...requisitionData, notes: e.target.value})} />
-                </div>
-                <button type="submit" className="w-full bg-teal-500 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-xs shadow-xl shadow-teal-200 hover:bg-[#020617] transition-all flex items-center justify-center gap-3">
-                    <Send size={18} /> Submit Requisition
-                </button>
-            </form>
-        </Modal>
-      )}
-
-      {/* AMENDMENT MODAL */}
-      {showAmendmentModal && (
-        <Modal title="Amend Shop Record" close={() => setShowAmendmentModal(false)}>
-            <form onSubmit={handleUpdateAmendment} className="p-10 grid grid-cols-2 gap-6">
-                <Input label="Drug Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                <Input label="Batch Number" value={formData.batch_number} onChange={e => setFormData({...formData, batch_number: e.target.value})} />
-                <Input label="Expiry Date" type="date" value={formData.expiry_date} onChange={e => setFormData({...formData, expiry_date: e.target.value})} />
-                <Input label="Selling Price" type="number" value={formData.selling_price_kes} onChange={e => setFormData({...formData, selling_price_kes: e.target.value})} />
-                <div className="col-span-2">
-                    <button type="submit" className="w-full bg-blue-600 text-white py-6 rounded-[2rem] font-black uppercase tracking-widest text-xs shadow-xl shadow-blue-200 hover:bg-slate-900 transition-all">
-                        Update Shop Record
-                    </button>
-                </div>
-            </form>
-        </Modal>
-      )}
-
-      {/* ADD MODAL (Existing logic maintained) */}
+      {/* ADD MODAL */}
       {showAddModal && (
-        <Modal title="Register Shop Stock" close={() => setShowAddModal(false)}>
-            <form onSubmit={handleSaveStock} className="p-10 grid grid-cols-2 gap-6">
-                <Input label="Drug Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
-                <Input label="Manufacturer" value={formData.manufacturer} onChange={e => setFormData({...formData, manufacturer: e.target.value})} />
-                <Input label="Quantity" type="number" value={formData.quantity_in_stock} onChange={e => setFormData({...formData, quantity_in_stock: e.target.value})} />
-                <Input label="Price (Ksh)" type="number" value={formData.selling_price_kes} onChange={e => setFormData({...formData, selling_price_kes: e.target.value})} />
-                <button className="col-span-2 bg-teal-500 text-white py-5 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-slate-900 transition-all">Finalize Entry</button>
-            </form>
+        <Modal title="Onboard Main Store Asset" close={() => setShowAddModal(false)}>
+          <form onSubmit={handleCreateProduct} className="p-6 space-y-4">
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1 w-full">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Main Store Product</label>
+                <select 
+                  className="w-full bg-slate-50 rounded-xl p-3.5 font-bold text-slate-900 border border-slate-100 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                  value={formData.name}
+                  onChange={e => handleMainStoreSelection(e.target.value)}
+                  required
+                >
+                  <option value="">-- Select Active Stock --</option>
+                  {mainStorePharmacyItems.map(item => (
+                    <option key={item.id} value={item.name}>
+                      {item.name} (Avail: {item.quantity_available})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">SKU Reference</label>
+                <input type="text" readOnly value={formData.sku} className="w-full bg-slate-100 border border-slate-200 rounded-xl p-3.5 font-mono text-xs font-bold text-slate-500 outline-none" placeholder="Automated" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Batch Number</label>
+                <input type="text" readOnly value={formData.batch_no} className="w-full bg-slate-100 border border-slate-200 rounded-xl p-3.5 font-mono text-xs font-bold text-slate-500 outline-none" placeholder="Linked" />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Type</label>
+                <input type="text" readOnly value={formData.dosage_form} className="w-full bg-slate-100 border border-slate-200 rounded-xl p-3.5 font-bold text-slate-500 text-sm outline-none" />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Strength</label>
+                <input type="text" readOnly value={formData.strength} className="w-full bg-slate-100 border border-slate-200 rounded-xl p-3.5 font-mono text-xs font-bold text-slate-500 outline-none" placeholder="Linked" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1 w-full">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">
+                  Quantity to Add {maxAvailableQty > 0 && `(Max: ${maxAvailableQty})`}
+                </label>
+                <input 
+                  type="number" 
+                  value={formData.stock_quantity} 
+                  onChange={e => setFormData({...formData, stock_quantity: e.target.value})} 
+                  placeholder="Enter amount"
+                  className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3.5 font-bold text-slate-900 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                  max={maxAvailableQty}
+                  min="1"
+                  required 
+                />
+              </div>
+              <Input label="Reorder Level" type="number" value={formData.reorder_level} onChange={e => setFormData({...formData, reorder_level: e.target.value})} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Unit Cost (Ksh)</label>
+                <input type="text" readOnly value={formData.cost_price_unit} className="w-full bg-slate-100 border border-slate-200 rounded-xl p-3.5 font-mono text-sm font-bold text-slate-500 outline-none" />
+              </div>
+              <Input label="Retail Price (Ksh)" type="number" step="0.01" value={formData.selling_price_kes} onChange={e => setFormData({...formData, selling_price_kes: e.target.value})} />
+            </div>
+
+            <button type="submit" className="w-full bg-[#020617] text-white py-3.5 rounded-xl font-black uppercase text-xs tracking-widest hover:bg-teal-600 transition-colors">
+              Save Record Entry
+            </button>
+          </form>
+        </Modal>
+      )}
+
+      {/* EDIT MODAL PANEL */}
+      {showPricingModal && (
+        <Modal title={`Modify Profile: ${formData.sku}`} close={() => setShowPricingModal(false)}>
+          <form onSubmit={handleUpdateProductData} className="p-6 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <Input label="Generic Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">Type</label>
+                <select 
+                  className="w-full bg-slate-50 rounded-xl p-3.5 font-bold text-slate-900 border border-slate-100 text-sm outline-none" 
+                  value={formData.dosage_form} 
+                  onChange={e => setFormData({...formData, dosage_form: e.target.value})}
+                >
+                  <option value="TABLET">Tablet</option>
+                  <option value="VIAL">Vial</option>
+                  <option value="SYRUP">Syrup</option>
+                </select>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <Input label="Strength" placeholder="e.g. 250mg" value={formData.strength} onChange={e => setFormData({...formData, strength: e.target.value})} />
+              <Input label="Reorder Level" type="number" value={formData.reorder_level} onChange={e => setFormData({...formData, reorder_level: e.target.value})} />
+            </div>
+
+            <Input label="Retail Price (Ksh)" type="number" step="0.01" value={formData.selling_price_kes} onChange={e => setFormData({...formData, selling_price_kes: e.target.value})} />
+            
+            <button type="submit" className="w-full bg-teal-600 text-white py-3.5 rounded-xl font-black uppercase text-xs tracking-widest hover:bg-slate-900 transition-colors">
+              Update Record Modification
+            </button>
+          </form>
         </Modal>
       )}
     </div>
   );
 };
 
-// Layout Components
 const Modal = ({ title, close, children }) => (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-        <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <h3 className="text-xl font-black text-slate-900 uppercase italic">{title}</h3>
-                <button onClick={close} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-400"><X size={24}/></button>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+        <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-slate-100">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight italic">{title}</h3>
+                <button onClick={close} className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400"><X size={18}/></button>
             </div>
             {children}
         </div>
     </div>
 );
 
-const AnalyticsCard = ({ label, value, icon, color }) => (
-    <div className={`bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl group hover:border-teal-500 transition-all`}>
-        <div className={`p-4 bg-${color}-50 text-${color}-500 rounded-2xl w-fit group-hover:scale-110 transition-transform`}>{icon}</div>
-        <h4 className="text-3xl font-black text-slate-950 mt-6 tracking-tighter">{value}</h4>
-        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">{label}</p>
-    </div>
-);
-
 const Input = ({ label, ...props }) => (
-    <div className="space-y-2">
-        <label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">{label}</label>
-        <input {...props} className="w-full bg-slate-50 border-none rounded-2xl p-4 font-bold text-slate-900 placeholder:text-slate-300 outline-none focus:ring-2 focus:ring-teal-500 transition-all" required />
+    <div className="space-y-1 w-full">
+        <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1">{label}</label>
+        <input {...props} className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3.5 font-bold text-slate-900 text-sm outline-none focus:ring-2 focus:ring-teal-500" required />
     </div>
 );
 
-export default InventoryManager;
+export default PharmacyInventory;

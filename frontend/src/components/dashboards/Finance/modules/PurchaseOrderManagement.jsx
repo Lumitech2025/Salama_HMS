@@ -283,12 +283,24 @@ export default function PurchaseOrderManagement({ prefilledData, clearPrefilledD
     e.preventDefault();
     setLoading(true);
     try {
+      // 1. Map through items and sanitize the expiry_date string for non-clinical categories
+      const processedItems = grnForm.items_received.map(item => {
+        const isNonExpiring = item.category === 'MARKETING' || item.category === 'ADMIN';
+        return {
+          ...item,
+          // If it's marketing/admin, explicitly force null. Otherwise, pass the date string (or null if blank).
+          expiry_date: isNonExpiring ? null : (item.expiry_date || null)
+        };
+      });
+
+      // 2. Build the payload using the sanitized 'processedItems' array
       const payload = {
         purchase_order: grnForm.purchase_order,
         delivery_note_ref: grnForm.delivery_note_ref,
         date_received: grnForm.date_received,
-        items_received_raw: grnForm.items_received
+        items_received_raw: processedItems // Hooked up the sanitized items here
       };
+      
       await API.post('/goods-received-notes/', payload, getAuthConfig());
       setShowCreateModal(false);
       setGrnForm({ purchase_order: '', delivery_note_ref: '', date_received: new Date().toISOString().split('T')[0], items_received: [] });
@@ -589,12 +601,20 @@ export default function PurchaseOrderManagement({ prefilledData, clearPrefilledD
                       </div>
 
                       <div className="col-span-2.5 space-y-1">
-                        <label className="text-[9px] font-bold text-slate-400 uppercase">Expiry Date</label>
+                        <label className="text-[9px] font-bold text-slate-400 uppercase">
+                          Expiry Date { (item.category === 'MARKETING' || item.category === 'ADMIN') && <span className="text-amber-500 font-black"></span> }
+                        </label>
                         <input 
                           type="date" 
-                          required 
-                          value={item.expiry_date || ''} 
-                          className="w-full bg-white border rounded-xl py-2.5 px-2 text-xs font-bold outline-none border-slate-200 focus:border-teal-500" 
+                          // Dynamically remove required and disable field for non-clinical items
+                          required={item.category !== 'MARKETING' && item.category !== 'ADMIN'} 
+                          disabled={item.category === 'MARKETING' || item.category === 'ADMIN'} 
+                          value={(item.category === 'MARKETING' || item.category === 'ADMIN') ? '' : (item.expiry_date || '')} 
+                          className={`w-full border rounded-xl py-2.5 px-2 text-xs font-bold outline-none transition-all ${
+                            (item.category === 'MARKETING' || item.category === 'ADMIN') 
+                              ? 'bg-slate-200 text-slate-400 cursor-not-allowed border-slate-300' 
+                              : 'bg-white border-slate-200 focus:border-teal-500'
+                          }`} 
                           onChange={(e) => handleGrnItemChange(index, 'expiry_date', e.target.value)} 
                         />
                       </div>
@@ -786,7 +806,7 @@ export default function PurchaseOrderManagement({ prefilledData, clearPrefilledD
           )
         )}
 
-        {/* TAB 2: GOODS RECEIVED NOTES (GRN) */}
+{/* TAB 2: GOODS RECEIVED NOTES (GRN) */}
         {!loading && currentMasterTab === 'GRNS' && (
           selectedGRN ? (
             <div className="p-12 animate-in fade-in duration-300">
@@ -810,23 +830,34 @@ export default function PurchaseOrderManagement({ prefilledData, clearPrefilledD
                         <th className="pb-2 text-center">Ordered Qty</th>
                         <th className="pb-2 text-center">Received Qty</th>
                         <th className="pb-2 text-center">Damaged Qty</th>
+                        <th className="pb-2 text-center">Expiry Date</th>
                         <th className="pb-2 text-right">Satisfaction Level</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedGRN.items_received?.map((item, idx) => (
-                        <tr key={idx} className="border-b border-white">
-                          <td className="py-3 font-bold">{item.item_name}</td>
-                          <td className="py-3 text-center text-slate-500">{item.ordered_quantity}</td>
-                          <td className="py-3 text-center text-teal-600 font-bold">{item.quantity_received}</td>
-                          <td className="py-3 text-center text-rose-500 font-bold">{item.damaged_quantity}</td>
-                          <td className="py-3 text-right">
-                            <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${item.satisfaction_level?.includes('Good') || item.satisfaction_level?.includes('Satisfactory') ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-                              {item.satisfaction_level === 'GoodCondition' ? 'Good Condition' : item.satisfaction_level}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {selectedGRN.items_received?.map((item, idx) => {
+                        const isNonExpiring = item.category === 'MARKETING' || item.category === 'ADMIN';
+                        return (
+                          <tr key={idx} className="border-b border-white">
+                            <td className="py-3 font-bold">{item.item_name}</td>
+                            <td className="py-3 text-center text-slate-500">{item.ordered_quantity}</td>
+                            <td className="py-3 text-center text-teal-600 font-bold">{item.quantity_received}</td>
+                            <td className="py-3 text-center text-rose-500 font-bold">{item.damaged_quantity}</td>
+                            <td className="py-3 text-center">
+                              {isNonExpiring ? (
+                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider bg-slate-200/60 px-2 py-0.5 rounded">N/A</span>
+                              ) : (
+                                <span className="font-mono text-slate-600">{item.expiry_date || '—'}</span>
+                              )}
+                            </td>
+                            <td className="py-3 text-right">
+                              <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${item.satisfaction_level?.includes('Good') || item.satisfaction_level?.includes('Satisfactory') ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                                {item.satisfaction_level === 'GoodCondition' ? 'Good Condition' : item.satisfaction_level}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

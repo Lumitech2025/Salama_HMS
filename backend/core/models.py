@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models, transaction
 from django.conf import settings
 from django.utils import timezone
@@ -14,6 +16,8 @@ import random
 import datetime
 
 from authentication.models import User
+from core import apps
+from django.apps import apps
 
 # --- Clinical Models ---
 
@@ -420,21 +424,6 @@ class ImagingRecord(models.Model):
     image_url = models.URLField(blank=True) # Link to PACS or Cloud storage
     findings = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
-
-class Drug(models.Model):
-    name = models.CharField(max_length=255)
-    batch_no = models.CharField(max_length=100)
-    stock_quantity = models.PositiveIntegerField()
-    expiry_date = models.DateField(null=True) 
-    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.name} ({self.batch_no})"
-
-    @property
-    def is_expired(self):
-        return date.today() >= self.expiry_date if self.expiry_date else False
 
 
 class Bill(models.Model):
@@ -1070,7 +1059,6 @@ class GoodsReceivedNote(models.Model):
 
 
 class GRNItem(models.Model):
-    """Granular verification tracking for each received item"""
     SATISFACTION_CHOICES = [
         ('GoodCondition', 'Good Condition'),
         ('Satisfactory', 'Satisfactory'),
@@ -1084,9 +1072,94 @@ class GRNItem(models.Model):
     quantity_received = models.PositiveIntegerField()
     damaged_quantity = models.PositiveIntegerField(default=0)
     satisfaction_level = models.CharField(max_length=30, choices=SATISFACTION_CHOICES, default='GoodCondition')
+    expiry_date = models.DateField(null=True, blank=True, help_text="Leave blank for non-expiring clinical/marketing products")
 
     def __str__(self):
         return f"{self.item_name} on {self.goods_received_note.grn_number}"
+
+    def save(self, *args, **kwargs):
+        # 1. Resolve parent department, dosage form, and strength details via matching PO Item
+        target_department = 'PHARMACY'
+        dosage_val = 'TABLET'
+        strength_val = 'GEN'
+        
+        po = self.goods_received_note.purchase_order
+        matched_po_item = po.items.filter(item_name=self.item_name).first()
+        
+        if matched_po_item:
+            target_department = matched_po_item.category
+            # Read structural data properties if defined on your PO lines layout
+            if hasattr(matched_po_item, 'dosage_form') and matched_po_item.dosage_form:
+                dosage_val = matched_po_item.dosage_form
+            if hasattr(matched_po_item, 'strength') and matched_po_item.strength:
+                strength_val = "".join(matched_po_item.strength.split()).upper()
+
+        # 2. Compute Custom SKU Variant using our unified logic
+        clean_name = "".join(self.item_name.split()).upper()[:6]
+        computed_sku = f"PHA-{clean_name}-{strength_val}"
+
+        # 3. Compute Expiry-Driven Batch Code Variant
+        if self.expiry_date:
+            month = str(self.expiry_date.month).zfill(2)
+            year = self.expiry_date.year
+            computed_batch = f"SCC-INV-{month}/{year}"
+        else:
+            timestamp = timezone.now().strftime("%m%y")
+            computed_batch = f"SCC-NONEXP-{timestamp}"
+
+        # Save this physical line item entry 
+        super().save(*args, **kwargs)
+
+        # Calculate exact usable units safely
+        usable_units = max(0, self.quantity_received - self.damaged_quantity)
+        unit_cost_val = matched_po_item.unit_cost if matched_po_item else Decimal('0.00')
+
+        # 4. LEVEL 1 WORKFLOW: Automate Entry to Main Store Warehouse Ledger
+        InventoryItem = apps.get_model('core', 'InventoryItem')
+        existing_stock = InventoryItem.objects.filter(sku=computed_sku, batch_number=computed_batch).first()
+
+        if existing_stock:
+            existing_stock.quantity_available += usable_units
+            existing_stock.save()
+        else:
+            InventoryItem.objects.create(
+                name=self.item_name,
+                sku=computed_sku,
+                batch_number=computed_batch,
+                dosage_form=dosage_val,
+                strength=strength_val if strength_val != "GEN" else "",
+                quantity_available=usable_units,
+                cost_per_unit=unit_cost_val,
+                department=target_department,
+                expiry_date=self.expiry_date
+            )
+
+        # 5. LEVEL 2 WORKFLOW: Cascade Downstream to Retail Point-of-Sale (Pharmacy Store)
+        if target_department == 'PHARMACY':
+            # Use dynamic apps fetch to preserve strict separation of modules
+            Drug = apps.get_model('core', 'Drug')
+            
+            # Deduplicate Pharmacy Stock using unique SKU + Batch mapping
+            existing_drug = Drug.objects.filter(sku=computed_sku, batch_no=computed_batch).first()
+            
+            if existing_drug:
+                existing_drug.stock_quantity += usable_units
+                existing_drug.save()
+            else:
+                # Automate retail point markup pricing baseline (e.g., + 33% standard healthcare buffer markup)
+                computed_retail_price = Decimal(float(unit_cost_val) * 1.33)
+                
+                Drug.objects.create(
+                    name=self.item_name,
+                    sku=computed_sku,
+                    batch_no=computed_batch,
+                    dosage_form=dosage_val,
+                    strength=strength_val if strength_val != "GEN" else "",
+                    stock_quantity=usable_units,
+                    cost_price_unit=unit_cost_val,
+                    selling_price_kes=computed_retail_price,
+                    expiry_date=self.expiry_date
+                )
 
 
 class PurchaseInvoice(models.Model):
@@ -1340,17 +1413,77 @@ class InventoryItem(models.Model):
         ('ADMIN', 'General Admin'),
     ]
 
+    DOSAGE_CHOICES = [
+        ('TABLET', 'Tablet'),
+        ('VIAL', 'Vial'),
+        ('SYRUP', 'Syrup'),
+    ]
+
     name = models.CharField(max_length=255)
+    sku = models.CharField(max_length=100, blank=True, null=True)
+    dosage_form = models.CharField(max_length=20, choices=DOSAGE_CHOICES, default='TABLET')
+    strength = models.CharField(max_length=50, blank=True, null=True)
     quantity_available = models.IntegerField(default=0)
     cost_per_unit = models.DecimalField(max_digits=12, decimal_places=2)
     department = models.CharField(max_length=50, choices=DEPARTMENT_CHOICES)
-    batch_number = models.CharField(max_length=100)
-    expiry_date = models.DateField(null=True, blank=True) # Optional
     
+    # batch_number can now be blank because the backend will auto-compute it
+    batch_number = models.CharField(max_length=100, blank=True)
+    expiry_date = models.DateField(null=True, blank=True)
+    reorder_level = models.PositiveIntegerField(default=50)
     added_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        # Generate SKU automatically if missing
+        if not self.sku and self.name:
+            clean_name = "".join(self.name.split()).upper()[:6]
+            clean_strength = "".join(self.strength.split()).upper() if self.strength else "GEN"
+            self.sku = f"PHA-{clean_name}-{clean_strength}"
+
+        # Generate Batch Number if empty and an expiry date exists
+        if not self.batch_number and self.expiry_date:
+            month = str(self.expiry_date.month).zfill(2)
+            year = self.expiry_date.year
+            # Yields the precise SCC-INV-MM/YYYY structure
+            self.batch_number = f"SCC-INV-{month}/{year}"
+        elif not self.batch_number:
+            # Fallback for non-expiring assets
+            timestamp = timezone.now().strftime("%m%y")
+            self.batch_number = f"SCC-GEN-{timestamp}"
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.name} - {self.batch_number}"
+    
+class Drug(models.Model):
+    DOSAGE_CHOICES = [
+        ('TABLET', 'Tablet'),
+        ('VIAL', 'Vial'),
+        ('SYRUP', 'Syrup'),
+    ]
+
+    name = models.CharField(max_length=255)
+    sku = models.CharField(max_length=100, unique=True, blank=True, null=True)
+    batch_no = models.CharField(max_length=100) # Ingested from Main Store Batch No
+    dosage_form = models.CharField(max_length=20, choices=DOSAGE_CHOICES, default='TABLET') # Type
+    strength = models.CharField(max_length=50, blank=True, null=True) # Formulation power
+    stock_quantity = models.PositiveIntegerField(default=0) # Shop floor quantity available
+    reorder_level = models.PositiveIntegerField(default=50) # Threshold indicator
+    
+    # Pricing fields
+    cost_price_unit = models.DecimalField(max_digits=10, decimal_places=2, default=0.00) # Base cost from store
+    selling_price_kes = models.DecimalField(max_digits=10, decimal_places=2, default=0.00) # Patient retail cost
+    
+    expiry_date = models.DateField(null=True, blank=True) 
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.batch_no})"
+
+    @property
+    def is_expired(self):
+        return date.today() >= self.expiry_date if self.expiry_date else False
     
 class PsychologyEnrollment(models.Model):
     STAGE_CHOICES = [
