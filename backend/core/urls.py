@@ -58,7 +58,9 @@ from .views import (
     PatientBillingSearchViewSet, 
     PatientInvoiceViewSet,
     ImagingOrderViewSet, 
-    ImagingResultViewSet
+    ImagingResultViewSet,
+    MpesaPaymentTriggerView, 
+    mpesa_callback_webhook
 )
 
 class OptionalSlashRouter(DefaultRouter):
@@ -148,6 +150,8 @@ urlpatterns = [
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('patients/lookup/', patient_lookup, name='patient-lookup'),
     path('api/icd11/token/', ICD11TokenProxyView.as_view(), name='icd11-token'),
+    path('mpesa/trigger-push/', MpesaPaymentTriggerView.as_view(), name='mpesa_trigger_push'),
+    path('vitals/mpesa-callback/', mpesa_callback_webhook, name='mpesa_callback_webhook'),
 
     # Viewset endpoints
     path('', include(router.urls)), 
@@ -155,3 +159,4 @@ urlpatterns = [
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+

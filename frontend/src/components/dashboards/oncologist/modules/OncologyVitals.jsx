@@ -4,7 +4,7 @@ import {
     Calculator, Activity, Thermometer, Heart, 
     Wind, Scale, ChevronDown, User, AlertCircle, 
     CheckCircle2, Loader2, RefreshCcw, FlaskConical, MessageSquare, Save, Pill, ClipboardCheck,
-    Stethoscope, X, Image as ImageIcon
+    Stethoscope, X, Image as ImageIcon, Syringe
 } from 'lucide-react';
 
 import ICD10DiagnosisSearch from "@/components/ICD10DiagnosisSearch";
@@ -20,7 +20,7 @@ const AVAILABLE_LAB_TESTS = [
     { id: 'MALARIA_BS', sku: 'LAB-BS_MP', label: 'Blood Slide for Malaria' },
 ];
 
-// ✨ NEW: Radiology / Ultrasound Test Definitions mapping 1:1 with your signal triggers
+// Radiology / Ultrasound Test Definitions mapping 1:1 with your signal triggers
 const AVAILABLE_IMAGING_TESTS = [
     { id: 'US_CAROTID', sku: 'RAD-US_CAROTID', label: 'Ultrasound Carotid Study' },
     { id: 'US_DUPLEX_LOW_EXT', sku: 'RAD-US_DUPLEX_LOW_EXT', label: 'Ultrasound Duplex Lower Extremity' },
@@ -31,16 +31,30 @@ const AVAILABLE_IMAGING_TESTS = [
     { id: 'US_HEMODIALYSIS', sku: 'RAD-US_HEMODIALYSIS', label: 'Ultrasound Hemodialysis Access Study' },
 ];
 
+// ✨ NEW: Nurse Station Service Definitions matching backend signals exactly
+const AVAILABLE_NURSE_SERVICES = [
+    { id: 'WOUND_DRESSING', sku: 'NUR-WOUND', flag: 'has_wound_dressing', label: 'Wound Dressing Procedure' },
+    { id: 'CATHETER_CHANGE', sku: 'NUR-CATH', flag: 'has_catheter_change', label: 'Catheter Change' },
+    { id: 'PELVIC_SCREENING', sku: 'NUR-PELVIC', flag: 'has_pelvic_screening', label: 'Pelvic Screening' },
+];
+
 const INITIAL_LAB_STATE = {
     CBC: false, PSA: false, URINALYSIS: false, BG_CROSS: false,
     UE: false, LFT: false, MALARIA_BS: false
 };
 
-// ✨ NEW: Initial state tracking hook for Imaging checklist
+// Imaging checklist state holder
 const INITIAL_IMAGING_STATE = {
     US_CAROTID: false, US_DUPLEX_LOW_EXT: false, US_VENOUS_EXT: false,
     US_VENOUS_UNILA: false, US_DOPPLER_ABD_PEL: false, US_LIMITED_DUPLEX: false,
     US_HEMODIALYSIS: false
+};
+
+// ✨ NEW: Nurse procedures default checkbox state holder
+const INITIAL_NURSE_STATE = {
+    WOUND_DRESSING: false,
+    CATHETER_CHANGE: false,
+    PELVIC_SCREENING: false
 };
 
 const PRIMARY_SITE_CHOICES = [
@@ -77,11 +91,12 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     const [hasLabResults, setHasLabResults] = useState(false);
     const [doctorNote, setDoctorNote] = useState("");
     const [isSaving, setIsSaving] = useState(false);
-    const [isSavingImaging, setIsSavingImaging] = useState(false); // Separated loader for radiology context
+    const [isSavingImaging, setIsSavingImaging] = useState(false); 
+    const [isSavingNurse, setIsSavingNurse] = useState(false); // ✨ NEW: Dedicated loader state for nurse submissions
     const [labRequests, setLabRequests] = useState(INITIAL_LAB_STATE);
-    const [imagingRequests, setImagingRequests] = useState(INITIAL_IMAGING_STATE); // ✨ NEW: Imaging checklist state holder
+    const [imagingRequests, setImagingRequests] = useState(INITIAL_IMAGING_STATE); 
+    const [nurseRequests, setNurseRequests] = useState(INITIAL_NURSE_STATE); // ✨ NEW: Nurse procedures selection state tracker
 
-    // Backend price catalogs are silently retained to ensure downstream data integrity
     const [servicePrices, setServicePrices] = useState({});
     const [loadingPrices, setLoadingPrices] = useState(true);
 
@@ -89,17 +104,19 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     const [selectedDiagnoses, setSelectedDiagnoses] = useState([]); 
     const [isSavingDiagnosis, setIsSavingDiagnosis] = useState(false);
 
-    // Fetch live service catalog configurations for BOTH Lab and Radiology departments
+    // Fetch live service catalog configurations for Lab, Radiology, AND Nursing departments
     const fetchServicePrices = useCallback(async () => {
         try {
             setLoadingPrices(true);
-            const [labRes, radRes] = await Promise.all([
-                API.get('/services/', { params: { dept: 'LAB', active: true } }),
-                API.get('/services/', { params: { dept: 'RAD', active: true } })
+            const [labRes, radRes, nurRes] = await Promise.all([
+                API.get('/services/', { params: { dept: 'LAB', active: True } }),
+                API.get('/services/', { params: { dept: 'RAD', active: True } }),
+                API.get('/services/', { params: { dept: 'NUR', active: True } }) // ✨ NEW: Pull nurse pricing structures
             ]);
 
             const labData = labRes.data.results || labRes.data;
             const radData = radRes.data.results || radRes.data;
+            const nurData = nurRes.data.results || nurRes.data;
             
             const priceMap = {};
             if (Array.isArray(labData)) {
@@ -107,6 +124,9 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             }
             if (Array.isArray(radData)) {
                 radData.forEach(service => { priceMap[service.sku] = parseFloat(service.price); });
+            }
+            if (Array.isArray(nurData)) {
+                nurData.forEach(service => { priceMap[service.sku] = parseFloat(service.price); });
             }
             setServicePrices(priceMap);
         } catch (err) {
@@ -171,7 +191,8 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             setSelectedPatient(item);
             fetchPatientData(item);
             setLabRequests(INITIAL_LAB_STATE);
-            setImagingRequests(INITIAL_IMAGING_STATE); // Clear scans state upon switching tokens
+            setImagingRequests(INITIAL_IMAGING_STATE); 
+            setNurseRequests(INITIAL_NURSE_STATE); // Reset nursing selection state upon switching patients
             setDoctorNote("");
             setSelectedSite(null);
             setSelectedDiagnoses([]);
@@ -182,9 +203,13 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         setLabRequests(prev => ({ ...prev, [test]: !prev[test] }));
     };
 
-    // ✨ NEW: Radiology toggle tracker handler 
     const toggleImagingTest = (testId) => {
         setImagingRequests(prev => ({ ...prev, [testId]: !prev[testId] }));
+    };
+
+    // ✨ NEW: Toggle tracking handler for Nurse Procedures panel
+    const toggleNurseService = (serviceId) => {
+        setNurseRequests(prev => ({ ...prev, [serviceId]: !prev[serviceId] }));
     };
 
     const totalRequisitionCost = useMemo(() => {
@@ -197,7 +222,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         }, 0);
     }, [labRequests, servicePrices]);
 
-    // ✨ NEW: Requisition evaluation pricing logic tracking radiology selections
     const totalImagingRequisitionCost = useMemo(() => {
         return AVAILABLE_IMAGING_TESTS.reduce((sum, scan) => {
             if (imagingRequests[scan.id]) {
@@ -207,6 +231,17 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             return sum;
         }, 0);
     }, [imagingRequests, servicePrices]);
+
+    // ✨ NEW: Live pricing calculator for selected Nursing actions
+    const totalNurseRequisitionCost = useMemo(() => {
+        return AVAILABLE_NURSE_SERVICES.reduce((sum, service) => {
+            if (nurseRequests[service.id]) {
+                const price = servicePrices[service.sku] || 0;
+                return sum + price;
+            }
+            return sum;
+        }, 0);
+    }, [nurseRequests, servicePrices]);
 
     const handleToggleDiagnosis = (diagnosisItem) => {
         setSelectedDiagnoses(prev => {
@@ -308,7 +343,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         }
     };
 
-    // ✨ NEW: Radiology Submission & Queue Re-routing Handler
     const handleReferToRadiology = async () => {
         const activeOrderedScans = AVAILABLE_IMAGING_TESTS.filter(scan => imagingRequests[scan.id]);
 
@@ -321,7 +355,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         try {
             const visitId = selectedPatient.visit_id || selectedPatient.visit;
             
-            // Build key flags mapping matching variable billing signals expectations
             const imagingPayload = {
                 patient: selectedPatient.patient,
                 visit: visitId,
@@ -331,16 +364,12 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                 total_estimated_charge: totalImagingRequisitionCost
             };
 
-            // Dynamically inject boolean triggers onto order row instance matching backend map logic
             activeOrderedScans.forEach(scan => {
                 const flagName = `has_us_${scan.id.toLowerCase()}`;
                 imagingPayload[flagName] = true;
             });
 
-            // Dispatch post request to target model viewset path mapping
             await API.post('/imaging-orders/', imagingPayload);
-            
-            // Re-route tracking station context directly to Radiology workspace
             await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'RADIOLOGY' });
             
             alert(`Success: Requisition submitted. Patient token advanced to Radiology workflow queue.`);
@@ -355,6 +384,53 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             }
         } finally {
             setIsSavingImaging(false);
+        }
+    };
+
+    // ✨ NEW: Nurse Orders Submission & Re-routing Pipeline
+    const handleReferToNurse = async () => {
+        const activeOrderedServices = AVAILABLE_NURSE_SERVICES.filter(service => nurseRequests[service.id]);
+
+        if (activeOrderedServices.length === 0) {
+            alert("Select at least one nursing procedure.");
+            return;
+        }
+
+        setIsSavingNurse(true);
+        try {
+            const visitId = selectedPatient.visit_id || selectedPatient.visit;
+            
+            const nursePayload = {
+                patient: selectedPatient.patient,
+                visit: visitId,
+                status: 'PENDING',
+                doctor_notes: doctorNote || "",
+                total_estimated_charge: totalNurseRequisitionCost
+            };
+
+            // Inject the explicit boolean keys expected by models.py and signals.py
+            activeOrderedServices.forEach(srv => {
+                nursePayload[srv.flag] = true;
+            });
+
+            // 1. Posts the order -> automatically posts invoice line charges on backend via trigger_completed_nurse_charges signal
+            await API.post('/nurse-orders/', nursePayload);
+            
+            // 2. Re-routes tracking token context directly into the physical Nurse's workstation panel
+            await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'NURSE' });
+            
+            alert(`Success: Nursing requisition submitted. Patient advanced to Nurse desk queue.`);
+            setNurseRequests(INITIAL_NURSE_STATE);
+            onTabSwitch('home');
+        } catch (err) {
+            console.error("Nursing route initialization error:", err);
+            if (err.response && err.response.data) {
+                alert(`Backend Validation Failed: ${JSON.stringify(err.response.data)}`);
+            } else {
+                alert("Referral process halted. Please verify workstation queue configurations.");
+            }
+        } finally {
+            setIsSavingNurse(false);
         }
     };
 
@@ -475,12 +551,7 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                                 </div>
                             </div>
 
-                            {!selectedSite && (
-                                <div className="flex items-center gap-2 text-amber-600 bg-amber-50 border border-amber-200/60 p-3 rounded-xl text-xs font-semibold mt-2">
-                                    <AlertCircle size={14} />
-                                    <span>Primary site isolation filter must be actively targeted before querying live registries.</span>
-                                </div>
-                            )}
+                            
 
                             {selectedDiagnoses.length > 0 && (
                                 <div className="mt-6 border-t border-slate-100 pt-5 space-y-3">
@@ -504,24 +575,24 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                         </div>
 
                         {/* CLINICAL NOTES */}
-                        <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
-                            <div className="flex items-center justify-between mb-5">
-                                <div className="flex items-center gap-3">
-                                    <div className="bg-slate-900 p-2.5 rounded-xl text-white"><MessageSquare size={18} /></div>
-                                    <h4 className="text-md font-bold text-slate-900">Notes</h4>
+                            <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
+                                <div className="flex items-center justify-between mb-5">
+                                    <div className="flex items-center gap-3">
+                                        <div className="bg-slate-900 p-2.5 rounded-xl text-white"><MessageSquare size={18} /></div>
+                                        <h4 className="text-md font-bold text-slate-900">Notes</h4>
+                                    </div> {/* Reclosed the inner layout wrapper properly */}
+                                    <button onClick={handleSaveNotes} disabled={isSaving || !doctorNote} className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 transition-all disabled:opacity-50">
+                                        {isSaving ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>} Save Notes
+                                    </button>
                                 </div>
-                                <button onClick={handleSaveNotes} disabled={isSaving || !doctorNote} className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 transition-all disabled:opacity-50">
-                                    {isSaving ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>} Save Notes
-                                </button>
+                                <textarea 
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5 text-slate-800 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
+                                    rows="4"
+                                    placeholder="Enter clinical assessment findings and diagnostics summary..."
+                                    value={doctorNote}
+                                    onChange={(e) => setDoctorNote(e.target.value)}
+                                />
                             </div>
-                            <textarea 
-                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5 text-slate-800 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
-                                rows="4"
-                                placeholder="Enter clinical assessment findings and diagnostics summary..."
-                                value={doctorNote}
-                                onChange={(e) => setDoctorNote(e.target.value)}
-                            />
-                        </div>
 
                         {/* LAB REQUESTS PANEL */}
                         <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
@@ -559,7 +630,7 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                             </button>
                         </div>
 
-                        {/* ✨ NEW: RADIOLOGY / IMAGING REQUESTS PANEL */}
+                        {/* RADIOLOGY / IMAGING REQUESTS PANEL */}
                         <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
                             <div className="flex items-center justify-between mb-6">
                                 <div className="flex items-center gap-3">
@@ -587,64 +658,57 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
 
                             <button 
                                 onClick={handleReferToRadiology}
-                                disabled={isSavingImaging || isSaving}
-                                className="w-full mt-6 bg-purple-600 hover:bg-purple-700 text-white py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2.5 shadow-lg disabled:opacity-50"
+                                disabled={isSavingImaging}
+                                className="w-full mt-6 bg-purple-600 hover:bg-purple-700 text-white py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2.5 shadow-lg"
                             >
                                 {isSavingImaging ? <Loader2 className="animate-spin" size={18} /> : <ClipboardCheck size={18} />} 
                                 Submit Requisition to Radiology ({AVAILABLE_IMAGING_TESTS.filter(s => imagingRequests[s.id]).length} Checked)
                             </button>
                         </div>
 
-                        {/* PRESCRIPTION HUB */}
-                        <div className="bg-slate-950 border border-slate-900 rounded-[2.5rem] p-8 shadow-xl">
-                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                                <div>
-                                    <h3 className="text-md font-bold text-white flex items-center gap-2">
-                                        <Pill size={18} className="text-emerald-400" /> Medical Prescription Plan
-                                    </h3>
-                                    <p className="text-xs font-medium text-slate-400 mt-1">Deploy cytotoxic treatments, supportive regimens, or oncology therapy orders.</p>
+                        {/* ✨ NEW: NURSING STATION PROCEDURES PANEL */}
+                        <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-emerald-600 p-2.5 rounded-xl text-white"><Syringe size={18} /></div>
+                                    <h3 className="text-md font-bold text-slate-900">Nursing Procedures Requisition</h3>
                                 </div>
-                                <button onClick={() => onTabSwitch('prescriptions')} className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-lg whitespace-nowrap">
-                                    Issue Patient Prescription
-                                </button>
                             </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {AVAILABLE_NURSE_SERVICES.map((service) => {
+                                    return (
+                                        <div 
+                                            key={service.id} 
+                                            onClick={() => toggleNurseService(service.id)}
+                                            className={`flex items-center justify-between p-5 rounded-xl border-2 transition-all cursor-pointer ${nurseRequests[service.id] ? 'bg-emerald-50/60 border-emerald-500 shadow-sm' : 'bg-slate-50 border-transparent hover:border-slate-200'}`}
+                                        >
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className={`text-xs font-bold ${nurseRequests[service.id] ? 'text-emerald-900' : 'text-slate-600'}`}>{service.label}</span>
+                                            </div>
+                                            {nurseRequests[service.id] ? <CheckCircle2 size={18} className="text-emerald-600" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-300" />}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            <button 
+                                onClick={handleReferToNurse}
+                                disabled={isSavingNurse}
+                                className="w-full mt-6 bg-emerald-600 hover:bg-emerald-700 text-white py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2.5 shadow-lg"
+                            >
+                                {isSavingNurse ? <Loader2 className="animate-spin" size={18} /> : <ClipboardCheck size={18} />} 
+                                Submit Order to Nursing Desk ({AVAILABLE_NURSE_SERVICES.filter(n => nurseRequests[n.id]).length} Checked)
+                            </button>
                         </div>
+
                     </main>
-
-                    {/* RIGHT UTILITIES PANEL */}
-                    <aside className="lg:col-span-4 space-y-6">
-                        <section className="bg-gradient-to-br from-blue-600 to-indigo-700 p-6 rounded-[2rem] text-white shadow-xl relative overflow-hidden">
-                            <p className="text-[10px] font-black text-blue-100 uppercase tracking-widest mb-3">Body Surface Area (BSA)</p>
-                            <div className="text-5xl font-black tracking-tight mb-1 flex items-baseline">
-                                {vitals?.bsa || '0.00'}
-                                <span className="text-lg font-normal ml-1 opacity-80">m²</span>
-                            </div>
-                            <p className="text-[10px] opacity-75 font-semibold tracking-wide">Critical index value required for safe cytotoxic dosing setup</p>
-                            <Calculator size={80} className="absolute -right-4 -bottom-4 text-white/10 pointer-events-none" />
-                        </section>
-
-                        <div className="bg-white border border-slate-100 text-slate-900 p-6 rounded-[2rem] shadow-md">
-                            <h3 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
-                                <CheckCircle2 size={14} className="text-blue-500"/> Pipeline Utilities
-                            </h3>
-                            <div className="space-y-3">
-                                {hasLabResults ? (
-                                    <button onClick={() => onTabSwitch('lab')} className="w-full bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 py-4 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2">
-                                        <FlaskConical size={16} /> Review Lab Results
-                                    </button>
-                                ) : (
-                                    <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 text-center">
-                                        <p className="text-xs font-medium text-slate-400">No active lab results ready for inspection</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </aside>
                 </div>
             ) : (
-                <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2.5rem] p-24 text-center shadow-sm">
-                    <Activity size={48} className="mx-auto text-slate-300 mb-4 animate-pulse" />
-                    <p className="text-slate-500 font-bold tracking-wide text-xs">Select a patient to load the health records.</p>
+                <div className="bg-slate-50 border border-dashed border-slate-200 py-24 rounded-[2.5rem] text-center max-w-xl mx-auto">
+                    <User className="mx-auto text-slate-300 mb-4" size={40} />
+                    <h3 className="text-lg font-bold text-slate-800">No Patient Session Active</h3>
+                    <p className="text-xs font-medium text-slate-400 mt-1 px-6">Select an waiting record token using the drop-down queue controller above to view vitals metrics and assign diagnostics trackers.</p>
                 </div>
             )}
         </div>

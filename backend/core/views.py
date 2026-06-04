@@ -25,6 +25,9 @@ from django.db.models import Q
 import requests
 from django.conf import settings
 from django.core.cache import cache
+from django.shortcuts import get_object_or_404
+from .mpesa import MpesaClient
+import logging
 
 from appointments.utils import dispatch_async_notifications
 
@@ -1698,3 +1701,64 @@ class PatientInvoiceViewSet(viewsets.ModelViewSet):
             "message": f"Invoice KES {invoice.total_payable:,} successfully cleared via {payment_method}.",
             "invoice_id": invoice.id
         }, status=status.HTTP_200_OK)
+    
+
+logger = logging.getLogger(__name__)
+
+class MpesaPaymentTriggerView(APIView):
+    """Triggers the STK Push when called by our React POS frontend."""
+    def post(self, request):
+        invoice_id = request.data.get("invoice_id")
+        phone_number = request.data.get("phone_number")
+        
+        if not invoice_id or not phone_number:
+            return Response({"error": "Missing invoice_id or phone_number"}, status=400)
+            
+        invoice = get_object_or_404(PatientInvoice, id=invoice_id)
+        
+        # Calculate invoice sum dynamically
+        total_amount = sum(item.quantity * item.unit_price for item in invoice.billable_items.all())
+        if total_amount <= 0:
+            return Response({"error": "Cannot bill an empty invoice ledger"}, status=400)
+
+        client = MpesaClient()
+        result = client.send_stk_push(phone_number, total_amount, invoice.id)
+        
+        if result["status"] == "success":
+            invoice.mpesa_checkout_id = result["checkout_request_id"]
+            invoice.status = "PROCESSING"
+            invoice.save()
+            return Response({"message": "STK Push sent!", "checkout_id": result["checkout_request_id"]})
+            
+        return Response({"error": result["message"]}, status=500)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def mpesa_callback_webhook(request):
+    """Public webhook that receives Safaricom's real-time transaction updates via ngrok."""
+    stk_callback = request.data.get("Body", {}).get("stkCallback", {})
+    result_code = stk_callback.get("ResultCode")
+    checkout_id = stk_callback.get("CheckoutRequestID")
+    
+    try:
+        invoice = PatientInvoice.objects.get(mpesa_checkout_id=checkout_id)
+    except PatientInvoice.DoesNotExist:
+        logger.error(f"Unknown checkout id returned: {checkout_id}")
+        return Response({"ResultCode": 1, "ResultDesc": "Mismatch"}, status=404)
+
+    if result_code == 0:  # Code 0 = Success!
+        callback_metadata = stk_callback.get("CallbackMetadata", {}).get("Item", [])
+        mpesa_receipt = next((item.get("Value") for item in callback_metadata if item.get("Name") == "MpesaReceiptNumber"), None)
+                
+        invoice.status = "PAID"
+        invoice.receipt_number = mpesa_receipt
+        invoice.payment_method = "MPESA"
+        invoice.save()
+        
+        return Response({"ResultCode": 0, "ResultDesc": "Success acknowledged"}, status=200)
+    else:
+        # Code rejected or timed out by patient
+        invoice.status = "UNPAID"
+        invoice.save()
+        return Response({"ResultCode": 0, "ResultDesc": "Failure acknowledged"}, status=200)

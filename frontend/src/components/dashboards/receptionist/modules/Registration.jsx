@@ -172,9 +172,7 @@ const Registration = () => {
         
         {/* BLOCK 1: PRIMARY DEMOGRAPHICS (With HRN incorporated under identification) */}
         <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
-          <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2 mb-2">
-            <FileText size={14} className="text-slate-400" /> 1. Core Identification & Demographics
-          </h3>
+          
           <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-6">
             <FormInput label="National ID / Passport" name="id_number" value={formData.id_number} onChange={handleChange} required />
             <FormInput label="First Name" name="first_name" value={formData.first_name} onChange={handleChange} required />
@@ -211,14 +209,14 @@ const Registration = () => {
         {/* BLOCK 2: NEXT OF KIN RELATIONAL DATA */}
         <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
           <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2 mb-2">
-            <Contact2 size={14} className="text-slate-400" /> 2. Next of Kin / Relational Contacts
+            <Contact2 size={14} className="text-slate-400" /> 2. Next of Kin
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <FormInput label="Next of Kin Full Name" name="next_of_kin_name" value={formData.next_of_kin_name} onChange={handleChange} required />
             
             {/* FIXED: Modified from text field to select component dropdown options */}
             <div className="space-y-2">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Relationship</label>
+              <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-2">Relationship</label>
               <select 
                 name="next_of_kin_relationship" 
                 value={formData.next_of_kin_relationship} 
@@ -241,12 +239,10 @@ const Registration = () => {
 
         {/* BLOCK 3: FINANCIAL COVER */}
         <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
-          <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2 mb-2">
-            <Layers size={14} className="text-slate-400" /> 3. Coverage Allocation & Status Flags
-          </h3>
+          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="space-y-2">
-              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Mode of Payment</label>
+              <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-2">Mode of Payment</label>
               <select name="payment_mode" value={formData.payment_mode} onChange={handleChange} className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold outline-none appearance-none cursor-pointer">
                 <option value="CASH">Cash Payment</option>
                 <option value="INSURANCE">Insurance Cover</option>

@@ -4,7 +4,7 @@ from .models import (
     Queue, 
     LabOrder, 
     ImagingOrder, 
-    NurseServiceOrder,  # Added new model import
+    NurseServiceOrder,
     PatientInvoice, 
     PatientBillableItem, 
     Service
@@ -53,15 +53,19 @@ def trigger_station_checkin_charges(sender, instance, created, **kwargs):
             ).exists()
 
             if not already_billed:
-                # Ensure structure matches unit price and name defaults if required
+                # Build extra field parameters safely depending on database attributes
+                extra_fields = {}
+                if hasattr(PatientBillableItem, 'unit_price'):
+                    extra_fields['unit_price'] = matching_service.price
+                if hasattr(PatientBillableItem, 'name'):
+                    extra_fields['name'] = matching_service.name
+
+                # ✅ FIXED: Flattened arguments passed cleanly directly into create()
                 PatientBillableItem.objects.create(
                     invoice=invoice,
                     service=matching_service,
                     quantity=1,
-                    defaults={
-                        'unit_price': matching_service.price,
-                        'name': matching_service.name
-                    } if hasattr(PatientBillableItem, 'unit_price') else {}
+                    **extra_fields
                 )
 
 
@@ -164,27 +168,36 @@ def trigger_completed_imaging_charges(sender, instance, created=False, **kwargs)
 @receiver(post_save, sender=NurseServiceOrder)
 def trigger_completed_nurse_charges(sender, instance, created=False, **kwargs):
     """
-    ✨ NEW: Listens to Nurse Service Orders.
-    Fires on creation/update to parse active nursing service flags (Wound Dressing, 
-    Catheter Change, Pelvic Screening) and maps them cleanly onto the invoice ledger.
+    Listens to Nurse Service Orders.
+    Fires on creation/update to parse active nursing service flags, maps them cleanly 
+    onto the invoice ledger, AND synchronizes the patient's queue tracker to the NURSE station.
     """
     if not instance.visit:
         return
 
-    # Fetch or initialize the active open tracking invoice ledger
+    # 1. Fetch or initialize the active open tracking invoice ledger
     invoice, _ = PatientInvoice.objects.get_or_create(
         visit=instance.visit,
         patient=instance.patient,
         defaults={'status': 'UNPAID'}
     )
 
-    # Dictionary mapping internal nursing boolean parameters to explicit billing SKUs
+    # 2. ✨ NEW: Auto-route the patient's active queue tracking to the NURSE station
+    # This automatically activates the 'TRIGGERED' base check-in fee signal!
+    Queue.objects.filter(
+        visit=instance.visit, 
+        patient=instance.patient
+    ).update(current_station='NURSE')
+
+    # 3. Dictionary mapping internal nursing boolean parameters to explicit billing SKUs
     nurse_service_sku_map = {
         'has_wound_dressing': 'NUR-WOUND',
         'has_catheter_change': 'NUR-CATH',
         'has_pelvic_screening': 'NUR-PELVIC',
     }
 
+    # Collect all valid SKUs that are marked True on this instance
+    active_skus = []
     for flag_attr, service_sku in nurse_service_sku_map.items():
         if hasattr(instance, flag_attr):
             is_service_selected = getattr(instance, flag_attr, False)
@@ -193,16 +206,32 @@ def trigger_completed_nurse_charges(sender, instance, created=False, **kwargs):
             is_service_selected = getattr(instance, alt_attr, False)
 
         if is_service_selected:
-            matching_service = Service.objects.filter(sku=service_sku, active=True).first()
-            
-            if matching_service:
-                base_price = matching_service.price
-                PatientBillableItem.objects.get_or_create(
-                    invoice=invoice,
-                    service=matching_service,
-                    defaults={
-                        'quantity': 1,
-                        'unit_price': base_price,
-                        'name': matching_service.name
-                    }
-                )
+            active_skus.append(service_sku)
+
+    if not active_skus:
+        return
+
+    # Bulk fetch all matching services from the master catalog in one database query
+    matching_services = Service.objects.filter(sku__in=active_skus, active=True)
+
+    # Find what has already been billed on this invoice to prevent duplicate lines
+    already_billed_skus = PatientBillableItem.objects.filter(
+        invoice=invoice,
+        service__sku__in=active_skus
+    ).values_list('service__sku', flat=True)
+
+    # Safely create billable items for any newly selected services
+    for service in matching_services:
+        if service.sku not in already_billed_skus:
+            extra_fields = {}
+            if hasattr(PatientBillableItem, 'unit_price'):
+                extra_fields['unit_price'] = service.price
+            if hasattr(PatientBillableItem, 'name'):
+                extra_fields['name'] = service.name
+
+            PatientBillableItem.objects.create(
+                invoice=invoice,
+                service=service,
+                quantity=1,
+                **extra_fields
+            )

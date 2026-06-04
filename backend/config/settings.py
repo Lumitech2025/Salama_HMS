@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'core',
     'django_filters',
+    'django_extensions',
 ]
 
 AUTH_USER_MODEL = 'authentication.User'
@@ -279,3 +280,11 @@ JAZZMIN_UI_TWEAKS = {
 }
 
 APPEND_SLASH = True
+
+MPESA_CONSUMER_KEY = os.environ.get("MPESA_CONSUMER_KEY")
+MPESA_CONSUMER_SECRET = os.environ.get("MPESA_CONSUMER_SECRET")
+MPESA_SHORTCODE = os.environ.get("MPESA_SHORTCODE", "174379")
+MPESA_PASSKEY = os.environ.get("MPESA_PASSKEY")
+
+MPESA_ENVIRONMENT = "sandbox" 
+MPESA_CALLBACK_URL = os.environ.get("MPESA_CALLBACK_URL")
