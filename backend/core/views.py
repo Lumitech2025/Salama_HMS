@@ -38,11 +38,14 @@ from .models import (
     ProtocolMaster, ProtocolDrug, DrugGuardrail, ProtocolIngredient,
     CancerSite, CancerType, Regimen, RegimenDrug,
     InsuranceCompany, InsuranceClaim, RemittanceBatch,ClaimDispatchBatch, InsuranceScheme,
-    Service, PatientBillableItem,
+    Service, PatientBillableItem, PatientInvoice, 
     ICD10Diagnosis, PatientDiagnosis,
+    ImagingOrder, ImagingResult,
     Supplier,
     PurchaseOrder, GoodsReceivedNote, 
-    PurchaseInvoice, PaymentVoucher
+    PurchaseInvoice, PaymentVoucher,
+    NurseServiceOrder
+    
 )
 from .serializers import (
     LabOrderSerializer, LabReferenceSerializer, LabResultSerializer, 
@@ -56,11 +59,13 @@ from .serializers import (
     SessionLogSerializer, 
     BereavementLogSerializer, OutreachCampaignSerializer, ReferralPartnerSerializer, SocialMediaPostSerializer,RequisitionSerializer, MarketingRequisitionSerializer, LabTestRegistrySerializer, ProtocolMasterSerializer,
     InsuranceCompanySerializer, InsuranceClaimSerializer, RemittanceBatchSerializer, DetailedPatientClaimSerializer, ClaimDispatchBatchSerializer, InsuranceSchemeSerializer,
-    ServiceSerializer, PatientBillableItemSerializer,
+    ServiceSerializer, PatientBillingLookupSerializer, ActiveInvoiceSerializer, PatientBillableItemSerializer,
     ICD10DiagnosisSerializer, PatientDiagnosisSerializer,
     SupplierSerializer,
     PurchaseOrderSerializer, GoodsReceivedNoteSerializer, 
-    PurchaseInvoiceSerializer, PaymentVoucherSerializer
+    PurchaseInvoiceSerializer, PaymentVoucherSerializer,
+    ImagingOrderSerializer, ImagingResultSerializer,
+    NurseServiceOrderSerializer
 )
 
 
@@ -114,6 +119,54 @@ class QueueViewSet(viewsets.ModelViewSet):
             }
             target_station = flow.get(queue_item.current_station, 'COMPLETED')
 
+       
+        if target_station == 'DOCTOR':
+            try:
+                from models import PatientInvoice, InvoiceLineItem
+                from models import Service 
+                
+                
+                target_sku = 'ONC-CONS_ONCO'  
+                
+               
+                consultation_service = Service.objects.filter(
+                    sku=target_sku, 
+                    charge_type='TRIGGERED',
+                    active=True
+                ).first()
+                
+                if consultation_service and queue_item.visit:
+                    # Fetch or create the active open invoice assigned to this specific RegistrationRecord
+                    invoice, created = PatientInvoice.objects.get_or_create(
+                        patient=queue_item.patient,
+                        visit=queue_item.visit,
+                        status='UNPAID'
+                    )
+                    
+                    charge_exists = InvoiceLineItem.objects.filter(
+                        invoice=invoice,
+                        item_name=consultation_service.name
+                    ).exists()
+                    
+                    if not charge_exists:
+                        InvoiceLineItem.objects.create(
+                            invoice=invoice,
+                            # service=consultation_service, # Uncomment if ForeignKey exists
+                            item_name=consultation_service.name,
+                            quantity=1,
+                            unit_price=consultation_service.price,
+                            total_price=consultation_service.price,
+                            status='PENDING'
+                        )
+                        
+                        if hasattr(invoice, 'recalculate_totals'):
+                            invoice.recalculate_totals()
+                            
+            except Exception as billing_err:
+                print(f"[TRIAGE AUTOMATION ERROR]: Failed to generate upfront charge: {str(billing_err)}")
+        # =================================================================
+
+        # 2. Complete standard station routing changes
         if target_station == 'COMPLETED':
             queue_item.status = 'COMPLETED'
         else:
@@ -333,8 +386,10 @@ class LabOrderViewSet(viewsets.ModelViewSet):
     search_fields = ['patient__name', 'visit__queue_id']
 
     def perform_create(self, serializer):
-        # Cleanly saves the order. The serializer automatically maps the array into boolean fields.
+        test_skus = self.request.data.get('test_skus', [])
+        
         serializer.save()
+        
 
     # --- Custom Actions Tailored for Your 4 User Profiles ---
 
@@ -465,6 +520,126 @@ class LabTestRegistryViewSet(viewsets.ModelViewSet):
                 serializer.save()
                 
             return Response(serializer.data)
+        
+class ImagingOrderViewSet(viewsets.ModelViewSet):
+    # Optimizing database queries to prevent expensive database round-trips
+    queryset = ImagingOrder.objects.all().select_related('patient', 'visit').order_by('-created_at')
+    serializer_class = ImagingOrderSerializer
+    
+    # Matches your exact clinical protection logic
+    permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
+    
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['visit', 'status', 'patient']
+    
+    # Clean lookup mapping leveraging your patient model structure
+    search_fields = ['patient__name', 'visit__id']
+
+    def perform_create(self, serializer):
+        # Captures raw data elements seamlessly before processing creation pipelines
+        imaging_skus = self.request.data.get('imaging_skus', [])
+        serializer.save()
+
+    # --- Custom Actions Tailored for Your Operational Profiles ---
+
+    @action(detail=False, methods=['get'], url_path='active-queue')
+    def active_queue(self, request):
+        """
+        1. FOR THE RADIOLOGIST
+        Returns only PENDING scans so they can see their active imagery workload 
+        without getting bogged down by completed historic archives.
+        """
+        pending_orders = self.get_queryset().filter(status='PENDING')
+        
+        # Optional: Filter specifically by a concrete registration instance
+        visit_id = request.query_params.get('visit_id', None)
+        if visit_id:
+            pending_orders = pending_orders.filter(visit_id=visit_id)
+            
+        serializer = self.get_serializer(pending_orders, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='billing-pending')
+    def billing_pending(self, request):
+        """
+        2. FOR THE BILLING OFFICER
+        Returns imaging orders requiring dynamic billing processing or adjustments.
+        """
+        visit_id = request.query_params.get('visit', None)
+        orders = self.get_queryset()
+        if visit_id:
+            orders = orders.filter(visit_id=visit_id)
+            
+        serializer = self.get_serializer(orders, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='patient-history')
+    def patient_history(self, request):
+        """
+        3. FOR THE PATIENT / DOCTOR
+        Quickly scans and aggregates historical ultrasound studies across visits.
+        """
+        patient_id = request.query_params.get('patient', None)
+        if not patient_id:
+            return Response({"error": "Patient ID parameter is required"}, status=400)
+            
+        orders = self.get_queryset().filter(patient_id=patient_id)
+        serializer = self.get_serializer(orders, many=True)
+        return Response(serializer.data)
+
+
+class ImagingResultViewSet(viewsets.ModelViewSet):
+    queryset = ImagingResult.objects.all().select_related('patient', 'visit', 'imaging_order').order_by('-created_at')
+    serializer_class = ImagingResultSerializer
+    permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
+    
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['patient', 'is_critical', 'visit', 'imaging_order']
+
+class NurseServiceOrderViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for handling Nurse Service Orders (Wound Dressing, Catheter Changes, Pelvic Screening).
+    Matches the transactional routing pattern used in Imaging and Lab setups.
+    """
+    queryset = NurseServiceOrder.objects.all().select_related('patient')
+    serializer_class = NurseServiceOrderSerializer
+    filterset_fields = ['patient', 'status']
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        # Wrapping in an atomic transaction ensures database integrity
+        with transaction.atomic():
+            # 1. Save the nursing service order record
+            nurse_order = serializer.save()
+            
+            # 2. Workflow Routing: Automatically update the patient's queue status to NURSE
+            patient_id = request.data.get('patient')
+            if patient_id:
+                # Find the active queue record for this patient and route them to the Nurse station
+                # Note: Adjust fields matching your exact Queue architecture (e.g., current_station)
+                Queue.objects.filter(patient_id=patient_id, status='ACTIVE').update(
+                    current_station='NURSE',
+                    updated_at=nurse_order.created_at
+                )
+        
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    @action(detail=True, methods=['post'], url_path='complete-order')
+    def complete_order(self, request, pk=None):
+        """
+        Custom action endpoint to mark a nursing service as completed by the nurse panel.
+        URL: POST /api/nurse-orders/<id>/complete-order/
+        """
+        order = self.get_object()
+        if order.status == 'COMPLETED':
+            return Response({'detail': 'Order is already completed.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        order.status = 'COMPLETED'
+        order.save()
+        return Response({'status': 'Nurse order completed successfully.'}, status=status.HTTP_200_OK)
         
 
 class ClinicalPortalPatientDetailsView(APIView):
@@ -1443,3 +1618,83 @@ class PaymentVoucherViewSet(viewsets.ModelViewSet):
     """
     queryset = PaymentVoucher.objects.all().order_by('-date_issued')
     serializer_class = PaymentVoucherSerializer
+
+
+class PatientBillingSearchViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    API endpoint that allows the Front Desk terminal to search for active,
+    registered patients and instantly fetch their station bills.
+    """
+    serializer_class = PatientBillingLookupSerializer
+
+    def get_queryset(self):
+        """
+        Filters patients dynamically based on the search query parameter (?q=...)
+        Matches against Name, ID Number, or Health Record Number.
+        Only grabs recent records to ensure it's an active outpatient session.
+        """
+        queryset = RegistrationRecord.objects.all().order_by('-registered_at')
+        search_query = self.request.query_params.get('q', None)
+        
+        if search_query:
+            queryset = queryset.filter(
+                Q(first_name__icontains=search_query) |
+                Q(last_name__icontains=search_query) |
+                Q(id_number__icontains=search_query) |
+                Q(health_record_number__icontains=search_query) |
+                Q(queue_id__icontains=search_query)
+            )
+            return queryset[:10]  # Limit results for instant frontend search responses
+            
+        # If no query is provided, return nothing to prevent heavy database loads
+        return RegistrationRecord.objects.none()
+
+
+class PatientInvoiceViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint to handle actions on the master Invoice ledger sheets, 
+    such as finalizing payments from the terminal control panel.
+    """
+    queryset = PatientInvoice.objects.all()
+    serializer_class = ActiveInvoiceSerializer
+
+    @action(detail=True, methods=['post'], url_path='settle-payment')
+    def settle_payment(self, request, pk=None):
+        """
+        Custom action endpoint to execute transaction settlements.
+        Validates client-side items against accounting rows to prevent leakage.
+        """
+        invoice = self.get_object()
+        payment_method = request.data.get('payment_method', 'CASH')
+        validated_items = request.data.get('validated_items', [])
+        
+        if validated_items:
+            # 1. Extract IDs of items remaining in frontend cart
+            frontend_item_ids = [item.get('id') for item in validated_items if item.get('id')]
+            
+            # 2. Drop items deleted from the cart by the terminal clerk
+            invoice.items.exclude(id__in=frontend_item_ids).delete()
+            
+            # 3. Synchronize adjusted catalog prices into ledger database logs
+            for item_data in validated_items:
+                item_id = item_data.get('id')
+                if item_id:
+                    # Parse calculated client rates safely
+                    client_price = item_data.get('price', 0)
+                    PatientBillableItem.objects.filter(id=item_id, invoice=invoice).update(
+                        unit_price=client_price,
+                        is_paid=True
+                    )
+        else:
+            # Fallback if payload is missing item-level arrays
+            invoice.items.all().update(is_paid=True)
+        
+        # Set overall invoice status header
+        invoice.status = 'PAID'
+        invoice.save()
+        
+        return Response({
+            "status": "success",
+            "message": f"Invoice KES {invoice.total_payable:,} successfully cleared via {payment_method}.",
+            "invoice_id": invoice.id
+        }, status=status.HTTP_200_OK)

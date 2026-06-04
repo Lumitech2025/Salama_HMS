@@ -35,7 +35,6 @@ const TriagePortal = () => {
 
     const fetchData = useCallback(async () => {
         try {
-            // Fetching only patients waiting at Triage
             const response = await API.get('/queue', {
                 params: {
                     current_station: 'TRIAGE',
@@ -96,13 +95,16 @@ const TriagePortal = () => {
             // 1. Save Vitals
             await API.post('/vitals', vitalsPayload);
 
-            // 2. Move to selected station using the new dynamic backend action
-            // IMPORTANT: Sending 'target_station' so the backend knows where to push the patient
             const moveResponse = await API.post(`/queue/${selectedPatient.queue_entry_id}/move_next`, {
                 target_station: nextStation 
             });
 
-            alert(`✅ Triage for ${selectedPatient.name} finalized. Patient moved to: ${moveResponse.data.next_station}`);
+            let alertMessage = `Triage for ${selectedPatient.name} finalized. Patient moved to: ${moveResponse.data.next_station}`;
+            if (nextStation === 'DOCTOR') {
+                alertMessage += `\n\n[BILLING NOTE]: Consultation charge generated. Patient must clear at Cashier before seeing the Doctor.`;
+            }
+
+            alert(alertMessage);
             
             // Reset UI
             setSelectedPatient(null);
@@ -232,6 +234,14 @@ const TriagePortal = () => {
                                 <div className="p-4 bg-white rounded-2xl shadow-sm group-hover:scale-110 transition-transform"><Ruler size={40} className="text-indigo-500" /></div>
                             </div>
                         </div>
+
+                        {/* VISUAL BILLING BANNER NOTICE */}
+                        {nextStation === 'DOCTOR' && selectedPatient && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-[2rem] p-6 flex items-center gap-4 text-amber-900 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                                
+                                
+                            </div>
+                        )}
                     </div>
 
                     <footer className="p-10 bg-slate-900 flex items-center justify-between gap-8">

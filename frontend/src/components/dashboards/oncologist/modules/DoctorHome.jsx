@@ -13,7 +13,6 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
     const [queue, setQueue] = useState([]); 
     const [searchQuery, setSearchQuery] = useState('');
     
-    // Exact dynamic helper targeting system timestamp strings safely
     const getTodayString = () => {
         const d = new Date();
         const year = d.getFullYear();
@@ -25,9 +24,8 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
     
     const [selectedDate, setSelectedDate] = useState(systemToday);
     
-    // Local internal state initialized from current selection to control calendar viewing windows
     const [currentYear, setCurrentYear] = useState(new Date(selectedDate).getFullYear());
-    const [currentMonth, setCurrentMonth] = useState(new Date(selectedDate).getMonth()); // 0-Indexed
+    const [currentMonth, setCurrentMonth] = useState(new Date(selectedDate).getMonth()); 
 
     const [stats, setStats] = useState({
         inQueue: 0,
@@ -40,22 +38,18 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
     const fetchDashboardData = useCallback(async () => {
         setLoading(true);
         try {
-            // 1. Fetch appointments for the SPECIFIC SELECTED DATE
             const resAppts = await API.get(`/appointments/?appointment_date=${selectedDate}`).catch(() => ({ data: [] }));
             const parsedAppts = resAppts.data.results || resAppts.data || [];
             setAppointments(parsedAppts);
 
-            // 2. Fetch LIVE QUEUE (Station: DOCTOR)
             const resQueue = await API.get('/queue?current_station=DOCTOR').catch(() => ({ data: [] }));
             const rawQueue = resQueue.data.results || resQueue.data || [];
             const activeQueue = rawQueue.filter(item => item.status === 'WAITING' || item.status === 'TRIAGED');
             setQueue(activeQueue);
 
-            // 3. Fetch KPI DATA strictly for Today
             const resTodayAppts = await API.get(`/appointments/?appointment_date=${systemToday}`).catch(() => ({ data: [] }));
             const resAnalytics = await API.get('/queue/analytics/?station=DOCTOR').catch(() => ({ data: {} }));
             
-            // Fixed: Safely compute lengths depending on if backend responds with standard paginated layout wrapper or explicit array
             const todayCount = resTodayAppts.data.count || resTodayAppts.data.results?.length || (Array.isArray(resTodayAppts.data) ? resTodayAppts.data.length : 0);
             const attendedBackend = resAnalytics.data.completed_today || 0;
             const totalHospitalAppts = resAnalytics.data.total_appointments || 0;
@@ -81,18 +75,23 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
         return () => clearInterval(interval);
     }, [fetchDashboardData]);
 
+    
     const handleAttendPatient = async (pat) => {
         try {
-            await API.patch(`/queue/${pat.id}/`, { status: 'UNDER_CONSULTATION' });
+            // Updated payload: Simply move status to active consultation without passing triggers
+            await API.patch(`/queue/${pat.id}/`, { 
+                status: 'UNDER_CONSULTATION'
+            });
+            
             setQueue(prev => prev.filter(item => item.id !== pat.id));
             onSelectPatient(pat);
         } catch (err) {
             console.error("Attend Error:", err);
+            // Graceful fallback UI management
             onSelectPatient(pat); 
         }
     };
 
-    // Calendar Navigation Logic
     const handlePrevMonth = () => {
         if (currentMonth === 0) {
             setCurrentMonth(11);
@@ -111,14 +110,12 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
         }
     };
 
-    // Safely calculate actual days in the current selected month to prevent rendering out-of-bounds days
     const totalDaysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
     const daysInMonthArray = Array.from({ length: totalDaysInMonth }, (_, i) => i + 1);
 
     const firstDayOfWeekIndex = new Date(currentYear, currentMonth, 1).getDay();
     const emptyPaddingSlots = Array.from({ length: firstDayOfWeekIndex });
 
-    // Dynamic Filter implementations for Search Input
     const filteredQueue = queue.filter(p => {
         const name = p.patient_name || "";
         const idNo = p.patient_id_no || "";
@@ -137,7 +134,6 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
                reason.toLowerCase().includes(searchQuery.toLowerCase());
     });
 
-    // Formatting viewable string headers cleanly
     const monthName = new Date(currentYear, currentMonth).toLocaleDateString('en-US', { month: 'long' });
 
     return (

@@ -1,18 +1,15 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
-from .views import ICD11TokenProxyView
-from core.views import ICD10DiagnosisViewSet
 from django.conf.urls.static import static
 from django.conf import settings
-from django.contrib import admin
-
 
 # All viewsets and functions imported cleanly from your local views.py
 from .views import (
     ICD11TokenProxyView,
     InsuranceCompanyViewSet,
-    InsuranceSchemeViewSet,      
+    InsuranceSchemeViewSet,
+    NurseServiceOrderViewSet,      
     RemittanceBatchViewSet, 
     InsuranceClaimViewSet,
     ClaimDispatchBatchViewSet,
@@ -53,8 +50,15 @@ from .views import (
     patient_lookup,
     PatientDiagnosisViewSet,
     SupplierViewSet,
-    PurchaseOrderViewSet, GoodsReceivedNoteViewSet,
-    PurchaseInvoiceViewSet, PaymentVoucherViewSet
+    PurchaseOrderViewSet, 
+    GoodsReceivedNoteViewSet,
+    PurchaseInvoiceViewSet, 
+    PaymentVoucherViewSet,
+    ICD10DiagnosisViewSet,
+    PatientBillingSearchViewSet, 
+    PatientInvoiceViewSet,
+    ImagingOrderViewSet, 
+    ImagingResultViewSet
 )
 
 class OptionalSlashRouter(DefaultRouter):
@@ -79,17 +83,13 @@ router.register(r'clinical-notes', ClinicalNoteViewSet, basename='clinical-note'
 router.register(r'imaging', ImagingRecordViewSet, basename='imaging')
 
 # --- 4. Protocols & Treatment Plans ---
-# --- 4. Protocols & Treatment Plans ---
 router.register(r'protocols', ProtocolViewSet, basename='protocol')
-router.register(r'protocol-masters', ProtocolViewSet, basename='protocol-master') 
+router.register(r'protocol-masters', ProtocolMasterViewSet, basename='protocol-master') 
 router.register(r'treatments', TreatmentViewSet, basename='treatment')
 router.register(r'chemo-sessions', ChemoSessionViewSet, basename='chemo-session')
-
-# ✨ FIX: The router automatically builds the custom action paths for these viewsets!
 router.register(r'cancer-sites', CancerSiteViewSet, basename='cancer-site')
 router.register(r'cancer-types', CancerTypeViewSet, basename='cancer-type')
 router.register(r'regimens', RegimenViewSet, basename='regimen')
-
 router.register(r'icd10-diagnoses', ICD10DiagnosisViewSet, basename='icd10-diagnoses')
 router.register(r'patient-diagnoses', PatientDiagnosisViewSet, basename='patient-diagnoses')
 
@@ -127,27 +127,31 @@ router.register(r'remittance-batches', RemittanceBatchViewSet, basename='remitta
 router.register(r'insurance-claims', InsuranceClaimViewSet, basename='insurance-claim')
 router.register(r'claim-dispatch-batches', ClaimDispatchBatchViewSet, basename='claim-dispatch-batch')
 
+# --- 10. Supply Chain & Procurement Matrix ---
 router.register(r'suppliers', SupplierViewSet, basename='supplier')
-
 router.register(r'purchase-orders', PurchaseOrderViewSet, basename='purchase-order')
 router.register(r'goods-received-notes', GoodsReceivedNoteViewSet, basename='goods-received-note')
 router.register(r'purchase-invoices', PurchaseInvoiceViewSet, basename='purchase-invoice')
 router.register(r'payment-vouchers', PaymentVoucherViewSet, basename='payment-voucher')
 
+router.register(r'billing-search', PatientBillingSearchViewSet, basename='billing-search')
+router.register(r'invoices', PatientInvoiceViewSet, basename='invoices')
+
+
+router.register(r'imaging-orders', ImagingOrderViewSet, basename='imaging-order')
+router.register(r'imaging-results', ImagingResultViewSet, basename='imaging-result')
+
+router.register(r'nurse-orders', NurseServiceOrderViewSet, basename='nurse-order')
 
 urlpatterns = [
     path('token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('admin/', admin.site.urls),
-
     path('patients/lookup/', patient_lookup, name='patient-lookup'),
+    path('api/icd11/token/', ICD11TokenProxyView.as_view(), name='icd11-token'),
 
-     path('api/icd11/token/', ICD11TokenProxyView.as_view(), name='icd11-token'),
-
-    # All generated viewset endpoints (including nested action URLs) are safely included here
+    # Viewset endpoints
     path('', include(router.urls)), 
 ]
-
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

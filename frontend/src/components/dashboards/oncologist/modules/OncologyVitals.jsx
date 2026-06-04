@@ -1,23 +1,34 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import API from '@/api/api';
 import { 
     Calculator, Activity, Thermometer, Heart, 
     Wind, Scale, ChevronDown, User, AlertCircle, 
     CheckCircle2, Loader2, RefreshCcw, FlaskConical, MessageSquare, Save, Pill, ClipboardCheck,
-    ShieldAlert, Stethoscope, X
+    Stethoscope, X, Image as ImageIcon
 } from 'lucide-react';
 
-// Swapped out ICD11 with localized, optimized Multi-Select ICD10 Search Interface
 import ICD10DiagnosisSearch from "@/components/ICD10DiagnosisSearch";
 
+// Kept SKUs intact for backend billing downstream processing, removed from UI display
 const AVAILABLE_LAB_TESTS = [
-    { id: 'CBC', label: 'Full Blood Count (CBC)' },
-    { id: 'PSA', label: 'Prostate Specific Antigen (PSA)' },
-    { id: 'UE', label: 'Urea, Electrolytes & Creatinine (U&E)' },
-    { id: 'LFT', label: 'Liver Function Test (LFT)' },
-    { id: 'URINALYSIS', label: 'Urinalysis (Routine)' },
-    { id: 'BG_CROSS', label: 'Blood Group & Cross Match' },
-    { id: 'MALARIA_BS', label: 'Blood Slide for Malaria' },
+    { id: 'CBC', sku: 'LAB-CBC', label: 'Full Blood Count (CBC)' },
+    { id: 'PSA', sku: 'LAB-PSA', label: 'Prostate Specific Antigen (PSA)' },
+    { id: 'UE', sku: 'LAB-UE', label: 'Urea, Electrolytes & Creatinine (U&E)' },
+    { id: 'LFT', sku: 'LAB-LFT', label: 'Liver Function Test (LFT)' },
+    { id: 'URINALYSIS', sku: 'LAB-URINE', label: 'Urinalysis (Routine)' },
+    { id: 'BG_CROSS', sku: 'LAB-BG_CROSS', label: 'Blood Group & Cross Match' },
+    { id: 'MALARIA_BS', sku: 'LAB-BS_MP', label: 'Blood Slide for Malaria' },
+];
+
+// ✨ NEW: Radiology / Ultrasound Test Definitions mapping 1:1 with your signal triggers
+const AVAILABLE_IMAGING_TESTS = [
+    { id: 'US_CAROTID', sku: 'RAD-US_CAROTID', label: 'Ultrasound Carotid Study' },
+    { id: 'US_DUPLEX_LOW_EXT', sku: 'RAD-US_DUPLEX_LOW_EXT', label: 'Ultrasound Duplex Lower Extremity' },
+    { id: 'US_VENOUS_EXT', sku: 'RAD-US_VENOUS_EXT', label: 'Ultrasound Venous Extremity' },
+    { id: 'US_VENOUS_UNILA', sku: 'RAD-US_VENOUS_UNILA', label: 'Ultrasound Venous Unilateral' },
+    { id: 'US_DOPPLER_ABD_PEL', sku: 'RAD-US_DOPPLER_ABD_PEL', label: 'Ultrasound Doppler Abdomen & Pelvis' },
+    { id: 'US_LIMITED_DUPLEX', sku: 'RAD-US_LIMITED_DUPLEX', label: 'Ultrasound Limited Duplex' },
+    { id: 'US_HEMODIALYSIS', sku: 'RAD-US_HEMODIALYSIS', label: 'Ultrasound Hemodialysis Access Study' },
 ];
 
 const INITIAL_LAB_STATE = {
@@ -25,7 +36,13 @@ const INITIAL_LAB_STATE = {
     UE: false, LFT: false, MALARIA_BS: false
 };
 
-// Localized Static Choice Matrix for Primary Disease Location Sites 
+// ✨ NEW: Initial state tracking hook for Imaging checklist
+const INITIAL_IMAGING_STATE = {
+    US_CAROTID: false, US_DUPLEX_LOW_EXT: false, US_VENOUS_EXT: false,
+    US_VENOUS_UNILA: false, US_DOPPLER_ABD_PEL: false, US_LIMITED_DUPLEX: false,
+    US_HEMODIALYSIS: false
+};
+
 const PRIMARY_SITE_CHOICES = [
     { id: "BREAST", name: "BREAST" },
     { id: "HEAD & NECK", name: "HEAD & NECK" },
@@ -39,6 +56,19 @@ const PRIMARY_SITE_CHOICES = [
     { id: "LEUKEMIA", name: "LEUKEMIA" }
 ];
 
+const VitalCard = ({ icon, label, value, unit }) => (
+    <div className="bg-slate-50 p-4.5 rounded-xl border border-slate-200/60 group hover:border-blue-500 hover:bg-white transition-all duration-200 shadow-sm">
+        <div className="flex items-center gap-1.5 mb-2 text-slate-400 group-hover:text-blue-600 transition-colors">
+            {icon}
+            <span className="text-[10px] font-bold uppercase tracking-wider">{label}</span>
+        </div>
+        <div className="flex items-baseline gap-1">
+            <span className="text-lg font-black text-slate-900 group-hover:text-blue-600 tracking-tight transition-colors">{value}</span>
+            <span className="text-[10px] font-semibold text-slate-400 lowercase">{unit}</span>
+        </div>
+    </div>
+);
+
 const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     const [queue, setQueue] = useState([]);
     const [selectedPatient, setSelectedPatient] = useState(selectedPatientFromParent || null);
@@ -47,12 +77,44 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     const [hasLabResults, setHasLabResults] = useState(false);
     const [doctorNote, setDoctorNote] = useState("");
     const [isSaving, setIsSaving] = useState(false);
+    const [isSavingImaging, setIsSavingImaging] = useState(false); // Separated loader for radiology context
     const [labRequests, setLabRequests] = useState(INITIAL_LAB_STATE);
+    const [imagingRequests, setImagingRequests] = useState(INITIAL_IMAGING_STATE); // ✨ NEW: Imaging checklist state holder
 
-    // DIAGNOSIS PIPELINE STATE VARIABLES
+    // Backend price catalogs are silently retained to ensure downstream data integrity
+    const [servicePrices, setServicePrices] = useState({});
+    const [loadingPrices, setLoadingPrices] = useState(true);
+
     const [selectedSite, setSelectedSite] = useState(null);
     const [selectedDiagnoses, setSelectedDiagnoses] = useState([]); 
     const [isSavingDiagnosis, setIsSavingDiagnosis] = useState(false);
+
+    // Fetch live service catalog configurations for BOTH Lab and Radiology departments
+    const fetchServicePrices = useCallback(async () => {
+        try {
+            setLoadingPrices(true);
+            const [labRes, radRes] = await Promise.all([
+                API.get('/services/', { params: { dept: 'LAB', active: true } }),
+                API.get('/services/', { params: { dept: 'RAD', active: true } })
+            ]);
+
+            const labData = labRes.data.results || labRes.data;
+            const radData = radRes.data.results || radRes.data;
+            
+            const priceMap = {};
+            if (Array.isArray(labData)) {
+                labData.forEach(service => { priceMap[service.sku] = parseFloat(service.price); });
+            }
+            if (Array.isArray(radData)) {
+                radData.forEach(service => { priceMap[service.sku] = parseFloat(service.price); });
+            }
+            setServicePrices(priceMap);
+        } catch (err) {
+            console.error("Failed to load catalog metrics for background calculation:", err);
+        } finally {
+            setLoadingPrices(false);
+        }
+    }, []);
 
     const fetchQueue = useCallback(async () => {
         try {
@@ -79,7 +141,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
 
             const vData = vitalsRes.data.results || vitalsRes.data;
             const latestVitals = Array.isArray(vData) ? vData[0] : vData;
-            
             setVitals(latestVitals || null);
 
             const lData = labRes.data.results || labRes.data;
@@ -92,7 +153,10 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         }
     }, []);
 
-    useEffect(() => { fetchQueue(); }, [fetchQueue]);
+    useEffect(() => { 
+        fetchQueue(); 
+        fetchServicePrices();
+    }, [fetchQueue, fetchServicePrices]);
 
     useEffect(() => {
         if (selectedPatientFromParent) {
@@ -107,6 +171,7 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             setSelectedPatient(item);
             fetchPatientData(item);
             setLabRequests(INITIAL_LAB_STATE);
+            setImagingRequests(INITIAL_IMAGING_STATE); // Clear scans state upon switching tokens
             setDoctorNote("");
             setSelectedSite(null);
             setSelectedDiagnoses([]);
@@ -116,6 +181,32 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     const toggleLabTest = (test) => {
         setLabRequests(prev => ({ ...prev, [test]: !prev[test] }));
     };
+
+    // ✨ NEW: Radiology toggle tracker handler 
+    const toggleImagingTest = (testId) => {
+        setImagingRequests(prev => ({ ...prev, [testId]: !prev[testId] }));
+    };
+
+    const totalRequisitionCost = useMemo(() => {
+        return AVAILABLE_LAB_TESTS.reduce((sum, test) => {
+            if (labRequests[test.id]) {
+                const price = servicePrices[test.sku] || 0;
+                return sum + price;
+            }
+            return sum;
+        }, 0);
+    }, [labRequests, servicePrices]);
+
+    // ✨ NEW: Requisition evaluation pricing logic tracking radiology selections
+    const totalImagingRequisitionCost = useMemo(() => {
+        return AVAILABLE_IMAGING_TESTS.reduce((sum, scan) => {
+            if (imagingRequests[scan.id]) {
+                const price = servicePrices[scan.sku] || 0;
+                return sum + price;
+            }
+            return sum;
+        }, 0);
+    }, [imagingRequests, servicePrices]);
 
     const handleToggleDiagnosis = (diagnosisItem) => {
         setSelectedDiagnoses(prev => {
@@ -157,7 +248,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         try {
             const visitId = selectedPatient.visit_id || selectedPatient.visit;
             
-            // Refactored pipeline loop ensuring explicit structural formatting
             await Promise.all(selectedDiagnoses.map(diag => 
                 API.post('/patient-diagnoses/', {
                     patient: selectedPatient.patient,
@@ -170,21 +260,19 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             ));
 
             alert(`✅ Recorded ${selectedDiagnoses.length} ICD-10 Diagnosis items successfully.`);
-            setSelectedDiagnoses([]); // Zero out internal tracking staging bag on transactional absolute success
+            setSelectedDiagnoses([]); 
         } catch (err) {
             console.error("Failed to post diagnosis logs:", err);
-            alert(`Failed to record diagnostic entries: ${err.response?.data?.detail || "Server communication layout fault."}`);
+            alert(`Failed to record diagnostic entries.`);
         } finally {
             setIsSavingDiagnosis(false);
         }
     };
 
     const handleReferToLab = async () => {
-        const selectedTests = AVAILABLE_LAB_TESTS
-            .filter(test => labRequests[test.id])
-            .map(test => test.label);
+        const activeOrderedTests = AVAILABLE_LAB_TESTS.filter(test => labRequests[test.id]);
 
-        if (selectedTests.length === 0) {
+        if (activeOrderedTests.length === 0) {
             alert("Select at least one investigation.");
             return;
         }
@@ -196,32 +284,88 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             await API.post('/lab-orders/', {
                 patient: selectedPatient.patient,
                 visit: visitId,
-                requested_tests: selectedTests, 
+                requested_tests: activeOrderedTests.map(t => t.label),
+                test_skus: activeOrderedTests.map(t => t.sku),
+                total_estimated_charge: totalRequisitionCost, 
                 status: 'PENDING',
                 doctor_notes: doctorNote || "" 
             });
             
             await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'LAB' });
             
-            alert(`Success: Patient routed to Lab for ${selectedTests.length} investigation(s).`);
+            alert(`Success: Patient investigations routed to Laboratory pipeline.`);
             setLabRequests(INITIAL_LAB_STATE);
             onTabSwitch('home'); 
         } catch (err) {
-            console.error("Lab referral failure:", err.response?.data || err.message);
-            alert(`Referral failed: ${JSON.stringify(err.response?.data || "Check network connections")}`);
+            console.error("Lab referral failure:", err);
+            if (err.response && err.response.data) {
+                alert(`Backend Validation Failed: ${JSON.stringify(err.response.data)}`);
+            } else {
+                alert("Referral process halted. Please verify station connectivity.");
+            }
         } finally { 
             setIsSaving(false); 
+        }
+    };
+
+    // ✨ NEW: Radiology Submission & Queue Re-routing Handler
+    const handleReferToRadiology = async () => {
+        const activeOrderedScans = AVAILABLE_IMAGING_TESTS.filter(scan => imagingRequests[scan.id]);
+
+        if (activeOrderedScans.length === 0) {
+            alert("Select at least one imaging study procedure.");
+            return;
+        }
+
+        setIsSavingImaging(true);
+        try {
+            const visitId = selectedPatient.visit_id || selectedPatient.visit;
+            
+            // Build key flags mapping matching variable billing signals expectations
+            const imagingPayload = {
+                patient: selectedPatient.patient,
+                visit: visitId,
+                status: 'PENDING',
+                doctor_notes: doctorNote || "",
+                imaging_skus: activeOrderedScans.map(s => s.sku),
+                total_estimated_charge: totalImagingRequisitionCost
+            };
+
+            // Dynamically inject boolean triggers onto order row instance matching backend map logic
+            activeOrderedScans.forEach(scan => {
+                const flagName = `has_us_${scan.id.toLowerCase()}`;
+                imagingPayload[flagName] = true;
+            });
+
+            // Dispatch post request to target model viewset path mapping
+            await API.post('/imaging-orders/', imagingPayload);
+            
+            // Re-route tracking station context directly to Radiology workspace
+            await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'RADIOLOGY' });
+            
+            alert(`Success: Requisition submitted. Patient token advanced to Radiology workflow queue.`);
+            setImagingRequests(INITIAL_IMAGING_STATE);
+            onTabSwitch('home');
+        } catch (err) {
+            console.error("Radiology route initialization error:", err);
+            if (err.response && err.response.data) {
+                alert(`Backend Validation Failed: ${JSON.stringify(err.response.data)}`);
+            } else {
+                alert("Referral process halted. Please verify station connectivity.");
+            }
+        } finally {
+            setIsSavingImaging(false);
         }
     };
 
     return (
         <div className="space-y-6 animate-in fade-in duration-700 font-['Inter'] pb-20 max-w-[1600px] mx-auto px-4">
             
-            {/* 1. ACTIVE PATIENT PROFILE BANNER */}
+            {/* PATIENT BANNER */}
             {selectedPatient && (
                 <div className="bg-gradient-to-r from-slate-900 to-slate-950 border border-slate-800 rounded-[2rem] p-6 shadow-xl flex items-center justify-between">
                     <div className="flex items-center gap-5">
-                        <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center font-black text-white text-xl shadow-lg shadow-blue-900/40">
+                        <div className="w-14 h-14 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center font-black text-white text-xl shadow-lg">
                             {selectedPatient.patient_name?.charAt(0) || <User size={24} />}
                         </div>
                         <div>
@@ -239,7 +383,7 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                 </div>
             )}
 
-            {/* SELECTION HUB */}
+            {/* QUEUE CONTROLLER */}
             <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-sm">
                 <div className="flex flex-col md:flex-row items-center gap-6">
                     <div className="flex items-center gap-4 flex-1 w-full">
@@ -269,11 +413,11 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in slide-in-from-bottom-6 duration-500">
                     
                     <main className="lg:col-span-8 space-y-6">
-                        {/* VISITS VITALS CARD */}
+                        {/* VITALS */}
                         <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md relative overflow-hidden">
                             <div className="flex items-center justify-between mb-8">
                                 <div className="flex items-center gap-3">
-                                    <div className="bg-blue-600 p-2.5 rounded-xl text-white shadow-sm shadow-blue-500/20"><Activity size={20} /></div>
+                                    <div className="bg-blue-600 p-2.5 rounded-xl text-white"><Activity size={20} /></div>
                                     <h3 className="text-xl font-bold tracking-tight text-slate-900">Vitals</h3>
                                 </div>
                                 <span className="bg-emerald-500/10 text-emerald-600 px-4 py-2 rounded-xl text-xs font-black tracking-wide border border-emerald-500/20">
@@ -295,16 +439,14 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                             )}
                         </div>
 
-                        {/* LIVE DIAGNOSIS HUB */}
+                        {/* DIAGNOSIS */}
                         <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md relative">
                             <div className="flex items-center gap-3 mb-6">
-                                <div className="bg-blue-600 p-2.5 rounded-xl text-white shadow-sm"><Stethoscope size={18} /></div>
-                                <h3 className="text-xl font-bold tracking-tight text-slate-900">Clinical Diagnosis Configuration</h3>
+                                <div className="bg-blue-600 p-2.5 rounded-xl text-white"><Stethoscope size={18} /></div>
+                                <h3 className="text-xl font-bold tracking-tight text-slate-900">Diagnosis</h3>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
-                                
-                                {/* Left Side: Primary Target Anatomy Site Select input */}
                                 <div className="relative">
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-0.5">Primary Disease Location Site</p>
                                     <select 
@@ -324,7 +466,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                                     <ChevronDown className="absolute right-4 top-9 text-slate-400 pointer-events-none" size={16} />
                                 </div>
 
-                                {/* Right Side: Aligned Dependent Search & Option Multi-Selector container */}
                                 <div className="flex flex-col justify-end">
                                     <ICD10DiagnosisSearch 
                                         selectedSite={selectedSite} 
@@ -336,61 +477,45 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
 
                             {!selectedSite && (
                                 <div className="flex items-center gap-2 text-amber-600 bg-amber-50 border border-amber-200/60 p-3 rounded-xl text-xs font-semibold mt-2">
-                                    <ShieldAlert size={14} />
-                                    <span>Primary site isolation filter must be actively targeted before querying live ICD-10 registries.</span>
+                                    <AlertCircle size={14} />
+                                    <span>Primary site isolation filter must be actively targeted before querying live registries.</span>
                                 </div>
                             )}
 
-                            {/* Show staging preview area for all checked codes before commit */}
                             {selectedDiagnoses.length > 0 && (
-                                <div className="mt-6 border-t border-slate-100 pt-5 space-y-3 animate-in slide-in-from-top-2 duration-300">
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                        Staged Diagnosis Bag ({selectedDiagnoses.length})
-                                    </p>
+                                <div className="mt-6 border-t border-slate-100 pt-5 space-y-3">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Staged Diagnosis Bag ({selectedDiagnoses.length})</p>
                                     <div className="flex flex-wrap gap-2">
                                         {selectedDiagnoses.map(diag => (
-                                            <div key={diag.id || diag.code} className="flex items-center gap-2 bg-slate-900 border border-slate-800 text-white rounded-xl pl-3 pr-2 py-1.5 shadow-sm">
+                                            <div key={diag.id || diag.code} className="flex items-center gap-2 bg-slate-900 border border-slate-800 text-white rounded-xl pl-3 pr-2 py-1.5">
                                                 <span className="font-mono font-black text-xs text-blue-400">[{diag.code}]</span>
                                                 <span className="text-xs font-medium max-w-[200px] truncate">{diag.short_description || diag.description}</span>
-                                                <button 
-                                                    onClick={() => handleToggleDiagnosis(diag)}
-                                                    className="p-0.5 hover:bg-slate-800 rounded text-slate-400 hover:text-rose-400 transition-colors"
-                                                >
+                                                <button onClick={() => handleToggleDiagnosis(diag)} className="p-0.5 text-slate-400 hover:text-rose-400 transition-colors">
                                                     <X size={14} />
                                                 </button>
                                             </div>
                                         ))}
                                     </div>
-                                    
-                                    <button 
-                                        onClick={handleSaveDiagnosis}
-                                        disabled={isSavingDiagnosis}
-                                        className="mt-2 w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-6 py-3 rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
-                                    >
-                                        {isSavingDiagnosis ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>} 
-                                        Commit Diagnosis Selections to Patient Record
+                                    <button onClick={handleSaveDiagnosis} disabled={isSavingDiagnosis} className="mt-2 w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-6 py-3 rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+                                        {isSavingDiagnosis ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>} Commit Diagnosis Selections
                                     </button>
                                 </div>
                             )}
                         </div>
 
-                        {/* NOTES */}
+                        {/* CLINICAL NOTES */}
                         <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
                             <div className="flex items-center justify-between mb-5">
                                 <div className="flex items-center gap-3">
                                     <div className="bg-slate-900 p-2.5 rounded-xl text-white"><MessageSquare size={18} /></div>
                                     <h4 className="text-md font-bold text-slate-900">Notes</h4>
                                 </div>
-                                <button 
-                                    onClick={handleSaveNotes}
-                                    disabled={isSaving || !doctorNote}
-                                    className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 transition-all disabled:opacity-50 shadow-sm"
-                                >
+                                <button onClick={handleSaveNotes} disabled={isSaving || !doctorNote} className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 transition-all disabled:opacity-50">
                                     {isSaving ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>} Save Notes
                                 </button>
                             </div>
                             <textarea 
-                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5 text-slate-800 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all resize-none"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-5 text-slate-800 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-all"
                                 rows="4"
                                 placeholder="Enter clinical assessment findings and diagnostics summary..."
                                 value={doctorNote}
@@ -398,32 +523,75 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                             />
                         </div>
 
-                        {/* LAB REQUESTS */}
+                        {/* LAB REQUESTS PANEL */}
                         <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="bg-indigo-600 p-2.5 rounded-xl text-white shadow-sm shadow-indigo-500/20"><FlaskConical size={18} /></div>
-                                <h3 className="text-md font-bold text-slate-900">Lab Investigations Requisition</h3>
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-indigo-600 p-2.5 rounded-xl text-white"><FlaskConical size={18} /></div>
+                                    <h3 className="text-md font-bold text-slate-900">Lab Investigations Requisition</h3>
+                                </div>
                             </div>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {AVAILABLE_LAB_TESTS.map((test) => (
-                                    <div 
-                                        key={test.id} 
-                                        onClick={() => toggleLabTest(test.id)}
-                                        className={`flex items-center justify-between p-4 rounded-xl border-2 transition-all cursor-pointer ${labRequests[test.id] ? 'bg-indigo-50/60 border-indigo-500 shadow-sm' : 'bg-slate-50 border-transparent hover:border-slate-200'}`}
-                                    >
-                                        <span className={`text-xs font-bold ${labRequests[test.id] ? 'text-indigo-900' : 'text-slate-600'}`}>{test.label}</span>
-                                        {labRequests[test.id] ? <CheckCircle2 size={18} className="text-indigo-600" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-300" />}
-                                    </div>
-                                ))}
+                                {AVAILABLE_LAB_TESTS.map((test) => {
+                                    return (
+                                        <div 
+                                            key={test.id} 
+                                            onClick={() => toggleLabTest(test.id)}
+                                            className={`flex items-center justify-between p-5 rounded-xl border-2 transition-all cursor-pointer ${labRequests[test.id] ? 'bg-indigo-50/60 border-indigo-500 shadow-sm' : 'bg-slate-50 border-transparent hover:border-slate-200'}`}
+                                        >
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className={`text-xs font-bold ${labRequests[test.id] ? 'text-indigo-900' : 'text-slate-600'}`}>{test.label}</span>
+                                            </div>
+                                            {labRequests[test.id] ? <CheckCircle2 size={18} className="text-indigo-600" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-300" />}
+                                        </div>
+                                    );
+                                })}
                             </div>
 
                             <button 
                                 onClick={handleReferToLab}
                                 disabled={isSaving}
-                                className="w-full mt-6 bg-indigo-600 hover:bg-indigo-700 text-white py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2.5 shadow-lg shadow-indigo-100"
+                                className="w-full mt-6 bg-indigo-600 hover:bg-indigo-700 text-white py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2.5 shadow-lg"
                             >
-                                {isSaving ? <Loader2 className="animate-spin" size={18} /> : <ClipboardCheck size={18} />} Submit Requisition to Lab
+                                {isSaving ? <Loader2 className="animate-spin" size={18} /> : <ClipboardCheck size={18} />} 
+                                Submit Requisition to Lab ({AVAILABLE_LAB_TESTS.filter(t => labRequests[t.id]).length} Checked)
+                            </button>
+                        </div>
+
+                        {/* ✨ NEW: RADIOLOGY / IMAGING REQUESTS PANEL */}
+                        <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
+                            <div className="flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-purple-600 p-2.5 rounded-xl text-white"><ImageIcon size={18} /></div>
+                                    <h3 className="text-md font-bold text-slate-900">Radiology & Imaging Requisition</h3>
+                                </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {AVAILABLE_IMAGING_TESTS.map((scan) => {
+                                    return (
+                                        <div 
+                                            key={scan.id} 
+                                            onClick={() => toggleImagingTest(scan.id)}
+                                            className={`flex items-center justify-between p-5 rounded-xl border-2 transition-all cursor-pointer ${imagingRequests[scan.id] ? 'bg-purple-50/60 border-purple-500 shadow-sm' : 'bg-slate-50 border-transparent hover:border-slate-200'}`}
+                                        >
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className={`text-xs font-bold ${imagingRequests[scan.id] ? 'text-purple-900' : 'text-slate-600'}`}>{scan.label}</span>
+                                            </div>
+                                            {imagingRequests[scan.id] ? <CheckCircle2 size={18} className="text-purple-600" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-300" />}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            <button 
+                                onClick={handleReferToRadiology}
+                                disabled={isSavingImaging || isSaving}
+                                className="w-full mt-6 bg-purple-600 hover:bg-purple-700 text-white py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2.5 shadow-lg disabled:opacity-50"
+                            >
+                                {isSavingImaging ? <Loader2 className="animate-spin" size={18} /> : <ClipboardCheck size={18} />} 
+                                Submit Requisition to Radiology ({AVAILABLE_IMAGING_TESTS.filter(s => imagingRequests[s.id]).length} Checked)
                             </button>
                         </div>
 
@@ -436,17 +604,14 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                                     </h3>
                                     <p className="text-xs font-medium text-slate-400 mt-1">Deploy cytotoxic treatments, supportive regimens, or oncology therapy orders.</p>
                                 </div>
-                                <button 
-                                    onClick={() => onTabSwitch('prescriptions')}
-                                    className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-lg shadow-emerald-900/20 whitespace-nowrap"
-                                >
+                                <button onClick={() => onTabSwitch('prescriptions')} className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all shadow-lg whitespace-nowrap">
                                     Issue Patient Prescription
                                 </button>
                             </div>
                         </div>
                     </main>
 
-                    {/* RIGHT PANEL */}
+                    {/* RIGHT UTILITIES PANEL */}
                     <aside className="lg:col-span-4 space-y-6">
                         <section className="bg-gradient-to-br from-blue-600 to-indigo-700 p-6 rounded-[2rem] text-white shadow-xl relative overflow-hidden">
                             <p className="text-[10px] font-black text-blue-100 uppercase tracking-widest mb-3">Body Surface Area (BSA)</p>
@@ -464,10 +629,7 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                             </h3>
                             <div className="space-y-3">
                                 {hasLabResults ? (
-                                    <button 
-                                        onClick={() => onTabSwitch('lab')}
-                                        className="w-full bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 py-4 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2"
-                                    >
+                                    <button onClick={() => onTabSwitch('lab')} className="w-full bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 py-4 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2">
                                         <FlaskConical size={16} /> Review Lab Results
                                     </button>
                                 ) : (
@@ -482,24 +644,11 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             ) : (
                 <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2.5rem] p-24 text-center shadow-sm">
                     <Activity size={48} className="mx-auto text-slate-300 mb-4 animate-pulse" />
-                    <p className="text-slate-500 font-bold tracking-wide text-xs">Select a patient from the active workspace dropdown above to load telemetry metadata records.</p>
+                    <p className="text-slate-500 font-bold tracking-wide text-xs">Select a patient to load the health records.</p>
                 </div>
             )}
         </div>
     );
 };
-
-const VitalCard = ({ icon, label, value, unit }) => (
-    <div className="bg-slate-50 p-4.5 rounded-xl border border-slate-200/60 group hover:border-blue-500 hover:bg-white transition-all duration-200 shadow-sm">
-        <div className="flex items-center gap-1.5 mb-2 text-slate-400 group-hover:text-blue-600 transition-colors">
-            {icon}
-            <span className="text-[10px] font-bold uppercase tracking-wider">{label}</span>
-        </div>
-        <div className="flex items-baseline gap-1">
-            <span className="text-lg font-black text-slate-900 group-hover:text-blue-600 tracking-tight transition-colors">{value}</span>
-            <span className="text-[10px] font-semibold text-slate-400 lowercase">{unit}</span>
-        </div>
-    </div>
-);
 
 export default OncologyVitals;

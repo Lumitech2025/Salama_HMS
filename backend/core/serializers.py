@@ -17,7 +17,10 @@ from .models import (
     Supplier,
     PurchaseOrder, PurchaseOrderItem, 
     GoodsReceivedNote, GRNItem, 
-    PurchaseInvoice, PaymentVoucher
+    PurchaseInvoice, PaymentVoucher,
+    PatientInvoice, PatientBillableItem,
+    ImagingOrder, ImagingResult,
+    NurseServiceOrder
 
 )
 
@@ -304,59 +307,115 @@ class LabResultSerializer(serializers.ModelSerializer):
 
 class LabOrderSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.name', read_only=True)
-    # 1. Dynamically read/write requested_tests so your frontend stays exactly the same
     requested_tests = serializers.SerializerMethodField()
     token_id = serializers.SerializerMethodField()
+
+    # Explicitly catch frontend tracking metrics safely
+    test_skus = serializers.ListField(
+        child=serializers.CharField(), 
+        write_only=True, 
+        required=True
+    )
+    total_estimated_charge = serializers.FloatField(
+        write_only=True, 
+        required=False
+    )
 
     class Meta:
         model = LabOrder
         fields = [
-            'id', 'patient', 'patient_name', 'visit', 
-            'requested_tests', 'status', 'doctor_notes', 
-            'token_id', 'created_at'
+            'id', 'patient', 'patient_name', 'visit', 'status', 'doctor_notes',
+            'has_cbc', 'has_ue', 'has_lft', 'has_psa', 'has_urine', 
+            'has_bg_cross', 'has_bs_mp', 'created_at',
+            'requested_tests', 'token_id',  # Included custom evaluation hooks
+            'test_skus', 'total_estimated_charge'
         ]
+        extra_kwargs = {
+            'has_cbc': {'write_only': True},
+            'has_ue': {'write_only': True},
+            'has_lft': {'write_only': True},
+            'has_psa': {'write_only': True},
+            'has_urine': {'write_only': True},
+            'has_bg_cross': {'write_only': True},
+            'has_bs_mp': {'write_only': True},
+        }
 
     def get_token_id(self, obj):
-        # Fallback matches your updated property approach cleanly
         if obj.visit and hasattr(obj.visit, 'queue_id'):
             return obj.visit.queue_id
         return f"REQ-{obj.id}"
 
     def get_requested_tests(self, obj):
-        """
-        OUTPUT (Read): Maps database booleans back to the 
-        frontend's array format ["Full Blood Count (CBC)", ...]
-        """
-        return obj.selected_test_list
+        # Gracefully handles reading back the database items array property
+        return getattr(obj, 'selected_test_list', [])
 
     def to_internal_value(self, data):
         """
-        INPUT (Write/Create/Update): intercept the frontend's 
-        ["Full Blood Count (CBC)"] array data, map it back into internal boolean 
-        fields, and pass it cleanly into the database.
+        INPUT (Write): Intercepts the clean SKU list strings 
+        to accurately flip internal database tracking booleans.
         """
-        # Pull standard validation from DRF first
         internal_value = super().to_internal_value(data)
+        incoming_skus = data.get('test_skus', None)
         
-        # Look for the payload coming from the doctor's screen
-        incoming_tests = data.get('requested_tests', None)
-        
-        if incoming_tests is not None:
-            if not isinstance(incoming_tests, list):
+        if incoming_skus is not None:
+            if not isinstance(incoming_skus, list):
                 raise serializers.ValidationError({
-                    "requested_tests": "Expected a list of test names."
+                    "test_skus": "Expected an array/list of string SKU identifiers."
                 })
                 
-            # Map frontend strings back to database model boolean attributes
-            internal_value['has_cbc'] = "Full Blood Count (CBC)" in incoming_tests
-            internal_value['has_ue'] = "Urea, Electrolytes & Creatinine (U&E)" in incoming_tests
-            internal_value['has_lft'] = "Liver Function Test (LFT)" in incoming_tests
-            internal_value['has_psa'] = "Prostate Specific Antigen (PSA)" in incoming_tests
-            internal_value['has_urine'] = "Urinalysis (Routine)" in incoming_tests
-            internal_value['has_bg_cross'] = "Blood Group & Cross Match" in incoming_tests
-            internal_value['has_bs_mp'] = "Blood Slide (Malaria Parasite)" in incoming_tests
+            internal_value['has_cbc'] = "LAB-CBC" in incoming_skus
+            internal_value['has_psa'] = "LAB-PSA" in incoming_skus
+            internal_value['has_ue'] = "LAB-UE" in incoming_skus
+            internal_value['has_lft'] = "LAB-LFT" in incoming_skus
+            internal_value['has_urine'] = "LAB-URINE" in incoming_skus
+            internal_value['has_bg_cross'] = "LAB-BG_CROSS" in incoming_skus
+            internal_value['has_bs_mp'] = "LAB-BS_MP" in incoming_skus
 
         return internal_value
+
+    def create(self, validated_data):
+        # Cleanly drop UI helper fields before database model record serialization instantiates
+        validated_data.pop('test_skus', None)
+        validated_data.pop('total_estimated_charge', None)
+        
+        # Save the main Lab Order entry
+        lab_order = super().create(validated_data)
+        visit = lab_order.visit
+        
+        if visit:
+            # Locate or build an active payment record ledger
+            invoice, created = PatientInvoice.objects.get_or_create(
+                visit=visit,
+                defaults={'patient': lab_order.patient, 'status': 'UNPAID'}
+            )
+            
+            # Map flags directly to master Service configurations catalog entries
+            lab_sku_mapping = {
+                'has_cbc': 'SKU-LAB-CBC',
+                'has_psa': 'SKU-LAB-PSA',
+                'has_ue': 'SKU-LAB-UE',
+                'has_lft': 'SKU-LAB-LFT',
+                'has_urine': 'SKU-LAB-URINE',
+                'has_bg_cross': 'SKU-LAB-CROSS',
+                'has_bs_mp': 'SKU-LAB-MALARIA',
+            }
+            
+            for field_name, service_sku in lab_sku_mapping.items():
+                if validated_data.get(field_name, False):
+                    service_catalog = Service.objects.filter(sku=service_sku, active=True).first()
+                    if service_catalog:
+                        PatientBillableItem.objects.get_or_create(
+                            invoice=invoice,
+                            service=service_catalog,
+                            defaults={
+                                'name': service_catalog.name,
+                                'unit_price': service_catalog.price,
+                                'quantity': 1,
+                                'station': 'Laboratory'
+                            }
+                        )
+                        
+        return lab_order
     
 class LabReferenceSerializer(serializers.ModelSerializer):
     class Meta:
@@ -402,6 +461,173 @@ class LabTestRegistrySerializer(serializers.ModelSerializer):
                     "lower_range": "Lower reference limit cannot exceed the upper reference limit."
                 })
         return data
+    
+class ImagingResultSerializer(serializers.ModelSerializer):
+    imaging_name_display = serializers.CharField(source='get_imaging_name_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    patient_name = serializers.CharField(source='patient.name', read_only=True)
+
+    class Meta:
+        model = ImagingResult
+        fields = '__all__'
+
+
+class ImagingOrderSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(source='patient.name', read_only=True)
+    requested_imaging = serializers.SerializerMethodField()
+    token_id = serializers.SerializerMethodField()
+
+    # Explicitly catch frontend tracking matrices safely
+    imaging_skus = serializers.ListField(
+        child=serializers.CharField(), 
+        write_only=True, 
+        required=True
+    )
+    # Because you set ultrasounds as VARIABLE, this field maps the custom pricing directly!
+    total_estimated_charge = serializers.FloatField(
+        write_only=True, 
+        required=False
+    )
+
+    class Meta:
+        model = ImagingOrder
+        fields = [
+            'id', 'patient', 'patient_name', 'visit', 'status', 'doctor_notes',
+            'has_us_carotid', 'has_us_duplex_low_ext', 'has_us_venous_ext', 
+            'has_us_venous_unila', 'has_us_doppler_abd_pel', 'has_us_limited_duplex', 
+            'has_us_hemodialysis', 'created_at',
+            'requested_imaging', 'token_id',  
+            'imaging_skus', 'total_estimated_charge'
+        ]
+        extra_kwargs = {
+            'has_us_carotid': {'write_only': True},
+            'has_us_duplex_low_ext': {'write_only': True},
+            'has_us_venous_ext': {'write_only': True},
+            'has_us_venous_unila': {'write_only': True},
+            'has_us_doppler_abd_pel': {'write_only': True},
+            'has_us_limited_duplex': {'write_only': True},
+            'has_us_hemodialysis': {'write_only': True},
+        }
+
+    def get_token_id(self, obj):
+        if obj.visit and hasattr(obj.visit, 'queue_id'):
+            return obj.visit.queue_id
+        return f"IMG-{obj.id}"
+
+    def get_requested_imaging(self, obj):
+        return getattr(obj, 'selected_imaging_list', [])
+
+    def to_internal_value(self, data):
+        """
+        INPUT (Write): Intercepts the clean SKU list strings 
+        to accurately flip internal database tracking booleans.
+        """
+        internal_value = super().to_internal_value(data)
+        incoming_skus = data.get('imaging_skus', None)
+        
+        if incoming_skus is not None:
+            if not isinstance(incoming_skus, list):
+                raise serializers.ValidationError({
+                    "imaging_skus": "Expected an array/list of string SKU identifiers."
+                })
+                
+            internal_value['has_us_carotid'] = "RAD-US_CAROTID" in incoming_skus
+            internal_value['has_us_duplex_low_ext'] = "RAD-US_DUPLEX_LOW_EXT" in incoming_skus
+            internal_value['has_us_venous_ext'] = "RAD-US_VENOUS_EXT" in incoming_skus
+            internal_value['has_us_venous_unila'] = "RAD-US_VENOUS_UNILA" in incoming_skus
+            internal_value['has_us_doppler_abd_pel'] = "RAD-US_DOPPLER_ABD_PEL" in incoming_skus
+            internal_value['has_us_limited_duplex'] = "RAD-US_LIMITED_DUPLEX" in incoming_skus
+            internal_value['has_us_hemodialysis'] = "RAD-US_HEMODIALYSIS" in incoming_skus
+
+        return internal_value
+
+    def create(self, validated_data):
+        # Extract UI helper inputs safely before saving model fields
+        imaging_skus = validated_data.pop('imaging_skus', None)
+        custom_variable_price = validated_data.pop('total_estimated_charge', None)
+        
+        # Save the main Imaging Order entry
+        imaging_order = super().create(validated_data)
+        visit = imaging_order.visit
+        
+        if visit:
+            # Locate or build an active payment record ledger
+            invoice, created = PatientInvoice.objects.get_or_create(
+                visit=visit,
+                defaults={'patient': imaging_order.patient, 'status': 'UNPAID'}
+            )
+            
+            # Map flags directly to master Service configurations catalog entries
+            imaging_sku_mapping = {
+                'has_us_carotid': 'RAD-US_CAROTID',
+                'has_us_duplex_low_ext': 'RAD-US_DUPLEX_LOW_EXT',
+                'has_us_venous_ext': 'RAD-US_VENOUS_EXT',
+                'has_us_venous_unila': 'RAD-US_VENOUS_UNILA',
+                'has_us_doppler_abd_pel': 'RAD-US_DOPPLER_ABD_PEL',
+                'has_us_limited_duplex': 'RAD-US_LIMITED_DUPLEX',
+                'has_us_hemodialysis': 'RAD-US_HEMODIALYSIS',
+            }
+            
+            for field_name, service_sku in imaging_sku_mapping.items():
+                if validated_data.get(field_name, False):
+                    service_catalog = Service.objects.filter(sku=service_sku, active=True).first()
+                    if service_catalog:
+                        # Fallback calculation logic for VARIABLE priced procedures
+                        final_unit_price = custom_variable_price if custom_variable_price is not None else service_catalog.price
+                        
+                        PatientBillableItem.objects.get_or_create(
+                            invoice=invoice,
+                            service=service_catalog,
+                            defaults={
+                                'name': service_catalog.name,
+                                'unit_price': final_unit_price,
+                                'quantity': 1,
+                                'station': 'Radiology'
+                            }
+                        )
+                        
+        return imaging_order
+    
+class NurseServiceOrderSerializer(serializers.ModelSerializer):
+    # Read-only fields fetched from the related Patient model (matching Lab/Imaging style)
+    patient_name = serializers.CharField(source='patient.name', read_only=True)
+    patient_number = serializers.CharField(source='patient.patient_number', read_only=True)
+    
+    # Formatted list of selected services to make frontend table rendering incredibly easy
+    requested_services = serializers.SerializerMethodField()
+
+    class Meta:
+        model = NurseServiceOrder
+        fields = [
+            'id', 
+            'patient', 
+            'patient_name', 
+            'patient_number',
+            'has_wound_dressing', 
+            'has_catheter_change', 
+            'has_pelvic_screening',
+            'requested_services',
+            'total_estimated_charge', 
+            'doctor_notes', 
+            'status', 
+            'created_at',
+            'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'total_estimated_charge']
+
+    def get_requested_services(self, obj):
+        """
+        Dynamically compiles a clean string array of active procedures
+        e.g., ["Wound Dressing", "Pelvic Screening"]
+        """
+        services = []
+        if obj.has_wound_dressing:
+            services.append("Wound Dressing")
+        if obj.has_catheter_change:
+            services.append("Catheter Change")
+        if obj.has_pelvic_screening:
+            services.append("Pelvic Screening")
+        return services
     
 class OncologyClinicalPortalSerializer(serializers.ModelSerializer):
     # Patient Demographic Fields mapped directly from RegistrationRecord
@@ -1552,3 +1778,81 @@ class PaymentVoucherSerializer(serializers.ModelSerializer):
             invoice.save()
             
         return voucher
+    
+
+class PatientBillableItemSerializer(serializers.ModelSerializer):
+    """
+    Serializes individual line items to match the columns on the React frontend:
+    Station, Service/Procedure, Cost (KES).
+    """
+    # Use the human-readable display string for the station choice field
+    station = serializers.CharField(source='get_station_display')
+    service = serializers.CharField(source='name')
+    price = serializers.FloatField(source='total_cost')
+
+    class Meta:
+        model = PatientBillableItem
+        fields = ['id', 'station', 'service', 'price']
+
+
+class ActiveInvoiceSerializer(serializers.ModelSerializer):
+    """
+    Serializes the complete billing profile for the selected patient transaction.
+    """
+    items = PatientBillableItemSerializer(many=True, read_only=True)
+    total_payable = serializers.FloatField(read_only=True)
+
+    class Meta:
+        model = PatientInvoice
+        fields = ['id', 'status', 'total_payable', 'items']
+
+
+class PatientBillingLookupSerializer(serializers.ModelSerializer):
+    """
+    Used when searching patients at the front desk. Resolves identification,
+    payment coverage flags, and hooks into their active transaction ledger.
+    """
+    # Flatten names cleanly using your model helper property
+    name = serializers.CharField(source='full_name', read_only=True)
+    scheme = serializers.SerializerMethodField()
+    active_bill = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RegistrationRecord
+        fields = ['id', 'queue_id', 'health_record_number', 'name', 'phone', 'payment_mode', 'scheme', 'active_bill']
+
+    def get_scheme(self, obj):
+        """Returns corporate insurer details or plain self-pay text"""
+        if obj.payment_mode == 'INSURANCE' and obj.insurance_company:
+            return f"{obj.insurance_company.name} - ({obj.insurance_number})"
+        return "Self Pay (Cash/M-Pesa)"
+
+    def get_active_bill(self, obj):
+        """
+        Resolves an active open invoice context. Auto-instantiates 
+        the row if it doesn't exist yet to secure station connectivity.
+        """
+        # 1. Look for an existing unpaid invoice attached to this visit session
+        invoice = PatientInvoice.objects.filter(visit=obj, status='UNPAID').first()
+        
+        # 2. ✨ CORRECTION: If none exists, create a live instance on the fly
+        if not invoice:
+            # Safely extract patient from the parent registration record instance
+            patient_record = getattr(obj, 'patient', None)
+            if patient_record:
+                invoice = PatientInvoice.objects.create(
+                    visit=obj,
+                    patient=patient_record,
+                    status='UNPAID'
+                )
+        
+        if invoice:
+            return ActiveInvoiceSerializer(invoice).data
+            
+        # Hard fallback only if database integrity is fundamentally broken
+        return {
+            "id": None,
+            "status": "UNPAID",
+            "total_payable": 0.0,
+            "items": []
+        }

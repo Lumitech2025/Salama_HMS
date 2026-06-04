@@ -41,15 +41,18 @@ const ServiceCatalogue = () => {
       { code: 'CONS_ONCO', name: 'Oncologist Consultation Fee' }
     ],
     RAD: [
-      { code: 'CT_SCAN', name: 'CT Scan' },
-      { code: 'CT_ANGIO', name: 'CT Angiography' },
-      { code: 'MRI', name: 'Magnetic Resonance Imaging (MRI)' },
-      { code: 'ULTRASOUND', name: 'Ultrasound Scan' },
-      { code: 'ECG', name: 'Electrocardiogram (ECG)' },
-      { code: 'ECHO', name: 'Echocardiogram (ECHO)' }
+      { code: 'US_CAROTID', name: 'U/S Carotid Doppler/Duplex' },
+      { code: 'US_DUPLEX_LOW_EXT', name: 'U/S Duplex Scan Low Ext Artery R/O Pseudo' },
+      { code: 'US_VENOUS_EXT', name: 'U/S Venous Duplex/Extremity' },
+      { code: 'US_VENOUS_UNILA', name: 'U/S Venous Duplex/Extrm/Unila' },
+      { code: 'US_DOPPLER_ABD_PEL', name: 'U/S Doppler, Abdominal/Pelvic' },
+      { code: 'US_LIMITED_DUPLEX', name: 'U/S Limited Study Duplex Scan' },
+      { code: 'US_HEMODIALYSIS', name: 'U/S Duplex Scan of Hemodialysis' }
     ],
     NUR: [
-      { code: 'WOUND_DRESS', name: 'Wound Dressing' }
+      { code: 'WOUND_DRESS', name: 'Wound Dressing' },
+      { code: 'CATH_CHANGE', name: 'Catheter Change' },
+      { code: 'PELVIC_SCREEN', name: 'Pelvic Screening' }
     ],
     PHA: [
       { code: 'INV_DISPENSE', name: 'Pharmaceutical Dispensation (Dynamic Inventory Cost)' }
@@ -534,7 +537,7 @@ const ServiceCatalogue = () => {
                     type="text" 
                     placeholder="Enter explicit service title..."
                     value={formData.name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    onChange={(prev) => setFormData(p => ({ ...p, name: prev.target.value }))}
                     className="w-full bg-white border border-slate-200 rounded-xl p-2 outline-none text-slate-800"
                     required disabled={isSubmitting}
                   />

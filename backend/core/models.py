@@ -136,7 +136,7 @@ class RegistrationRecord(models.Model):
         # 1. Fallback sync calculations from patient master metadata
         if self.patient:
             if not self.first_name:
-                # Assuming your Patient model contains these properties or a split strategy
+                
                 self.first_name = getattr(self.patient, 'first_name', '')
                 self.middle_name = getattr(self.patient, 'middle_name', '')
                 self.last_name = getattr(self.patient, 'last_name', '')
@@ -145,9 +145,7 @@ class RegistrationRecord(models.Model):
             if not self.gender:
                 self.gender = self.patient.gender
 
-        # 2. Concurrency-Safe Identifier Resolution Block
-        # Wrap sequence lookups inside an atomic atomic transaction with select_for_update if tracking via a counter table,
-        # or use standard pessimistic locking on the table itself to prevent race conditions during high influxes.
+        
         if not self.queue_id or not self.health_record_number:
             # Using transaction.atomic to prevent dirty reads across connections
             with transaction.atomic():
@@ -814,6 +812,209 @@ class LabReference(models.Model):
     def __str__(self):
         return f"{self.name} ({self.category})"
     
+# Imaging
+class ImagingOrder(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending Processing'),
+        ('COMPLETED', 'Results Ready'),
+    ]
+
+    # Explicit canonical choices for the 7 standard available ultrasounds
+    # Matches your frontend naming conventions perfectly
+    IMAGING_CHOICES = [
+        ('US_CAROTID', 'U/S Carotid Doppler/Duplex'),
+        ('US_DUPLEX_LOW_EXT', 'U/S Duplex Scan Low Ext Artery R/O Pseudo'),
+        ('US_VENOUS_EXT', 'U/S Venous Duplex/Extremity'),
+        ('US_VENOUS_UNILA', 'U/S Venous Duplex/Extrm/Unila'),
+        ('US_DOPPLER_ABD_PEL', 'U/S Doppler, Abdominal/Pelvic'),
+        ('US_LIMITED_DUPLEX', 'U/S Limited Study Duplex Scan'),
+        ('US_HEMODIALYSIS', 'U/S Duplex Scan of Hemodialysis'),
+    ]
+
+    # Relational Database Connections (Matching your Lab layout)
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='imaging_orders')
+    visit = models.ForeignKey('RegistrationRecord', on_delete=models.CASCADE, related_name='requested_imaging', null=True, blank=True)
+    
+    # Simple explicit matrix layout using boolean flags for the 7 standard procedures
+    has_us_carotid = models.BooleanField(default=False, verbose_name="U/S Carotid Doppler/Duplex")
+    has_us_duplex_low_ext = models.BooleanField(default=False, verbose_name="U/S Duplex Scan Low Ext Artery R/O Pseudo")
+    has_us_venous_ext = models.BooleanField(default=False, verbose_name="U/S Venous Duplex/Extremity")
+    has_us_venous_unila = models.BooleanField(default=False, verbose_name="U/S Venous Duplex/Extrm/Unila")
+    has_us_doppler_abd_pel = models.BooleanField(default=False, verbose_name="U/S Doppler, Abdominal/Pelvic")
+    has_us_limited_duplex = models.BooleanField(default=False, verbose_name="U/S Limited Study Duplex Scan")
+    has_us_hemodialysis = models.BooleanField(default=False, verbose_name="U/S Duplex Scan of Hemodialysis")
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    doctor_notes = models.TextField(blank=True, null=True, help_text="Notes/Clinical indications from the ordering clinician")
+    radiologist_report = models.TextField(blank=True, null=True, help_text="Official scan diagnostic summary from the radiologist")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    # --- Relational Helpers For the 4 Users (Mirrored from LabOrder) ---
+
+    @property
+    def patient_name(self):
+        """Used by Doctor, Radiologist, Patient, Billing"""
+        return self.patient.name
+
+    @property
+    def health_record_number(self):
+        """Used by Doctor, Radiologist, Patient, Billing"""
+        return getattr(self.patient, 'health_record_number', 'N/A')
+
+    @property
+    def queue_id(self):
+        """
+        Dynamically extracts token tracking identifier from active session sequence.
+        Used by Radiologist to process scans, and Billing Officer to calculate active invoices.
+        """
+        if self.visit:
+            return getattr(self.visit, 'token_id', f"Q{self.visit.id}")
+        return "N/A"
+
+    @property
+    def selected_imaging_list(self):
+        """Returns string representations matching frontend tracking matrices"""
+        scans = []
+        if self.has_us_carotid: scans.append("U/S Carotid Doppler/Duplex")
+        if self.has_us_duplex_low_ext: scans.append("U/S Duplex Scan Low Ext Artery R/O Pseudo")
+        if self.has_us_venous_ext: scans.append("U/S Venous Duplex/Extremity")
+        if self.has_us_venous_unila: scans.append("U/S Venous Duplex/Extrm/Unila")
+        if self.has_us_doppler_abd_pel: scans.append("U/S Doppler, Abdominal/Pelvic")
+        if self.has_us_limited_duplex: scans.append("U/S Limited Study Duplex Scan")
+        if self.has_us_hemodialysis: scans.append("U/S Duplex Scan of Hemodialysis")
+        return scans
+
+    def __str__(self):
+        return f"Imaging Order #{self.id} | Token: {self.queue_id} | {self.patient_name} - {self.status}"
+    
+
+class ImagingResult(models.Model):
+    # Matches your exact frontend imaging choices matrix
+    IMAGING_CHOICES = [
+        ('US_CAROTID', 'U/S Carotid Doppler/Duplex'),
+        ('US_DUPLEX_LOW_EXT', 'U/S Duplex Scan Low Ext Artery R/O Pseudo'),
+        ('US_VENOUS_EXT', 'U/S Venous Duplex/Extremity'),
+        ('US_VENOUS_UNILA', 'U/S Venous Duplex/Extrm/Unila'),
+        ('US_DOPPLER_ABD_PEL', 'U/S Doppler, Abdominal/Pelvic'),
+        ('US_LIMITED_DUPLEX', 'U/S Limited Study Duplex Scan'),
+        ('US_HEMODIALYSIS', 'U/S Duplex Scan of Hemodialysis'),
+    ]
+
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('COMPLETED', 'Result Ready'),
+    ]
+
+    # LINK BACK TO THE ORDER SYSTEM (Exactly like Lab)
+    imaging_order = models.ForeignKey(
+        'ImagingOrder', 
+        on_delete=models.CASCADE, 
+        related_name='results', 
+        null=True, 
+        blank=True,
+        help_text="The originating clinical instruction record"
+    )
+    
+    # Direct linkages for fast patient history lookups
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='imaging_history')
+    visit = models.ForeignKey('RegistrationRecord', on_delete=models.CASCADE, related_name='imaging_results', null=True)
+    
+    # Target scan properties
+    imaging_name = models.CharField(max_length=50, choices=IMAGING_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    is_critical = models.BooleanField(default=False)
+    
+    # Radiologist Narrative Reports
+    findings = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Detailed anatomical observations made during the ultrasound scan."
+    )
+    impression = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="The core clinical conclusion/diagnosis. What the doctor needs to know immediately."
+    )
+    
+    # Ownership Tracking
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        limit_choices_to={'role': 'RADIOLOGIST'} # Limits options to your specialized image reader role
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.get_imaging_name_display()} - {self.patient.name} ({self.status})"
+
+
+class ImagingAttachment(models.Model):
+    """
+    Holds the actual visual ultrasound images/snapshots tied back to the 
+    specific diagnostic result row above.
+    """
+    imaging_result = models.ForeignKey(
+        ImagingResult, 
+        on_delete=models.CASCADE, 
+        related_name='attachments'
+    )
+    image = models.ImageField(
+        upload_to='radiology/attachments/%Y/%m/%d/',
+        help_text="Key frame or annotated ultrasound snapshot graph"
+    )
+    caption = models.CharField(
+        max_length=255, 
+        blank=True, 
+        help_text="Optional description, e.g., 'Right carotid artery bifurcation showing velocity'"
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Attachment for Result #{self.imaging_result.id}"
+    
+
+class NurseServiceOrder(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('COMPLETED', 'Completed'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+    
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='nurse_orders')
+    visit = models.ForeignKey('RegistrationRecord', on_delete=models.CASCADE,  related_name='nurse_orders', null=True, blank=True)
+    
+    # Procedure selection flags
+    has_wound_dressing = models.BooleanField(default=False, verbose_name="Wound Dressing")
+    has_catheter_change = models.BooleanField(default=False, verbose_name="Catheter Change")
+    has_pelvic_screening = models.BooleanField(default=False, verbose_name="Pelvic Screening")
+    
+    # Billing tracking & instructions
+    total_estimated_charge = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    doctor_notes = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='PENDING')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Nurse Order #{self.id} - Patient: {self.patient}"
+    
+
     
 ## Finance & Revenue Cycle Models
 
@@ -836,7 +1037,7 @@ class Requisition(models.Model):
     requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='finance_requisitions')
     reason = models.TextField(help_text="Clinical, operational, or campaign-specific justification")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
-    total_cost = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    total_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1798,7 +1999,6 @@ def auto_generate_lab_results(sender, instance, created, **kwargs):
                         status='PENDING'
                     )
 
-
 class Service(models.Model):
     DEPARTMENT_CHOICES = [
         ('ONC', 'Oncology Center'),
@@ -1809,94 +2009,164 @@ class Service(models.Model):
         ('PHA', 'Pharmacy'),
     ]
 
+    CHARGE_TYPE_CHOICES = [
+        ('TRIGGERED', 'Triggered Event (Station Check-In)'),
+        ('DAILY_RECURRING', 'Daily Recurring (Midnight Run)'),
+        ('VARIABLE', 'Variable Entry (Manual input or Inventory)'),
+    ]
+
     sku = models.CharField(max_length=50, unique=True, db_index=True)
     name = models.CharField(max_length=255)
     dept = models.CharField(max_length=3, choices=DEPARTMENT_CHOICES)
     price = models.DecimalField(max_digits=12, decimal_places=2, help_text="Base selling price in KES")
+    charge_type = models.CharField(
+        max_length=20, 
+        choices=CHARGE_TYPE_CHOICES, 
+        default='TRIGGERED',
+        db_index=True
+    )
+    
     active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.sku} - {self.name} (KES {self.price})"
+        return f"{self.sku} - {self.name} ({self.charge_type} - KES {self.price})"
 
 
 # --- Transactional Point-Of-Care Billing Matrix ---
 
-class PatientBillableItem(models.Model):
-    STATION_CHOICES = [
-        ('REGISTRATION', 'Registration'),
-        ('TRIAGE', 'Triage Station'),
-        ('DOCTOR', 'Consultation Room'),
-        ('LAB', 'Laboratory'),
-        ('RADIOLOGY', 'Radiology Room'),
-        ('PSYCHOLOGY', 'Psychology Room'),
-        ('PHARMACY', 'Pharmacy'),
+class PatientInvoice(models.Model):
+    """
+    Groups all station charges incurred during a specific outpatient visit session.
+    """
+    STATUS_CHOICES = [
+        ('UNPAID', 'Unpaid Draft'),
+        ('PARTIAL', 'Partially Paid'),
+        ('PAID', 'Fully Settled'),
+        ('INSURANCE_PENDING', 'Awaiting Insurance Pre-Auth Clear'),
     ]
 
-    BILLING_STATUS_CHOICES = [
-        ('PENDING', 'Pending Payment'),
-        ('PAID', 'Paid'),
-        ('WAIVED', 'Waived'),
-    ]
-
+    visit = models.OneToOneField(
+        'RegistrationRecord', 
+        on_delete=models.CASCADE, 
+        related_name='invoice'
+    )
     patient = models.ForeignKey(
         'Patient', 
         on_delete=models.CASCADE, 
+        related_name='invoices'
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='UNPAID')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def total_payable(self):
+        """Aggregates all related line item costs dynamically for the frontend total"""
+        return sum(item.total_cost for item in self.items.all())
+
+    def __str__(self):
+    # Safe fallback if 'patient' relationship or 'name' is missing
+        if hasattr(self, 'patient') and self.patient:
+            return f"Invoice for {self.patient.name}"
+        elif hasattr(self, 'name'):
+            return f"{self.name}"
+        return f"Invoice #{self.id}"
+
+
+class PatientBillableItem(models.Model):
+    """
+    Unified line-item ledger that pulls costs from both standard Services 
+    and Pharmacy Drugs, tracking the 6 exact active charging stations.
+    """
+    # ✨ Explicitly mapped to your 6 active charging stations (Registration removed)
+    STATION_DISPLAY_CHOICES = [
+        ('Consultation', 'Oncology (Consultation Room)'),
+        ('Laboratory', 'Laboratory'),
+        ('Radiology', 'Radiology & Imaging'),
+        ('Nursing', 'Nursing & Procedures'),
+        ('Pharmacy', 'Pharmacy'),
+        ('Psychology', 'Counselling Psychology'),
+    ]
+
+    invoice = models.ForeignKey(
+        PatientInvoice, 
+        on_delete=models.CASCADE, 
+        related_name='items'
+    )
+    
+    # Track the exact station matching your new frontend column layout
+    station = models.CharField(
+        max_length=30, 
+        choices=STATION_DISPLAY_CHOICES, 
+        default='Consultation'
+    )
+
+    # Polymorphic links (Both are blank=True, null=True)
+    service = models.ForeignKey(
+        'Service', 
+        on_delete=models.SET_NULL, 
+        blank=True, 
+        null=True, 
         related_name='billable_items'
     )
-    # Links directly to the current session sequence to cluster items on an active visit invoice
-    visit = models.ForeignKey(
-        'RegistrationRecord', 
-        on_delete=models.CASCADE, 
-        related_name='billable_items',
-        null=True,
-        blank=True
+    drug = models.ForeignKey(
+        'Drug', 
+        on_delete=models.SET_NULL, 
+        blank=True, 
+        null=True, 
+        related_name='billable_items'
     )
-    # Optional connection to the specific base configuration blueprint
-    service = models.ForeignKey(
-        Service, 
-        on_delete=models.PROTECT, 
-        related_name='billed_instances',
-        null=True,
-        blank=True
-    )
-    
-    # Text fallback snapshots to prevent historical changes from corrupting old financial records
-    service_sku_snapshot = models.CharField(max_length=50)
-    service_name_snapshot = models.CharField(max_length=255)
-    
-    # Real-time auditing context
-    station_charged = models.CharField(max_length=20, choices=STATION_CHOICES)
-    qty = models.PositiveIntegerField(default=1)
-    price_snap = models.DecimalField(max_digits=12, decimal_places=2, help_text="Price snapshot at point of care")
-    total_amount = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
-    
-    billing_status = models.CharField(max_length=15, choices=BILLING_STATUS_CHOICES, default='PENDING')
-    ordered_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.PROTECT, 
-        related_name='initiated_charges'
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        ordering = ['-created_at']
+    # Snapshotted text values to safeguard historical financial accounting audits
+    name = models.CharField(
+        max_length=255, 
+        help_text="Captured name at the moment of entry execution"
+    )
+    unit_price = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        default=0.00
+    )
+    quantity = models.PositiveIntegerField(default=1)
+    
+    is_paid = models.BooleanField(default=False)
+    incurred_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def total_cost(self):
+        return self.unit_price * self.quantity
 
     def save(self, *args, **kwargs):
-        # Always pull from the configuration template if present during initial entry creation
-        if self.service and not self.id:
-            self.service_sku_snapshot = self.service.sku
-            self.service_name_snapshot = self.service.name
-            if not self.price_snap:
-                self.price_snap = self.service.price
-                
-        # Handle strict point-of-care totals generation
-        self.total_amount = self.qty * self.price_snap
+        """
+        Auto-lookup hook: pull default prices and standard names from 
+        the source catalog records if not explicitly declared.
+        """
+        if self.service and not self.name:
+            self.name = self.service.name
+            self.unit_price = self.service.price
+            
+            # ✨ Maps the 3-letter Service.dept choices perfectly to your exact frontend display strings
+            dept_mapping = {
+                'ONC': 'Consultation',
+                'LAB': 'Laboratory',
+                'RAD': 'Radiology',
+                'NUR': 'Nursing',
+                'PHA': 'Pharmacy',
+                'PSY': 'Psychology'
+            }
+            self.station = dept_mapping.get(self.service.dept, 'Consultation')
+            
+        elif self.drug and not self.name:
+            self.name = f"{self.drug.name} ({self.drug.strength or ''})"
+            self.unit_price = self.drug.selling_price_kes
+            self.station = 'Pharmacy'
+
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.service_sku_snapshot} - {self.patient.name} ({self.billing_status})"
+        return f"{self.station} -> {self.name} ({self.quantity}x KES {self.unit_price})"
 
 
 
