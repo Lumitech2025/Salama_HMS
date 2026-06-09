@@ -3,46 +3,58 @@ import { CheckCircle2, Activity, Thermometer, Heart, Scale, Percent, MoveUp, Hel
 
 const VitalsTab = ({ vitals = [], patientData }) => {
   
-  // 🎯 Extract active patient ID accurately across context formats
-  const activePatientId = patientData?.id || patientData?.patient?.id || patientData?.patient_id;
+  // 🎯 Safely resolve the patient sub-object properties directly from context
+  const corePatient = patientData?.patient || patientData;
 
-  // 🛡️ Fail-safe structural array resolution
-  const rawVitalsList = Array.isArray(vitals) 
-    ? vitals 
-    : Array.isArray(patientData?.vitals) 
-      ? patientData.vitals 
-      : Array.isArray(patientData?.patient?.vitals) 
-        ? patientData.patient.vitals 
-        : [];
-
-  // 🔄 Defensive Filtering: Handles both flat ID integers and nested patient sub-objects 
-  const targetVitals = rawVitalsList.filter(item => {
-    if (!activePatientId) return true; 
-    
-    // Extract the ID whether backend sent an object or a flat integer ID
-    const recordPatientId = item.patient && typeof item.patient === 'object' 
-      ? item.patient.id 
-      : item.patient;
-
-    return Number(recordPatientId) === Number(activePatientId);
-  });
-
-  // Extract the latest record (guaranteed by Django's ordering = ['-created_at'])
-  const latestVitals = targetVitals[0] || {};
-
-  // Comprehensive safety parser for patient naming values
+  // Format the exact name dynamically based on what's currently in context
   const getPatientFullName = () => {
-    if (!patientData) return "COLLINS KIMATHI MWITI";
-    const core = patientData.patient || patientData;
+    if (!corePatient) return "LOADING PATIENT CONTEXT...";
     
-    if (core.first_name || core.last_name) {
-      const mid = core.middle_name ? ` ${core.middle_name}` : '';
-      return `${core.first_name || ''}${mid} ${core.last_name || ''}`.trim().toUpperCase();
+    if (corePatient.first_name || corePatient.last_name) {
+      const mid = corePatient.middle_name ? ` ${corePatient.middle_name}` : '';
+      return `${corePatient.first_name || ''}${mid} ${corePatient.last_name || ''}`.trim().toUpperCase();
     }
-    return (core.name || "COLLINS KIMATHI MWITI").toUpperCase();
+    
+    // Fallback for flat dictionary name structures
+    if (corePatient.name) return corePatient.name.toUpperCase();
+    
+    return "UNKNOWN PATIENT RECORD";
   };
 
-  const hrn = patientData?.health_record_number || patientData?.patient?.health_record_number || "SCC-001/26";
+  const healthRecordNumber = corePatient?.health_record_number || "PENDING ISSUANCE";
+
+  // Rely on the server-filtered vitals data array passed straight down from the parent shell
+  const targetVitals = Array.isArray(vitals) ? vitals : [];
+
+  // Helper utility to safely extract or calculate BMI on the fly if backend misses it
+  const getBmiValue = (item) => {
+    if (item.bmi !== undefined && item.bmi !== null && Number(item.bmi) !== 0) {
+      return Number(item.bmi);
+    }
+    if (item.weight && item.height && Number(item.height) > 0) {
+      const heightM = Number(item.height) / 100;
+      return roundToTwo(Number(item.weight) / (heightM * heightM));
+    }
+    return 0;
+  };
+
+  // Helper utility to safely extract or calculate BSA (Mosteller Formula) on the fly
+  const getBsaValue = (item) => {
+    if (item.bsa !== undefined && item.bsa !== null && Number(item.bsa) !== 0) {
+      return Number(item.bsa);
+    }
+    if (item.weight && item.height) {
+      return roundToTwo(Math.sqrt((Number(item.height) * Number(item.weight)) / 3600));
+    }
+    return 0;
+  };
+
+  const roundToTwo = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
+
+  // Extract the latest record 
+  const latestVitals = targetVitals[0] || {};
+  const latestBmi = getBmiValue(latestVitals);
+  const latestBsa = getBsaValue(latestVitals);
 
   const renderBP = (v) => {
     if (v && v.systolic_bp && v.diastolic_bp) {
@@ -66,7 +78,7 @@ const VitalsTab = ({ vitals = [], patientData }) => {
               {getPatientFullName()}
             </h3>
             <span className="text-xs font-medium text-slate-500 block mt-0.5">
-              Health Record Number: <span className="font-mono font-bold text-slate-700">{hrn}</span>
+              Health Record Number: <span className="font-mono font-bold text-slate-700">{healthRecordNumber}</span>
             </span>
           </div>
         </div>
@@ -133,14 +145,14 @@ const VitalsTab = ({ vitals = [], patientData }) => {
           },
           { 
             label: 'Body Mass Index (BMI)', 
-            value: latestVitals.bmi && latestVitals.bmi !== 0 ? `${latestVitals.bmi} kg/m²` : '—', 
+            value: latestBmi !== 0 ? `${latestBmi} kg/m²` : '—', 
             sub: 'Calculated Body Mass Value', 
             icon: MoveUp, 
             color: 'text-indigo-600 bg-indigo-50 border-indigo-100 font-bold' 
           },
           { 
             label: 'Body Surface Area (BSA)', 
-            value: latestVitals.bsa && latestVitals.bsa !== 0 ? `${latestVitals.bsa} m²` : '—', 
+            value: latestBsa !== 0 ? `${latestBsa} m²` : '—', 
             sub: 'Mosteller Surface Index Metric', 
             icon: HelpCircle, 
             color: 'text-purple-600 bg-purple-50 border-purple-100 font-bold' 
@@ -178,25 +190,30 @@ const VitalsTab = ({ vitals = [], patientData }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
-              {targetVitals.length > 0 ? targetVitals.map((item, idx) => (
-                <tr key={idx} className="hover:bg-slate-50/70 transition-colors text-slate-700">
-                  <td className="p-4 text-left font-semibold text-slate-900">
-                    {item.created_at ? new Date(item.created_at).toLocaleDateString('en-GB') : 'Clinical Check'}
-                  </td>
-                  <td className="p-4 text-center font-mono font-bold text-slate-900 text-base">{renderBP(item)}</td>
-                  <td className="p-4 text-center font-mono text-base">{item.heart_rate || '—'}</td>
-                  <td className="p-4 text-center font-mono text-base">{item.respiratory_rate || '—'}</td>
-                  <td className="p-4 text-center font-mono text-base">{item.temperature ? `${item.temperature}°C` : '—'}</td>
-                  <td className="p-4 text-center font-mono font-bold text-emerald-600 text-base">{item.spo2 ? `${item.spo2}%` : '—'}</td>
-                  <td className="p-4 text-center font-mono text-sm">{item.weight || '—'}kg / {item.height || '—'}cm</td>
-                  <td className="p-4 text-center font-mono font-bold text-indigo-700 bg-indigo-50/40 text-base">
-                    {item.bmi && item.bmi !== 0 ? item.bmi : '—'}
-                  </td>
-                  <td className="p-4 text-right px-6 font-mono font-bold text-purple-700 text-base bg-purple-50/20">
-                    {item.bsa && item.bsa !== 0 ? item.bsa : '—'}
-                  </td>
-                </tr>
-              )) : (
+              {targetVitals.length > 0 ? targetVitals.map((item, idx) => {
+                const currentBmi = getBmiValue(item);
+                const currentBsa = getBsaValue(item);
+
+                return (
+                  <tr key={idx} className="hover:bg-slate-50/70 transition-colors text-slate-700">
+                    <td className="p-4 text-left font-semibold text-slate-900">
+                      {item.created_at ? new Date(item.created_at).toLocaleDateString('en-GB') : 'Clinical Check'}
+                    </td>
+                    <td className="p-4 text-center font-mono font-bold text-slate-900 text-base">{renderBP(item)}</td>
+                    <td className="p-4 text-center font-mono text-base">{item.heart_rate || '—'}</td>
+                    <td className="p-4 text-center font-mono text-base">{item.respiratory_rate || '—'}</td>
+                    <td className="p-4 text-center font-mono text-base">{item.temperature ? `${item.temperature}°C` : '—'}</td>
+                    <td className="p-4 text-center font-mono font-bold text-emerald-600 text-base">{item.spo2 ? `${item.spo2}%` : '—'}</td>
+                    <td className="p-4 text-center font-mono text-sm">{item.weight || '—'}kg / {item.height || '—'}cm</td>
+                    <td className="p-4 text-center font-mono font-bold text-indigo-700 bg-indigo-50/40 text-base">
+                      {currentBmi !== 0 ? currentBmi : '—'}
+                    </td>
+                    <td className="p-4 text-right px-6 font-mono font-bold text-purple-700 text-base bg-purple-50/20">
+                      {currentBsa !== 0 ? currentBsa : '—'}
+                    </td>
+                  </tr>
+                );
+              }) : (
                 <tr>
                   <td colSpan="9" className="p-16 text-center text-slate-400 font-medium font-mono text-sm">
                     No Vitals Records Found for this Selection Context

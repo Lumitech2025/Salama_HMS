@@ -196,11 +196,7 @@ const NurseDashboard = () => {
                         <div className="space-y-6">
                             <div className="flex justify-between items-center">
                                 
-                                {selectedPatient && (
-                                    <div className="bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider border-l-4 border-l-blue-500 shadow-sm">
-                                        Current Context: {selectedPatient.patient_name}
-                                    </div>
-                                )}
+                                
                             </div>
                             
                             <div className="bg-white rounded-2xl p-6 shadow-xs border border-slate-200 min-h-[75vh] animate-in slide-in-from-bottom-4 duration-500">

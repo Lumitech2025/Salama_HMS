@@ -4,12 +4,16 @@ import FinanceDashboard from './FinanceDashboard';
 
 // Import all functional modules
 import MainStoreLedger from './modules/MainStoreLedger';
+import StockTakeManager from './modules/StockTakeManager';
+import AssetLedger from './modules/AssetLedger';
 import SupplierManagement from './modules/SupplierManagement';
 import PurchaseOrderManagement from './modules/PurchaseOrderManagement'; // New PO module link
 import InsuranceClaimsHub from './modules/InsuranceClaimsHub';
 import FinanceRequisitionsTab from './modules/FinanceRequisitionsTab';
 import InsuranceProviders from '../billingofficer/modules/InsuranceProviders';
 import ServiceCatalogue from '../billingofficer/modules/ServiceCatalogue';
+import ExpensesManagement from './modules/ExpenseManagement';
+
 
 const FinancePortal = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -35,6 +39,9 @@ const [prefilledRequisition, setPrefilledRequisition] = useState(null);
       
       case 'inventory': 
         return <MainStoreLedger />;
+
+      case 'assets':
+        return <AssetLedger />;
       
       case 'vendors': 
         return <SupplierManagement />;
@@ -55,9 +62,15 @@ const [prefilledRequisition, setPrefilledRequisition] = useState(null);
       
       case 'insurance_providers':
         return <InsuranceProviders />;
+
+      case 'expenses':
+        return <ExpensesManagement />;
       
       case 'service-catalogue':
         return <ServiceCatalogue />;
+
+      case 'stocktake':
+        return <StockTakeManager />;
       
       default: 
         return <FinanceDashboard />;

@@ -2,14 +2,14 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   CreditCard, Smartphone, Receipt, Search, Plus, 
   CheckCircle2, ArrowRight, ShieldCheck, User, 
-  Loader2, X, Mail, MessageSquare, ArrowUpRight, Check
+  Loader2, X, Mail, MessageSquare, ArrowUpRight, Check, AlertTriangle
 } from 'lucide-react';
 
 const PaymentPortal = () => {
   const [billingMode, setBillingMode] = useState('self_pay'); 
   const [paymentMethod, setPaymentMethod] = useState('mpesa');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [paymentStatus, setPaymentStatus] = useState('idle');
+  const [paymentStatus, setPaymentStatus] = useState('idle'); 
 
   const [searchPatient, setSearchPatient] = useState('');
   const [selectedPatient, setSelectedPatient] = useState(null);
@@ -28,11 +28,44 @@ const PaymentPortal = () => {
   const [masterCatalog, setMasterCatalog] = useState({});
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(true);
 
+  // ✨ NEW: Transaction state handlers for polling tracking
+  const [errorMessage, setErrorMessage] = useState('');
+  const [countdown, setCountdown] = useState(60);
+
+  // Helper to retrieve the CSRF token from Django cookies
+const getCookie = (name) => {
+  let cookieValue = null;
+  if (document.cookie && document.cookie !== '') {
+    const cookies = document.cookie.split(';');
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim();
+      if (cookie.substring(0, name.length + 1) === (name + '=')) {
+        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+        break;
+      }
+    }
+  }
+  return cookieValue;
+};
+
   // Helper function to dynamically retrieve JWT Access Token headers
   const getAuthHeaders = () => {
     const token = localStorage.getItem('access_token');
     return token ? { 'Authorization': `Bearer ${token}` } : {};
   };
+
+ 
+  useEffect(() => {
+    let timer;
+    if (paymentStatus === 'prompting' && countdown > 0) {
+      timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+    } else if (countdown === 0 && paymentStatus === 'prompting') {
+      setPaymentStatus('failed');
+      setIsProcessing(false);
+      setErrorMessage('M-Pesa entry window timed out. Please check mobile handset network connectivity.');
+    }
+    return () => clearTimeout(timer);
+  }, [countdown, paymentStatus]);
 
   // Fetch active Master Service Catalog prices to prevent static price injection leaks
   const fetchMasterCatalogPrices = useCallback(async () => {
@@ -71,7 +104,6 @@ const PaymentPortal = () => {
     fetchMasterCatalogPrices();
   }, [fetchMasterCatalogPrices]);
 
-  // Handles search inputs with explicit JWT Auth injections
   useEffect(() => {
     if (searchPatient.trim().length > 2) {
       setIsSearching(true);
@@ -111,9 +143,10 @@ const PaymentPortal = () => {
     setPatientQueryResults([]);
     setHasSearched(false);
     setVerificationStatus('unverified'); 
+    setPaymentStatus('idle');
+    setErrorMessage('');
     
     if (patientRecord.active_bill && Array.isArray(patientRecord.active_bill.items)) {
-      // Reconcile prices dynamically from master catalog maps by cross-matching operational SKUs 
       const dynamicallyPricedCart = patientRecord.active_bill.items.map(item => {
         const fallbackPrice = parseFloat(item.price || 0);
         const dynamicMasterPrice = masterCatalog[item.sku || item.sku_code];
@@ -143,43 +176,127 @@ const PaymentPortal = () => {
     setCart(cart.filter(item => item.id !== id));
   };
 
-  // Settle payments against active invoice IDs
-  const handleProcessPayment = async () => {
-    if (!selectedPatient || !invoiceId) return;
-    setIsProcessing(true);
+  // ✨ NEW: Internal polling status scanner
+  const startMpesaCallbackTracking = (invId) => {
+    const checkInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/invoices/${invId}/`, {
+          method: 'GET',
+          headers: getAuthHeaders()
+        });
+        
+        if (res.ok) {
+          const updatedInvoice = await res.json();
+          
     
-    try {
-      if (paymentMethod === 'mpesa') {
-        setPaymentStatus('prompting');
-        await new Promise(resolve => setTimeout(resolve, 2000));
+          if (updatedInvoice.status === 'PAID') {
+            clearInterval(checkInterval);
+            setPaymentStatus('success');
+            setIsProcessing(false);
+          } else if (updatedInvoice.status === 'UNPAID' && paymentStatus !== 'prompting') {
+            clearInterval(checkInterval);
+            setPaymentStatus('failed');
+            setIsProcessing(false);
+            setErrorMessage('Transaction declined or aborted on user mobile handset.');
+          }
+        }
+      } catch (err) {
+        console.error("Polled verification link disconnected:", err);
       }
+    }, 2000); 
 
-      const response = await fetch(`/api/invoices/${invoiceId}/settle-payment/`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...getAuthHeaders()
-        },
-        body: JSON.stringify({ 
-          payment_method: paymentMethod.toUpperCase(),
-          phone_number: paymentMethod === 'mpesa' ? phoneNumber : null,
-          validated_items: cart // Pass corrected cart entries tracking back into core accounting logs
-        })
-      });
-
-      if (response.ok) {
-        setPaymentStatus('success');
-      } else {
-        alert("Payment processing execution failed at the core terminal server.");
-        setPaymentStatus('idle');
-      }
-    } catch (error) {
-      console.error("Network communication fault during checkout:", error);
-      setPaymentStatus('idle');
-    } finally {
-      setIsProcessing(false);
-    }
+    
+    setTimeout(() => clearInterval(checkInterval), 61000);
   };
+
+  const handleProcessPayment = async () => {
+  // 1. Initial Validations
+  if (!phoneNumber || phoneNumber.trim() === '') {
+    alert("Please enter a valid M-Pesa phone number.");
+    return;
+  }
+
+  try {
+    // 2. Set UI to loading state
+    setPaymentStatus('prompting'); // Shows your "AWAITING PATIENT PIN INPUT..." loader
+    setCountdown(60);             
+
+    // 3. Trigger the initial STK Push request to Django
+    const response = await fetch('/api/mpesa/trigger-push/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+        ...getAuthHeaders() // If you use JWT authentication tokens
+      },
+      body: JSON.stringify({
+        invoice_id: invoiceId,
+        phone_number: phoneNumber,
+        validated_items: cart // Sends the items payload to compute total amount
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to initiate M-Pesa payment.");
+    }
+
+    // ✨ 4. STK PUSH TRIGGERED SUCCESSFULLY! NOW START POLLING
+    console.log("STK Push active. CheckoutRequestID:", data.checkout_id);
+
+    // Setup the interval to check our new status endpoint every 3 seconds (3000ms)
+    const pollInterval = setInterval(async () => {
+      try {
+        const statusResponse = await fetch(`/api/mpesa/check-status/${invoiceId}/`, {
+          headers: getAuthHeaders()
+        });
+        const statusData = await statusResponse.json();
+
+        console.log("Polling invoice status...", statusData.status);
+
+        // Scenario A: Payment is a complete success!
+        if (statusData.status === 'PAID') {
+          clearInterval(pollInterval); // Stop looping
+          setPaymentStatus('success');  // Changes UI to show completion/green checkmark
+          
+          // Optional: Trigger your receipt printing or local state update here
+          if (onPaymentComplete) {
+            onPaymentComplete(statusData.receipt_number);
+          }
+        } 
+        
+        
+        else if (statusData.status === 'UNPAID') {
+          clearInterval(pollInterval); // Stop looping
+          setPaymentStatus('failed');   // Switch UI to a failure/retry view
+          alert("Transaction was cancelled or rejected on the handset.");
+        }
+        
+
+      } catch (pollError) {
+        console.error("Error during background status check:", pollError);
+      }
+    }, 3000);
+
+    
+    setTimeout(() => {
+      clearInterval(pollInterval);
+      setPaymentStatus((currentStatus) => {
+        if (currentStatus === 'prompting') {
+          alert("M-Pesa payment validation timed out. Please check your phone or try again.");
+          return 'failed';
+        }
+        return currentStatus;
+      });
+    }, 60000); // 60,000ms = 1 minute
+
+  } catch (error) {
+    console.error("Payment initiation failed:", error);
+    alert(error.message || "An unexpected error occurred.");
+    setPaymentStatus('idle'); 
+  }
+};
 
   // Connects live corporate underwriters to claims validators
   const handleVerifyInsurance = async (e) => {
@@ -192,6 +309,7 @@ const PaymentPortal = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken'),
           ...getAuthHeaders()
         },
         body: JSON.stringify({
@@ -229,14 +347,14 @@ const PaymentPortal = () => {
         <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
           <button 
             type="button"
-            onClick={() => { setBillingMode('self_pay'); setPaymentStatus('idle'); }}
+            onClick={() => { setBillingMode('self_pay'); setPaymentStatus('idle'); setErrorMessage(''); }}
             className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all flex items-center gap-2 ${billingMode === 'self_pay' ? 'bg-emerald-500 text-white' : 'text-slate-400 hover:text-white'}`}
           >
             <User size={14} /> Self Pay (M-Pesa / Cash)
           </button>
           <button 
             type="button"
-            onClick={() => { setBillingMode('insurance'); setPaymentStatus('idle'); }}
+            onClick={() => { setBillingMode('insurance'); setPaymentStatus('idle'); setErrorMessage(''); }}
             className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all flex items-center gap-2 ${billingMode === 'insurance' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
           >
             <ShieldCheck size={14} /> Insurance Schemes
@@ -246,12 +364,12 @@ const PaymentPortal = () => {
 
       {/* PATIENT SELECTOR */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs relative">
-        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Active Patient Selector</label>
+        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Patient</label>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
           <input 
             type="text" 
-            placeholder="Type patient name, queue ID, or HRN number to fetch active station bills..." 
+            placeholder="Type patient name, queue ID, or HRN number to fetch Patient's bills..." 
             value={searchPatient}
             onChange={(e) => setSearchPatient(e.target.value)}
             className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-9 pr-4 text-xs font-medium outline-none focus:border-slate-300 focus:bg-white transition-all"
@@ -306,7 +424,7 @@ const PaymentPortal = () => {
                 <span className="block text-slate-400 text-[10px] mt-0.5">Active Cover Link: {selectedPatient.scheme || 'Cash / Self-Pay'} | Token ID: {selectedPatient.queue_id}</span>
               </div>
             </div>
-            <button type="button" onClick={() => { setSelectedPatient(null); setCart([]); setInvoiceId(null); }} className="text-slate-400 hover:text-slate-600 p-1">
+            <button type="button" onClick={() => { setSelectedPatient(null); setCart([]); setInvoiceId(null); setErrorMessage(''); }} className="text-slate-400 hover:text-slate-600 p-1">
               <X size={14} />
             </button>
           </div>
@@ -398,6 +516,14 @@ const PaymentPortal = () => {
                 </div>
               </div>
 
+              {/* ✨ NEW: Input errors parsing viewport banner */}
+              {errorMessage && (
+                <div className="p-3 bg-red-950/40 border border-red-500/30 text-red-200 rounded-lg flex items-center gap-2.5 text-[11px]">
+                  <AlertTriangle size={14} className="text-red-400 shrink-0" />
+                  <span>{errorMessage}</span>
+                </div>
+              )}
+
               {paymentStatus === 'success' ? (
                 <div className="bg-emerald-950/30 border border-emerald-900 p-4 rounded-lg text-center space-y-3">
                   <div className="w-10 h-10 bg-emerald-500 text-white rounded-full flex items-center justify-center mx-auto shadow-sm">
@@ -407,21 +533,32 @@ const PaymentPortal = () => {
                     <h4 className="text-xs font-bold text-white">Payment Confirmed</h4>
                     <span className="text-[10px] font-mono text-slate-400 block mt-0.5">REF: SAL-STK-{Math.floor(Math.random()*90000+10000)}</span>
                   </div>
-                  <button type="button" onClick={() => { setPaymentStatus('idle'); setSelectedPatient(null); setCart([]); setInvoiceId(null); }} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white py-2 rounded-lg text-xs font-bold transition-all">Clear Terminal</button>
+                  <button type="button" onClick={() => { setPaymentStatus('idle'); setSelectedPatient(null); setCart([]); setInvoiceId(null); setErrorMessage(''); }} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white py-2 rounded-lg text-xs font-bold transition-all">Clear Terminal</button>
+                </div>
+              ) : paymentStatus === 'prompting' ? (
+                /* ✨ NEW: High-contrast modal block locking view while user inputs phone PIN */
+                <div className="bg-slate-900 border border-emerald-500/20 p-4 rounded-lg text-center space-y-2">
+                  <div className="flex items-center justify-center gap-2.5 text-emerald-400 font-bold text-xs uppercase tracking-wide">
+                    <Loader2 className="animate-spin" size={14} />
+                    <span>Awaiting Patient PIN Input...</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    STK push dispatched to <span className="text-white font-mono font-bold">{phoneNumber}</span>. Window expires in <span className="text-emerald-400 font-bold">{countdown}s</span>
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-2">
                     <button 
                       type="button"
-                      onClick={() => setPaymentMethod('mpesa')}
+                      onClick={() => { setPaymentMethod('mpesa'); setErrorMessage(''); }}
                       className={`flex items-center justify-center gap-2 p-2.5 rounded-lg border text-xs font-semibold transition-all ${paymentMethod === 'mpesa' ? 'bg-emerald-600/10 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
                     >
                       <Smartphone size={14} /> M-Pesa STK
                     </button>
                     <button 
                       type="button"
-                      onClick={() => setPaymentMethod('cash')}
+                      onClick={() => { setPaymentMethod('cash'); setErrorMessage(''); }}
                       className={`flex items-center justify-center gap-2 p-2.5 rounded-lg border text-xs font-semibold transition-all ${paymentMethod === 'cash' ? 'bg-emerald-600/10 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
                     >
                       <CreditCard size={14} /> Cash Payments
@@ -437,6 +574,7 @@ const PaymentPortal = () => {
                         onChange={(e) => setPhoneNumber(e.target.value)}
                         placeholder="e.g. 0712345678"
                         className="w-full bg-slate-950 border border-slate-800 rounded-md p-1.5 text-xs font-mono font-bold text-white outline-none focus:border-slate-600"
+                        disabled={isProcessing}
                       />
                     </div>
                   )}
@@ -449,15 +587,25 @@ const PaymentPortal = () => {
                     {isProcessing ? (
                       <>
                         <Loader2 className="animate-spin" size={14} />
-                        <span>PROCESSING...</span>
+                        <span>PROCESSING GATEWAY DISPATCH...</span>
                       </>
                     ) : (
                       <>
-                        <span>Execute Transaction</span>
+                        <span>{paymentMethod === 'mpesa' ? 'Execute STK Push Request' : 'Execute Cash Transaction'}</span>
                         <ArrowRight size={14} />
                       </>
                     )}
                   </button>
+                  
+                  {paymentStatus === 'failed' && (
+                    <button 
+                      type="button" 
+                      onClick={() => setPaymentStatus('idle')} 
+                      className="w-full bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 text-[11px] py-1.5 rounded-lg font-semibold transition-all"
+                    >
+                      Reset Transaction State Node
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -468,7 +616,7 @@ const PaymentPortal = () => {
                 <ShieldCheck className="text-blue-600" size={16} />
                 <div>
                   <h3 className="text-xs font-bold text-slate-900">Pre-Authorization Validator</h3>
-                  <p className="text-[10px] text-slate-400">Verify corporate insurance policy validity</p>
+                  <p className="text-[10px] text-slate-400">Verify Insurance</p>
                 </div>
               </div>
 

@@ -1,14 +1,16 @@
+// api.js
 import axios from 'axios';
 
-// Consolidate onto a single base server domain to avoid dynamic IP breakages
 const BASE_DOMAIN = "http://localhost:8000";
-
 export const API_URL = `${BASE_DOMAIN}/api`; 
 export const LOGIN_URL = `${BASE_DOMAIN}/api/auth/login/`;
 
-// Create and export the default instance that Registration.jsx is looking for
+// Create and export the default instance with dynamic CSRF injection
 const API = axios.create({
     baseURL: API_URL,
+    xsrfCookieName: 'csrftoken',
+    xsrfHeaderName: 'X-CSRFToken',
+    withCredentials: true, // Allows your browser to share secure tokens across localhost ports safely
 });
 
 // Automatically inject the Bearer token into every request if it exists
@@ -23,19 +25,44 @@ API.interceptors.request.use((config) => {
 });
 
 export default API;
-
-// Fixed endpoint duplication issue
 export const registerStaff = async (staffData) => {
     try {
-        // Because your default 'API' instance has interceptors and a baseURL config,
-        // you do NOT need to pass the raw token or full API_URL string manually here!
         const response = await API.post('/register/', staffData, {
-            headers: {
-                'Content-Type': 'application/json'
-            }
+            headers: { 'Content-Type': 'application/json' }
         });
         return response.data;
     } catch (error) {
         throw error.response ? error.response.data : new Error("Network Error");
+    }
+};
+
+export const submitRadiologyRequisition = async (patientId, visitId, selectedScans) => {
+    try {
+        const payload = {
+            patient: patientId, 
+            visit: visitId,     
+            imaging_skus: selectedScans.map(scan => scan.id), 
+            requested_procedures: selectedScans.map(scan => ({
+                scan_id: scan.id,
+                label: scan.label,
+                cost: scan.price || 0
+            })),
+            billing: {
+                total_amount: selectedScans.reduce((sum, scan) => sum + (scan.price || 0), 0),
+                status: "CHARGED_TO_ACCOUNT"
+            },
+            queue_routing: {
+                target_department: "RADIOLOGY_DESK",
+                status: "PENDING",
+                entered_at: new Date().toISOString()
+            }
+        };
+
+        const response = await API.post('/imaging-orders/', payload, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+        return response.data;
+    } catch (error) {
+        throw error.response ? error.response.data : new Error("Failed to process radiology requisition");
     }
 };

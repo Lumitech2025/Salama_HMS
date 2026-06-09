@@ -4,63 +4,26 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from django.conf.urls.static import static
 from django.conf import settings
 
-# All viewsets and functions imported cleanly from your local views.py
 from .views import (
-    ICD11TokenProxyView,
-    InsuranceCompanyViewSet,
-    InsuranceSchemeViewSet,
-    NurseServiceOrderViewSet,      
-    RemittanceBatchViewSet, 
-    InsuranceClaimViewSet,
-    ClaimDispatchBatchViewSet,
-    InventoryItemViewSet,
-    LabInventoryViewSet,
-    LabOrderViewSet,
-    LabReferenceViewSet,         
-    LabTestRegistryViewSet,
-    MarketingRequisitionViewSet,
-    PatientViewSet, 
-    ProtocolViewSet,
-    CancerSiteViewSet, 
-    CancerTypeViewSet, 
-    RegimenViewSet,
-    RequisitionViewSet, 
-    TreatmentViewSet, 
-    ChemoSessionViewSet, 
-    DrugViewSet, 
-    LabResultViewSet, 
-    BillViewSet,
-    AppointmentViewSet,
-    VitalSignViewSet,
-    QueueViewSet,              
-    PrescriptionViewSet,     
-    ClinicalNoteViewSet,     
-    ImagingRecordViewSet,    
-    SalamaTokenObtainPairView,
-    RegistrationRecordViewSet,
-    PsychologyEnrollmentViewSet,
-    SessionLogViewSet,
-    BereavementLogViewSet,
-    OutreachCampaignViewSet, 
-    ReferralPartnerViewSet, 
-    SocialMediaPostViewSet,
-    ProtocolMasterViewSet,
-    ServiceViewSet,
-    PatientBillableItemViewSet,
-    patient_lookup,
-    PatientDiagnosisViewSet,
-    SupplierViewSet,
-    PurchaseOrderViewSet, 
-    GoodsReceivedNoteViewSet,
-    PurchaseInvoiceViewSet, 
-    PaymentVoucherViewSet,
-    ICD10DiagnosisViewSet,
-    PatientBillingSearchViewSet, 
-    PatientInvoiceViewSet,
-    ImagingOrderViewSet, 
-    ImagingResultViewSet,
-    MpesaPaymentTriggerView, 
-    mpesa_callback_webhook
+    FixedAssetViewSet, ICD11TokenProxyView, InsuranceCompanyViewSet,
+    InsuranceSchemeViewSet, NurseServiceOrderViewSet, RemittanceBatchViewSet, 
+    InsuranceClaimViewSet, ClaimDispatchBatchViewSet, InventoryItemViewSet,
+    LabInventoryViewSet, LabOrderViewSet, LabReferenceViewSet,          
+    LabTestRegistryViewSet, MarketingRequisitionViewSet, PatientViewSet, 
+    ProtocolViewSet, CancerSiteViewSet, CancerTypeViewSet, RegimenViewSet,
+    RequisitionViewSet, TreatmentViewSet, ChemoSessionViewSet, DrugViewSet, 
+    LabResultViewSet, BillViewSet, AppointmentViewSet, VitalSignViewSet,
+    QueueViewSet, PrescriptionViewSet, ClinicalNoteViewSet, ImagingRecordViewSet,    
+    SalamaTokenObtainPairView, RegistrationRecordViewSet, PsychologyEnrollmentViewSet,
+    SessionLogViewSet, BereavementLogViewSet, OutreachCampaignViewSet, 
+    ReferralPartnerViewSet, SocialMediaPostViewSet, ProtocolMasterViewSet,
+    ServiceViewSet, PatientBillableItemViewSet, patient_lookup,
+    PatientDiagnosisViewSet, SupplierViewSet, PurchaseOrderViewSet, 
+    GoodsReceivedNoteViewSet, PurchaseInvoiceViewSet, PaymentVoucherViewSet,
+    ICD10DiagnosisViewSet, PatientBillingSearchViewSet, PatientInvoiceViewSet,
+    ImagingOrderViewSet, ImagingResultViewSet, MpesaPaymentTriggerView,
+    StockTakeViewSet, ExpenseViewSet,
+    mpesa_callback_webhook, check_invoice_status,
 )
 
 class OptionalSlashRouter(DefaultRouter):
@@ -98,8 +61,9 @@ router.register(r'patient-diagnoses', PatientDiagnosisViewSet, basename='patient
 # --- 5. Pharmacy & Inventory ---
 router.register(r'prescriptions', PrescriptionViewSet, basename='prescription')
 router.register(r'drugs', DrugViewSet, basename='drug')
-router.register(r'inventory', LabInventoryViewSet, basename='inventory')
+router.register(r'inventory', InventoryItemViewSet, basename='inventory')
 router.register(r'inventory-items', InventoryItemViewSet, basename='inventory-item')
+router.register(r'stock-takes', StockTakeViewSet, basename='stock-take')
 
 # --- 6. Diagnostics, Revenue Cycle & Lab Core ---
 router.register(r'services', ServiceViewSet, basename='services')
@@ -132,31 +96,37 @@ router.register(r'claim-dispatch-batches', ClaimDispatchBatchViewSet, basename='
 # --- 10. Supply Chain & Procurement Matrix ---
 router.register(r'suppliers', SupplierViewSet, basename='supplier')
 router.register(r'purchase-orders', PurchaseOrderViewSet, basename='purchase-order')
-router.register(r'goods-received-notes', GoodsReceivedNoteViewSet, basename='goods-received-note')
+router.register(r'goods-received-notes', GoodsReceivedNoteViewSet, basename='goods-received-notes')
 router.register(r'purchase-invoices', PurchaseInvoiceViewSet, basename='purchase-invoice')
 router.register(r'payment-vouchers', PaymentVoucherViewSet, basename='payment-voucher')
 
 router.register(r'billing-search', PatientBillingSearchViewSet, basename='billing-search')
 router.register(r'invoices', PatientInvoiceViewSet, basename='invoices')
-
-
 router.register(r'imaging-orders', ImagingOrderViewSet, basename='imaging-order')
 router.register(r'imaging-results', ImagingResultViewSet, basename='imaging-result')
-
 router.register(r'nurse-orders', NurseServiceOrderViewSet, basename='nurse-order')
+router.register(r'fixed-assets', FixedAssetViewSet, basename='fixed-asset')
+router.register(r'expenses', ExpenseViewSet, basename='expense')
 
 urlpatterns = [
+
+    # Financial Integrations (Explicit Clean Namespacing)
+    path('mpesa/trigger-push/', MpesaPaymentTriggerView.as_view(), name='mpesa_trigger_push'),
+    path('mpesa/callback/', mpesa_callback_webhook, name='mpesa_callback_webhook'),
+    path('mpesa/check-status/<int:invoice_id>/', check_invoice_status, name='check_invoice_status'),
+    # Auth Endpoints
     path('token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    
+    # Core Lookups and Proxy Routes
     path('patients/lookup/', patient_lookup, name='patient-lookup'),
-    path('api/icd11/token/', ICD11TokenProxyView.as_view(), name='icd11-token'),
-    path('mpesa/trigger-push/', MpesaPaymentTriggerView.as_view(), name='mpesa_trigger_push'),
-    path('vitals/mpesa-callback/', mpesa_callback_webhook, name='mpesa_callback_webhook'),
+    path('icd11/token/', ICD11TokenProxyView.as_view(), name='icd11-token'),
+    
 
-    # Viewset endpoints
-    path('', include(router.urls)), 
+    # Viewset Namespace Bindings - Resolves the frontend /api prefix breakdown
+    path('api/', include(router.urls)), 
+    path('', include(router.urls)), # Fallback for root path resolution compatibility
 ]
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-

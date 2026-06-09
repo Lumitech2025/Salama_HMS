@@ -12,8 +12,6 @@ import LabReference from './modules/LabReference';
 import LabInventory from './modules/LabInventory';
 import LabRequisitionsTab from './modules/LabRequisitionsTab';
 
-// 🔴 FIX 1: Moved helper utility completely outside the component block 
-// so it doesn't get re-allocated on every single state change render cycle.
 const getShortForm = (label) => {
   const targetString = label || '';
   

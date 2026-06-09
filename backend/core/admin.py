@@ -20,8 +20,11 @@ from .models import (InsuranceScheme, LabOrder, RegistrationRecord,
     PurchaseOrder, PurchaseOrderItem, 
     GoodsReceivedNote, GRNItem, 
     PurchaseInvoice, PaymentVoucher,
-    Service, PatientInvoice, PatientBillableItem
+    Service, PatientInvoice, PatientBillableItem,
+    ImagingOrder, ImagingResult, FixedAsset, InventoryItem, StockTake, Expense
 )
+
+
 
 
 User = get_user_model()
@@ -623,6 +626,66 @@ class LabResultAdmin(admin.ModelAdmin):
         
         return format_html('<span style="color: #94a3b8; font-style: italic;">{}</span>', "No metrics registered")
     formatted_metrics_inline.short_description = "Observed Findings Summary"
+
+
+@admin.register(ImagingOrder)
+class ImagingOrderAdmin(admin.ModelAdmin):
+    # Columns to show in the main admin table list
+    list_display = (
+        'id', 
+        'queue_id', 
+        'get_patient_hrn', 
+        'get_patient_name', 
+        'display_ordered_scans', 
+        'status', 
+        'created_at'
+    )
+    
+    # Sidebar search filters
+    list_filter = ('status', 'created_at', 'has_us_carotid', 'has_us_venous_ext')
+    
+    # Enable global search for patients and token IDs
+    search_fields = ('patient__name', 'patient__health_record_number', 'visit__token_id', 'id')
+    
+    # Organizes the detail/edit view into logical blocks
+    fieldsets = (
+        ('Patient & Visit Context', {
+            'fields': ('patient', 'visit', 'status')
+        }),
+        ('Requested Ultrasounds', {
+            'description': 'Checkboxes tracking the explicit matrix layout requested by the clinician.',
+            'fields': (
+                'has_us_carotid',
+                'has_us_duplex_low_ext',
+                'has_us_venous_ext',
+                'has_us_venous_unila',
+                'has_us_doppler_abd_pel',
+                'has_us_limited_duplex',
+                'has_us_hemodialysis',
+            )
+        }),
+        ('Clinical Documentation', {
+            'fields': ('doctor_notes', 'radiologist_report')
+        }),
+    )
+
+    # --- Custom Column Methods to handle Properties gracefully in list_display ---
+
+    @admin.display(description="HRN")
+    def get_patient_hrn(self, obj):
+        return obj.health_record_number
+
+    @admin.display(description="Patient Name")
+    def get_patient_name(self, obj):
+        return obj.patient_name
+
+    @admin.display(description="Ordered Scans")
+    def display_ordered_scans(self, obj):
+        """Converts your property array into a comma-separated string for summary view"""
+        scans = obj.selected_imaging_list
+        if not scans:
+            return "No scans selected"
+        return ", ".join(scans)
 
 
 # --- 9. SUPPORT, PSYCHOLOGY & CAMPAIGNS ---
@@ -1360,3 +1423,209 @@ class PaymentVoucherAdmin(admin.ModelAdmin):
     list_filter = ('payment_mode', 'date_issued')
     search_fields = ('voucher_number', 'payment_reference', 'purchase_invoice__invoice_number')
     readonly_fields = ('voucher_number', 'date_issued')
+
+
+@admin.register(InventoryItem)
+class InventoryItemAdmin(admin.ModelAdmin):
+    """
+    Control dashboard for Salama's Central Ledger balances.
+    Organizes data lines by Sub-Store location, tracking SKU codes and batch lineages.
+    """
+    # Columns to show in the main admin table row
+    list_display = (
+        'sku_badge', 
+        'name', 
+        'strength', 
+        'dosage_form', 
+        'department_badge', 
+        'batch_number_display', 
+        'quantity_available', 
+        'cost_per_unit', 
+        'expiry_date'
+    )
+    
+    # Fast sidebar filter panels
+    list_filter = ('department', 'dosage_form', 'expiry_date')
+    
+    # Global search box index tracking parameters
+    search_fields = ('name', 'sku', 'batch_number')
+    
+    # Grouping standard fields inside the editing screen beautifully
+    fieldsets = (
+        ('Product Core Details', {
+            'fields': ('name', 'sku', 'dosage_form', 'strength')
+        }),
+        ('Store Location & Balance Metrics', {
+            'fields': ('department', 'quantity_available', 'reorder_level', 'cost_per_unit')
+        }),
+        ('Traceability & Batches', {
+            'fields': ('batch_number', 'expiry_date')
+        }),
+    )
+
+    # Visual Badges for Clean Scannability
+    def sku_badge(self, obj):
+        if obj.sku:
+            return format_html('<code style="background: #f1f5f9; padding: 4px 8px; border-radius: 6px; font-weight: bold; color: #0d9488;">{}</code>', obj.sku)
+        return "—"
+    sku_badge.short_description = "SKU Code"
+
+    def department_badge(self, obj):
+        bg_colors = {
+            'PHARMACY': '#ccfbf1; color: #115e59',
+            'LAB': '#e0f2fe; color: #075985',
+            'NURSING': '#f3e8ff; color: #6b21a8',
+            'RADIOLOGY': '#fef3c7; color: #92400e',
+            'ADMIN': '#f1f5f9; color: #334155'
+        }
+        color_style = bg_colors.get(obj.department, '#f1f5f9; color: #334155')
+        return format_html('<span style="padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; text-transform: uppercase; {}">{}</span>', color_style, obj.get_department_display())
+    department_badge.short_description = "Department Location"
+
+    def batch_number_display(self, obj):
+        if obj.batch_number:
+            return format_html('<b style="font-family: monospace; color: #475569;">#{}</b>', obj.batch_number)
+        return "—"
+    batch_number_display.short_description = "Batch Number"
+
+
+@admin.register(StockTake)
+class StockTakeAdmin(admin.ModelAdmin):
+    """
+    Auditing reconciliation log viewer.
+    Highlights processing errors, variance tracking calculations, and auditing officers.
+    """
+    list_display = (
+        'created_at_date', 
+        'item_description', 
+        'item_sku', 
+        'item_batch', 
+        'system_quantity', 
+        'physical_quantity', 
+        'variance_alert', 
+        'performed_by_user'
+    )
+    
+    # Filter adjustments for tracking stock count trends over time
+    list_filter = ('item__department', 'created_at', 'recorded_at')
+    search_fields = ('item__name', 'item__sku', 'item__batch_number', 'notes')
+    
+    # Read-only attributes to prevent manual modification of frozen audits
+    readonly_fields = ('system_quantity', 'physical_quantity', 'variance', 'variance_percentage', 'performed_by', 'created_at')
+
+    def created_at_date(self, obj):
+        return obj.created_at.strftime("%d/%m/%Y %H:%M")
+    created_at_date.short_description = "Audit Timestamp"
+
+    def item_description(self, obj):
+        return format_html('<b>{}</b> <span style="color:#64748b; font-size:11px;">({})</span>', obj.item.name, obj.item.strength or '')
+    item_description.short_description = "Product Name"
+
+    def item_sku(self, obj):
+        return obj.item.sku
+    item_sku.short_description = "SKU"
+
+    def item_batch(self, obj):
+        return format_html('<code style="font-size:11px;">#{}</code>', obj.item.batch_number)
+    item_batch.short_description = "Batch No"
+
+    def performed_by_user(self, obj):
+        if obj.performed_by:
+            return obj.performed_by.get_full_name() or obj.performed_by.username
+        return "System / Anonymous"
+    performed_by_user.short_description = "Audited By"
+
+    # Red/Green dynamic alert system flag for the Finance Officer
+    def variance_alert(self, obj):
+        if obj.variance == 0:
+            return format_html('<span style="color: #059669; font-weight: 900;">Perfect Match (0)</span>')
+        
+        color = '#dc2626' if obj.variance < 0 else '#d97706'
+        sign = '+' if obj.variance > 0 else ''
+        return format_html(
+            '<span style="color: {}; font-weight: 900;">{}{:,} ({:.1f}%)</span>', 
+            color, sign, obj.variance, obj.variance_percentage
+        )
+    variance_alert.short_description = "Variance Metric"
+
+
+
+@admin.register(FixedAsset)
+class FixedAssetAdmin(admin.ModelAdmin):
+    # 1. Columns displayed when viewing the list of assets
+    list_display = (
+        'name', 
+        'sku', 
+        'department', 
+        'quantity', 
+        'unit_cost_display', 
+        'depreciation_rate_display', 
+        'created_at',
+        
+    )
+    
+    # 2. Sidebar filter tools for rapid navigation
+    list_filter = ('department', 'depreciation_rate', 'created_at',)
+    
+    # 3. Search field configurations
+    search_fields = ('name', 'sku', 'department')
+    
+    # 4. Keeps the dynamic SKU read-only if you want the backend database save() logic to handle it safely
+    readonly_fields = ('sku', 'created_at', 'updated_at')
+
+    # 5. Clean, organized section layouts within the asset form view
+    fieldsets = (
+        ('Core Identification', {
+            'fields': ('name', 'sku', 'department')
+        }),
+        ('Inventory & Purchase Costs', {
+            'fields': ('quantity', 'unit_cost')
+        }),
+        ('Yearly Value Loss Calculations', {
+            'fields': ('salvage_value', 'depreciation_rate'),
+            'description': 'Configure the percentage loss parameters to safely project balance sheet values.'
+        }),
+        ('System Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',), # Keeps this section tidily hidden until clicked
+        }),
+    )
+
+    # Helper formatters to display currency symbols and percentage marks plainly in rows
+    def unit_cost_display(self, obj):
+        return f"KES {obj.unit_cost:,.2f}"
+    unit_cost_display.short_description = "Cost / Unit"
+
+    def depreciation_rate_display(self, obj):
+        return f"{obj.depreciation_rate}% / year"
+    depreciation_rate_display.short_description = "Value Loss Rate"
+
+
+@admin.register(Expense)
+class ExpenseAdmin(admin.ModelAdmin):
+    # Controls which columns appear in the main admin list overview
+    list_display = ('id', 'description', 'category', 'behavior', 'date', 'amount', 'has_receipt_proof')
+    
+    # Left-hand sidebar filters to drill down into records quickly
+    list_filter = ('category', 'behavior', 'date')
+    
+    # Main search bar capabilities matching your frontend scope
+    search_fields = ('id', 'description', 'reference')
+    
+    # Automatically organizes fields inside the edit view layout
+    fieldsets = (
+        ('Core Details', {
+            'fields': ('description', 'category', 'amount', 'date')
+        }),
+        ('Schedule & Audit', {
+            'fields': ('behavior', 'reference', 'document')
+        }),
+    )
+    
+    # Read-only metadata fields
+    readonly_fields = ('created_at', 'updated_at')
+
+    # Custom indicator column to show if payment proof is missing or uploaded
+    @admin.display(boolean=True, description='Proof Attached')
+    def has_receipt_proof(self, obj):
+        return bool(obj.document)

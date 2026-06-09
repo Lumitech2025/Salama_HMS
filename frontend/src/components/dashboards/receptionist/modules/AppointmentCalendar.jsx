@@ -207,7 +207,7 @@ const AppointmentCalendar = ({ onStatusUpdated }) => {
                     <select name="practitioner" value={formData.practitioner} onChange={handleInputChange}
                         className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 px-6 text-sm font-semibold text-slate-900 outline-none">
                         <option value="">Select Specialist</option>
-                        <option value="2">Edwin Mwiti (Oncologist)</option>
+                        <option value="4">Edwin Mwiti (Oncologist)</option>
                     </select>
                 </div>
             </div>
@@ -269,7 +269,7 @@ const AppointmentCalendar = ({ onStatusUpdated }) => {
                                   </td>
                                   <td className="px-10 py-8">
                                       <div className="flex flex-col">
-                                          <span className="font-black text-slate-900 text-[11px] uppercase">{appt.practitioner_name || "Medical Staff"}</span>
+                                          <span className="font-black text-slate-900 text-[11px] uppercase">{appt.practitioner_name || "Edwin Mwiti(Oncologist)"}</span>
                                           <span className="text-teal-600 text-[9px] font-bold uppercase tracking-wider">{appt.practitioner_role}</span>
                                       </div>
                                   </td>

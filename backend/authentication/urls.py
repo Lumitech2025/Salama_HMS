@@ -1,8 +1,15 @@
-from django.urls import path
-from .views import SalamaAuthView
+# authentication/urls.py
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import SalamaAuthView, UserRegistryViewSet
 from rest_framework_simplejwt.views import TokenRefreshView
+
+router = DefaultRouter()
+router.register(r'users', UserRegistryViewSet, basename='user-registry')
 
 urlpatterns = [
     path('login/', SalamaAuthView.as_view(), name='token_obtain_pair'),
     path('refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    
+    path('', include(router.urls)), 
 ]

@@ -9,6 +9,8 @@ import {
 
 import ICD10DiagnosisSearch from "@/components/ICD10DiagnosisSearch";
 
+import { submitRadiologyRequisition } from "@/services/api";
+
 // Kept SKUs intact for backend billing downstream processing, removed from UI display
 const AVAILABLE_LAB_TESTS = [
     { id: 'CBC', sku: 'LAB-CBC', label: 'Full Blood Count (CBC)' },
@@ -344,48 +346,61 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     };
 
     const handleReferToRadiology = async () => {
-        const activeOrderedScans = AVAILABLE_IMAGING_TESTS.filter(scan => imagingRequests[scan.id]);
+    const selectedScanIds = Object.keys(imagingRequests).filter(id => imagingRequests[id]);
+    
+    if (!selectedPatient) {
+        alert("No active patient session selected.");
+        return;
+    }
+    
+    if (selectedScanIds.length === 0) {
+        alert("Please check at least one radiology scan procedure before submitting.");
+        return;
+    }
 
-        if (activeOrderedScans.length === 0) {
-            alert("Select at least one imaging study procedure.");
-            return;
+    setIsSavingImaging(true);
+
+    try {
+        // 1. Map selected scans to retrieve pricing details
+        const requestedScansDetails = AVAILABLE_IMAGING_TESTS.filter(scan => imagingRequests[scan.id]);
+        const totalRadiologyCharge = requestedScansDetails.reduce((sum, scan) => sum + (scan.price || 0), 0);
+
+        // 2. UNTANGLE IDs: Find the actual patient record ID vs the visit ID (32)
+        // If your selectedPatient object nests the patient details, this falls back safely.
+        const realPatientId = selectedPatient.patient_id || 
+                              (selectedPatient.patient && typeof selectedPatient.patient === 'object' ? selectedPatient.patient.id : selectedPatient.patient) || 
+                              selectedPatient.patient;
+                              
+        const realVisitId = selectedPatient.visit_id || selectedPatient.visit || selectedPatient.id;
+
+        // Safety fallback: If your data model doesn't nest the patient ID and it matches the visit ID, 
+        // ensure we check your console. logs to map the accurate property name.
+        if (!realPatientId || realPatientId === realVisitId) {
+            console.warn("WARNING: realPatientId resolved identical to visit ID (32). Check your console object schema:", selectedPatient);
         }
 
-        setIsSavingImaging(true);
-        try {
-            const visitId = selectedPatient.visit_id || selectedPatient.visit;
-            
-            const imagingPayload = {
-                patient: selectedPatient.patient,
-                visit: visitId,
-                status: 'PENDING',
-                doctor_notes: doctorNote || "",
-                imaging_skus: activeOrderedScans.map(s => s.sku),
-                total_estimated_charge: totalImagingRequisitionCost
-            };
+        // 3. Fire the centralized Axios service with correct distinct ID values
+        await submitRadiologyRequisition(
+            realPatientId, // Parameter 1 -> Maps cleanly to Django's patient field
+            realVisitId,   // Parameter 2 -> Maps cleanly to Django's visit field (32)
+            requestedScansDetails
+        );
 
-            activeOrderedScans.forEach(scan => {
-                const flagName = `has_us_${scan.id.toLowerCase()}`;
-                imagingPayload[flagName] = true;
-            });
-
-            await API.post('/imaging-orders/', imagingPayload);
-            await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'RADIOLOGY' });
-            
-            alert(`Success: Requisition submitted. Patient token advanced to Radiology workflow queue.`);
-            setImagingRequests(INITIAL_IMAGING_STATE);
-            onTabSwitch('home');
-        } catch (err) {
-            console.error("Radiology route initialization error:", err);
-            if (err.response && err.response.data) {
-                alert(`Backend Validation Failed: ${JSON.stringify(err.response.data)}`);
-            } else {
-                alert("Referral process halted. Please verify station connectivity.");
-            }
-        } finally {
-            setIsSavingImaging(false);
-        }
-    };
+        // 4. Success Flow
+        alert(`Successfully billed $${totalRadiologyCharge} and routed patient to Radiology!`);
+        
+        // Reset the checkmarks local state dictionary cleanly
+        setImagingRequests({}); 
+        
+    } catch (error) {
+        console.error("Radiology integration failure:", error);
+        // Display backend error arrays cleanly if they exist
+        const serverError = typeof error === 'object' ? JSON.stringify(error) : error;
+        alert(`Failed to process desk requisition charges: ${serverError}`);
+    } finally {
+        setIsSavingImaging(false);
+    }
+};
 
     // ✨ NEW: Nurse Orders Submission & Re-routing Pipeline
     const handleReferToNurse = async () => {
@@ -534,7 +549,7 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                                             setSelectedDiagnoses([]); 
                                         }}
                                     >
-                                        <option value="">Select target anatomy structure...</option>
+                                        <option value="">Select Body Part</option>
                                         {PRIMARY_SITE_CHOICES.map(site => (
                                             <option key={site.id} value={site.id}>{site.name}</option>
                                         ))}
@@ -699,6 +714,17 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                             >
                                 {isSavingNurse ? <Loader2 className="animate-spin" size={18} /> : <ClipboardCheck size={18} />} 
                                 Submit Order to Nursing Desk ({AVAILABLE_NURSE_SERVICES.filter(n => nurseRequests[n.id]).length} Checked)
+                            </button>
+                        </div>
+
+                    {/* ✨ NEW: PATIENT DOSING TAB ROUTING ACTION LINK BUTTON */}
+                        <div className="pt-2 flex justify-end">
+                            <button 
+                                onClick={() => onTabSwitch('prescriptions')}
+                                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm px-8 py-4 rounded-2xl shadow-md transition-all active:scale-[0.99]"
+                            >
+                                <Pill size={16} className="text-blue-400" />
+                                Go to Patient Dosing
                             </button>
                         </div>
 

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from enum import unique
 
 from django.db import models, transaction
 from django.conf import settings
@@ -16,8 +17,6 @@ import random
 import datetime
 
 from authentication.models import User
-from core import apps
-from django.apps import apps
 
 # --- Clinical Models ---
 
@@ -393,7 +392,7 @@ class CancerType(models.Model):
 class Regimen(models.Model):
     """Protocol acronym: e.g., AC-T, FOLFOX-6, CAPOX"""
     cancer_type = models.ForeignKey(CancerType, on_delete=models.CASCADE, related_name="regimens")
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=255, help_text="Oncology protocol name")
     default_cycles = models.IntegerField(default=6)
     
     def __str__(self):
@@ -403,23 +402,20 @@ class RegimenDrug(models.Model):
     """The individual drugs that load automatically under Dropdown 3"""
     regimen = models.ForeignKey(Regimen, on_delete=models.CASCADE, related_name="drugs")
     name = models.CharField(max_length=255)  # e.g., Docetaxel, Pemetrexed
-    base_value = models.CharField(max_length=50, blank=True)  # e.g., 75, 500
-    metric_unit = models.CharField(max_length=50, default="mg/m²")  # e.g., mg, mg/m²
-    route_pathway = models.CharField(max_length=100, default="IV Infusion")
+    base_value = models.CharField(max_length=255, blank=True)  # e.g., 75, 500
+    metric_unit = models.CharField(max_length=255, default="mg/m²")  # e.g., mg, mg/m²
+    route_pathway = models.CharField(max_length=255, default="IV Infusion")
     cycle_cost_kes = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
 
     def __str__(self):
         return f"{self.regimen.name} -> {self.name}"
     
 
-
 # 3. Radiologist Section
-
-
 class ImagingRecord(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-    scan_type = models.CharField(max_length=50) # MRI, CT, XRAY
-    image_url = models.URLField(blank=True) # Link to PACS or Cloud storage
+    scan_type = models.CharField(max_length=50) 
+    image_url = models.URLField(blank=True) 
     findings = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -443,78 +439,16 @@ class Bill(models.Model):
         return f"{self.bill_no} - {self.patient.name}"
     
 
-
-class LabInventoryItem(models.Model):
-    CATEGORY_CHOICES = [
-        ('Chemicals', 'Chemicals'),
-        ('Consumables', 'Consumables'),
-        ('Reagents', 'Reagents'),
-        ('Microscopy', 'Microscopy'),
-    ]
-
-    name = models.CharField(max_length=200)
-    category = models.CharField(max_length=100, choices=CATEGORY_CHOICES, default="General")
-    stock = models.IntegerField(default=0)
-    min_stock = models.IntegerField(default=5)
-    unit = models.CharField(max_length=50, default="Units")
-    
-    # REQUIRED FOR FINANCE: Base cost tracking for auto-calculating totals
-    buying_price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"{self.name} ({self.stock} {self.unit} remaining)"
-    
-class PharmacyStockCatalogItem(models.Model):
-    """
-    Tracks central pharmacy medicine stock elements and purchasing costs 
-    for procurement indents, keeping patient prescriptions decoupled from finance.
-    """
-    drug_name = models.CharField(max_length=255, unique=True)
-    formulation = models.CharField(max_length=100, help_text="e.g., Tablets, Vials, Syrup")
-    current_stock = models.IntegerField(default=0)
-    buying_price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"{self.drug_name} - KES {self.buying_price}"
-
-class StockAdjustment(models.Model):
-    item = models.ForeignKey(LabInventoryItem, on_delete=models.CASCADE, related_name='adjustments')
-    technician = models.ForeignKey('authentication.User', on_delete=models.SET_NULL, null=True)
-    quantity_used = models.IntegerField()
-    remaining_stock = models.IntegerField()
-    notes = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-
-class Prescription(models.Model):
-    STATUS_CHOICES = [('PENDING', 'Pending'), ('DISPENSED', 'Dispensed'), ('CANCELLED', 'Cancelled')]
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE)
-    prescribed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
-    clinical_notes = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-class PrescriptionItem(models.Model):
-    prescription = models.ForeignKey(Prescription, related_name='items', on_delete=models.CASCADE)
-    medication_name = models.CharField(max_length=255)
-    dosage = models.CharField(max_length=100)
-    route = models.CharField(max_length=100)     
-    frequency = models.CharField(max_length=100) 
-    duration = models.CharField(max_length=100)  
-    instructions = models.TextField(blank=True)
-
 class Drug(models.Model):
     STORE_CHOICES = [('main', 'Main Bulk Store'), ('pharmacy', 'Pharmacy Shop')]
     
     name = models.CharField(max_length=255)
     generic_name = models.CharField(max_length=255, blank=True)
     manufacturer = models.CharField(max_length=255, blank=True)
-    batch_number = models.CharField(max_length=100)
+    batch_number = models.CharField(max_length=255)
     
-    strength = models.CharField(max_length=100, help_text="e.g., 500mg, 10mg/ml")
-    unit_type = models.CharField(max_length=50, default="vial", help_text="e.g., vial, tablet, bottle")
+    strength = models.CharField(max_length=255, help_text="e.g., 500mg, 10mg/ml")
+    unit_type = models.CharField(max_length=255, default="vial", help_text="e.g., vial, tablet, bottle")
     
     quantity_in_stock = models.PositiveIntegerField(default=25)
     reorder_level = models.PositiveIntegerField(default=10, help_text="Minimum threshold before requisition")
@@ -534,9 +468,83 @@ class Drug(models.Model):
     @property
     def is_expired(self):
         return date.today() >= self.expiry_date if self.expiry_date else False
+
+
+class Prescription(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending Approval'),
+        ('DISPENSED', 'Dispensed'),
+        ('CANCELLED', 'Cancelled')
+    ]
     
+    # Core Relations
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE)
+    
+    # Binding the prescription explicitly to the clinical visit encounter 
+    visit = models.ForeignKey('RegistrationRecord', on_delete=models.SET_NULL, null=True, blank=True)
+    
+    # Optional blueprint link (Null means a manual ad-hoc prescription)
+    protocol = models.ForeignKey(
+        'Protocol', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True, 
+        related_name='issued_prescriptions'
+    )
+    
+    prescribed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.SET_NULL, 
+        null=True,
+        blank=True,
+        related_name='oncology_prescriptions'
+    )
+    
+    # Structural Attributes
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    
+    # MATCHES FRONTEND PAYLOAD: React sends this key as 'notes'
+    notes = models.TextField(
+        blank=True,
+        null=True, 
+        help_text="Protocol remarks, titration exceptions, or toxicity justifications."
+    )
+
+    clinical_notes = models.TextField(
+        blank=True, 
+        null=True, 
+        default=''
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Rx #{self.id} - Patient: {self.patient}"
 
 
+class PrescriptionItem(models.Model):
+    prescription = models.ForeignKey(Prescription, related_name='items', on_delete=models.CASCADE)
+    
+    # WORKAROUND: Bypasses the broken foreign key string evaluation engine entirely
+    drug_id = models.PositiveIntegerField(
+        null=True, 
+        blank=True,
+        help_text="Direct integer reference tracking to core.Drug inventory row"
+    )
+    
+    medication_name = models.CharField(max_length=255)
+    dosage = models.CharField(max_length=100)
+    route = models.CharField(max_length=100)     
+    frequency = models.CharField(max_length=100) 
+    duration = models.CharField(max_length=100)  
+    instructions = models.TextField(blank=True)
+
+    def __str__(self):
+        return f"{self.medication_name} - {self.dosage}"
     
 class ClinicalNote(models.Model):
     NOTE_TYPES = [
@@ -1039,7 +1047,7 @@ class Requisition(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     total_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, help_text="Date and time when requisition was submitted")
     updated_at = models.DateTimeField(auto_now=True)
     is_viewed_by_finance = models.BooleanField(default=False)
 
@@ -1058,12 +1066,17 @@ class Requisition(models.Model):
             
         Requisition.objects.filter(id=self.id).update(total_cost=self.total_cost)
 
+
 class RequisitionItem(models.Model):
     requisition = models.ForeignKey(Requisition, related_name='items', on_delete=models.CASCADE)
     
-    # Precise point references matching your actual domain layout arrays
-    lab_item = models.ForeignKey(LabInventoryItem, on_delete=models.PROTECT, null=True, blank=True, related_name='requisition_lines')
-    pharmacy_item = models.ForeignKey(PharmacyStockCatalogItem, on_delete=models.PROTECT, null=True, blank=True, related_name='requisition_lines')
+    inventory_item = models.ForeignKey(
+        'InventoryItem', 
+        on_delete=models.PROTECT, 
+        null=True, 
+        blank=True, 
+        related_name='requisition_lines'
+    )
     
     # Generic item details field to handle random unindexed office/admin supplies
     non_inventory_title = models.CharField(max_length=255, null=True, blank=True, help_text="For miscellaneous line items not in the inventory logs")
@@ -1073,11 +1086,9 @@ class RequisitionItem(models.Model):
     line_total = models.DecimalField(max_digits=12, decimal_places=2, editable=False)
 
     def save(self, *args, **kwargs):
-        # Auto-extract true values based on context mapping configurations
-        if self.lab_item:
-            self.unit_price = self.lab_item.buying_price
-        elif self.pharmacy_item:
-            self.unit_price = self.pharmacy_item.buying_price
+        # ALIGNED: Extract price directly from unified item data layout
+        if self.inventory_item:
+            self.unit_price = self.inventory_item.cost_per_unit
             
         self.line_total = self.unit_price * self.quantity
         super().save(*args, **kwargs)
@@ -1605,6 +1616,9 @@ class RemittanceBatch(models.Model):
         return f"REMIT-{self.payment_reference} ({self.insurance_company.name})"
     
 
+from django.db import models, transaction
+from django.utils import timezone
+
 class InventoryItem(models.Model):
     DEPARTMENT_CHOICES = [
         ('PHARMACY', 'Pharmacy'),
@@ -1616,8 +1630,16 @@ class InventoryItem(models.Model):
 
     DOSAGE_CHOICES = [
         ('TABLET', 'Tablet'),
-        ('VIAL', 'Vial'),
+        ('CAPSULE', 'Capsule'),
         ('SYRUP', 'Syrup'),
+        ('SUSPENSION', 'Oral Suspension'),
+        ('VIAL', 'Vial (Liquid/Powder for Injection)'),
+        ('AMP_INJ', 'Ampoule (Injection)'),
+        ('INF_BAG', 'Infusion Bag (Premixed Cytotoxic/Hydration)'),
+        ('OINTMENT', 'Ointment / Cream'),
+        ('PATCH', 'Transdermal Patch (e.g., Fentanyl Palliative Care)'),
+        ('PESSARY', 'Pessary (e.g., localized hormonal therapies)'),
+        ('SUPPOSITORY', 'Suppository (e.g., antiemetics / palliative comfort care)'),
     ]
 
     name = models.CharField(max_length=255)
@@ -1627,35 +1649,72 @@ class InventoryItem(models.Model):
     quantity_available = models.IntegerField(default=0)
     cost_per_unit = models.DecimalField(max_digits=12, decimal_places=2)
     department = models.CharField(max_length=50, choices=DEPARTMENT_CHOICES)
-    
-    # batch_number can now be blank because the backend will auto-compute it
     batch_number = models.CharField(max_length=100, blank=True)
     expiry_date = models.DateField(null=True, blank=True)
     reorder_level = models.PositiveIntegerField(default=50)
     added_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
-        # Generate SKU automatically if missing
+        # 1. Generate Sequential Base SKU automatically if missing
         if not self.sku and self.name:
-            clean_name = "".join(self.name.split()).upper()[:6]
-            clean_strength = "".join(self.strength.split()).upper() if self.strength else "GEN"
-            self.sku = f"PHA-{clean_name}-{clean_strength}"
+            clean_base_name = self.name.strip().lower()
 
-        # Generate Batch Number if empty and an expiry date exists
-        if not self.batch_number and self.expiry_date:
-            month = str(self.expiry_date.month).zfill(2)
-            year = self.expiry_date.year
-            # Yields the precise SCC-INV-MM/YYYY structure
-            self.batch_number = f"SCC-INV-{month}/{year}"
-        elif not self.batch_number:
-            # Fallback for non-expiring assets
-            timestamp = timezone.now().strftime("%m%y")
-            self.batch_number = f"SCC-GEN-{timestamp}"
+            with transaction.atomic():
+                existing_item = InventoryItem.objects.filter(
+                    name__iexact=clean_base_name
+                ).exclude(sku__isnull=True).exclude(sku="").first()
+
+                if existing_item:
+                    self.sku = existing_item.sku
+                else:
+                    last_item = InventoryItem.objects.filter(sku__startswith="SCC").order_by("-id").first()
+                    if last_item and last_item.sku:
+                        try:
+                            last_number_str = last_item.sku.replace("SCC", "")
+                            last_number = int(last_number_str)
+                            next_number = last_number + 1
+                        except ValueError:
+                            next_number = InventoryItem.objects.filter(sku__startswith="SCC").count() + 1
+                    else:
+                        next_number = 1
+
+                    self.sku = f"SCC{next_number:04d}"
+
+        # 2. Refined Batch Generation: Matches layout schema "SCC-B001/090626"
+        if not self.batch_number:
+            # Fall back to active context window date values if entity entry isn't saved yet
+            generation_date = self.added_at if self.id else timezone.now()
+            date_str = generation_date.strftime("%d%m%y")  # Generates ddmmyy format (e.g., 090626)
+            
+            # Target range boundaries using your exact field name: added_at
+            day_start = generation_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = generation_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+            
+            with transaction.atomic():
+                # Locate the latest entry assigned on the current calendar date to calculate indices reliably
+                last_daily_batch = InventoryItem.objects.filter(
+                    added_at__range=(day_start, day_end),
+                    batch_number__startswith="SCC-B"
+                ).order_by("-id").first()
+
+                next_batch_num = 1
+                if last_daily_batch and last_daily_batch.batch_number:
+                    try:
+                        # Extract the inner 3 digit count integer from 'SCC-B001/090626'
+                        raw_batch_part = last_daily_batch.batch_number.split('/')[0]  # Result: "SCC-B001"
+                        counter_str = raw_batch_part.replace("SCC-B", "")             # Result: "001"
+                        next_batch_num = int(counter_str) + 1
+                    except (ValueError, IndexError):
+                        # Fallback count lookup if string parses incorrectly
+                        next_batch_num = InventoryItem.objects.filter(added_at__range=(day_start, day_end)).count() + 1
+
+                # Formats precisely to: SCC-B001/090626
+                self.batch_number = f"SCC-B{next_batch_num:03d}/{date_str}"
 
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.name} - {self.batch_number}"
+        return f"{self.name} ({self.strength}) - {self.sku} [{self.batch_number}]"
     
 class Drug(models.Model):
     DOSAGE_CHOICES = [
@@ -1666,9 +1725,10 @@ class Drug(models.Model):
 
     name = models.CharField(max_length=255)
     sku = models.CharField(max_length=100, unique=True, blank=True, null=True)
-    batch_no = models.CharField(max_length=100) # Ingested from Main Store Batch No
-    dosage_form = models.CharField(max_length=20, choices=DOSAGE_CHOICES, default='TABLET') # Type
-    strength = models.CharField(max_length=50, blank=True, null=True) # Formulation power
+    batch_no = models.CharField(max_length=100)
+    dosage_form = models.CharField(max_length=20, choices=DOSAGE_CHOICES, blank=True, null=True)
+# Formulation power
+    strength = models.CharField(max_length=50, blank=True, null=True)
     stock_quantity = models.PositiveIntegerField(default=0) # Shop floor quantity available
     reorder_level = models.PositiveIntegerField(default=50) # Threshold indicator
     
@@ -1685,6 +1745,37 @@ class Drug(models.Model):
     @property
     def is_expired(self):
         return date.today() >= self.expiry_date if self.expiry_date else False
+    
+class StockTake(models.Model):
+    # Links directly to the inventory instance item being audited
+    item = models.ForeignKey('InventoryItem', on_delete=models.CASCADE, related_name='stock_takes')
+    
+    # Frozen snapshot parameters captured directly from the Main Store inventory line during audit
+    system_quantity = models.IntegerField(help_text="The quantity recorded in the database during audit")
+    physical_quantity = models.IntegerField(help_text="The physical count verified on the ground by the officer")
+    variance = models.IntegerField(default=0)
+    variance_percentage = models.DecimalField(max_digits=6, decimal_places=2, default=0.00)
+    
+    notes = models.TextField(blank=True, null=True)
+    performed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    recorded_at = models.DateField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        # 1. Automate variance equations cleanly before saving
+        self.variance = self.physical_quantity - self.system_quantity
+        if self.system_quantity > 0:
+            self.variance_percentage = (float(self.variance) / float(self.system_quantity)) * 100
+        else:
+            self.variance_percentage = 100.00 if self.variance > 0 else 0.00
+            
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Audit ({self.item.department}): {self.item.name} - Var: {self.variance}"
     
 class PsychologyEnrollment(models.Model):
     STAGE_CHOICES = [
@@ -2060,6 +2151,9 @@ class PatientInvoice(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='UNPAID')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    mpesa_checkout_id = models.CharField(max_length=100, blank=True, null=True)
+    receipt_number = models.CharField(max_length=50, blank=True, null=True)
+    payment_method = models.CharField(max_length=20, blank=True, null=True)
 
     @property
     def total_payable(self):
@@ -2227,3 +2321,169 @@ class PatientDiagnosis(models.Model):
     def __str__(self):
         # Displays the assigned health record number cleanly in the Django Admin portal
         return f"[{self.icd10_code}] - {self.visit.health_record_number} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
+    
+
+class FixedAsset(models.Model):
+    DEPARTMENT_CHOICES = [
+        ('PHARMACY', 'Pharmacy'),
+        ('LAB', 'Laboratory'),
+        ('NURSING', 'Nursing'),
+        ('RADIOLOGY', 'Radiology'),
+        ('ADMIN', 'General Admin'),
+    ]
+
+    name = models.CharField(
+        max_length=255, 
+        help_text="Name of the asset (e.g., Siemens Ultrasound Pro)"
+    )
+    sku = models.CharField(
+        max_length=100, 
+        unique=True, 
+        help_text="Automatically generated unique asset code identifier"
+    )
+    department = models.CharField(
+        max_length=50, 
+        choices=DEPARTMENT_CHOICES, 
+        default='PHARMACY',
+        help_text="The clinical or administrative department using this asset"
+    )
+    quantity = models.PositiveIntegerField(
+        default=1,
+        help_text="Number of units owned by the hospital"
+    )
+    unit_cost = models.DecimalField(
+        max_digits=14, 
+        decimal_places=2,
+        help_text="The purchase cost per individual unit in KES"
+    )
+    salvage_value = models.DecimalField(
+        max_digits=14, 
+        decimal_places=2, 
+        default=0.00,
+        help_text="Expected resale or scrap value of a single unit at the end of its usefulness"
+    )
+    depreciation_rate = models.DecimalField(
+        max_digits=5, 
+        decimal_places=2, 
+        default=20.00,
+        help_text="The annual percentage rate of value loss (e.g., 20.00 for 20%)"
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="Timestamp when the asset record was first onboarding"
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Timestamp when the asset details were last updated"
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Fixed Asset"
+        verbose_name_plural = "Fixed Assets"
+
+    # Business Logic Fallback: Automatically build a safe SKU if not passed directly by an API payload
+    def save(self, *args, **kwargs):
+        if not self.sku and self.name:
+            clean_name = "".join(self.name.split()).upper()[:6]
+            clean_dept = self.department[:3].upper()
+            self.sku = f"AST-{clean_dept}-{clean_name}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.sku}) - Qty: {self.quantity}"
+    
+
+class Expense(models.Model):
+    # Expense categories matching your sidebar options
+    CATEGORY_CHOICES = [
+        ('SALARIES', 'Salaries'),
+        ('WAGES', 'Wages'),
+        ('LOCUM', 'Locum'),
+        ('TRANSPORT', 'Transport'),
+        ('SECURITY', 'Security & Alarm'),
+        ('MAINTENANCE', 'Maintenance'),
+        ('CATERING', 'Catering'),
+        ('BANK_CHARGES', 'Bank Charges'),
+        ('LICENSING', 'Licensing'),
+        ('MARKETING', 'Marketing'),
+        ('LEGAL_FEES', 'Legal Fees'),
+        ('COMMUNICATION', 'Communication'),
+        ('RENT', 'Rent'),
+        ('UTILITIES', 'Utilities (Water & Elec)'),
+    ]
+
+    # Schedule behavior type
+    BEHAVIOR_CHOICES = [
+        ('Fixed', 'Fixed (Auto-Renewable)'),
+        ('Variable', 'Variable (On-Demand)'),
+    ]
+
+    description = models.CharField(max_length=255)
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='SALARIES')
+    behavior = models.CharField(max_length=15, choices=BEHAVIOR_CHOICES, default='Fixed')
+    date = models.DateField(default=timezone.now)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    
+    # Transaction reference (e.g., MPESA code, Cheque No). 
+    # Can be blank or set to 'PENDING_SORT' for auto-generated fixed items.
+    reference = models.CharField(max_length=100, blank=True, null=True, default='PENDING_SORT')
+    
+    # Stores uploaded payment proofs/receipts in an 'expense_proofs/' directory
+    document = models.FileField(upload_to='expense_proofs/', blank=True, null=True)
+    
+    # Audit tracking timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-date', '-created_at']
+        verbose_name = "Expense Voucher"
+        verbose_name_plural = "Expense Vouchers"
+
+    def __str__(self):
+        return f"{self.description} ({self.category}) - KES {self.amount}"
+
+
+
+
+
+
+class LabInventoryItem(models.Model):
+    CATEGORY_CHOICES = [
+        ('Chemicals', 'Chemicals'),
+        ('Consumables', 'Consumables'),
+        ('Reagents', 'Reagents'),
+        ('Microscopy', 'Microscopy'),
+    ]
+
+    name = models.CharField(max_length=200)
+    category = models.CharField(max_length=255, choices=CATEGORY_CHOICES, default="General")
+    stock = models.IntegerField(default=0)
+    min_stock = models.IntegerField(default=5)
+    unit = models.CharField(max_length=50, default="Units")
+    
+    # REQUIRED FOR FINANCE: Base cost tracking for auto-calculating totals
+    buying_price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.stock} {self.unit} remaining)"
+    
+class PharmacyStockCatalogItem(models.Model):
+    drug_name = models.CharField(max_length=255, unique=True)
+    formulation = models.CharField(max_length=255, help_text="e.g., Tablets, Vials, Syrup")
+    current_stock = models.IntegerField(default=0)
+    buying_price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.drug_name} - KES {self.buying_price}"
+
+class StockAdjustment(models.Model):
+    item = models.ForeignKey(LabInventoryItem, on_delete=models.CASCADE, related_name='adjustments')
+    technician = models.ForeignKey('authentication.User', on_delete=models.SET_NULL, null=True)
+    quantity_used = models.IntegerField()
+    remaining_stock = models.IntegerField()
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)

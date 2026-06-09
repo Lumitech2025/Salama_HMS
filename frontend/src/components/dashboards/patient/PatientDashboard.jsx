@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api';
-import { Loader2 } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 
 // Unified Layout Navigation Track Sidebar
 import PatientSidebar from "./PatientSidebar";
@@ -18,6 +18,7 @@ const PatientDashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('overview');
   const [patientData, setPatientData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   
   // 🎯 Persistent Global Workspace Focus state for Active Selection
   const [selectedPatientContext, setSelectedPatientContext] = useState(null);
@@ -32,22 +33,31 @@ const PatientDashboard = ({ onLogout }) => {
   const [chemoSessions, setChemoSessions] = useState([]);
   const [bills, setBills] = useState([]);
 
-  // Resolve the active patient object accurately based on current workflow scope
+  // Resolve the active patient object dynamically based on current workflow scope
   const currentPatient = selectedPatientContext || patientData;
 
+  // Manual explicit header generator matrix
+  const getRequestConfig = useCallback(() => {
+    const token = localStorage.getItem('access_token') || sessionStorage.getItem('token');
+    return token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+  }, []);
+
+  // Fetch contextual sub-records strictly tailored to the targeted patient
   const fetchPatientSubRecords = useCallback(async (patientId) => {
     if (!patientId) return;
     try {
-      // Query records filtering on the focused client model context
+      const config = getRequestConfig();
+
+      // Query records passing explicit token configurations directly to satisfy Django permission classes
       const [appRes, vitRes, noteRes, rxRes, labRes, imgRes, chemoRes, billRes] = await Promise.all([
-        API.get(`/appointments/?patient=${patientId}`).catch(() => ({ data: [] })),
-        API.get(`/vital-signs/?patient=${patientId}`).catch(() => ({ data: [] })),
-        API.get(`/clinical-notes/?patient=${patientId}`).catch(() => ({ data: [] })),
-        API.get(`/prescriptions/?patient=${patientId}`).catch(() => ({ data: [] })),
-        API.get(`/lab-results/?patient=${patientId}`).catch(() => ({ data: [] })),
-        API.get(`/imaging/?patient=${patientId}`).catch(() => ({ data: [] })),
-        API.get(`/chemo-sessions/?patient=${patientId}`).catch(() => ({ data: [] })),
-        API.get(`/bills/?patient=${patientId}`).catch(() => ({ data: [] })),
+        API.get(`/appointments/?patient=${patientId}`, config).catch(() => ({ data: [] })),
+        API.get(`/vital-signs/?patient=${patientId}`, config).catch(() => ({ data: [] })),
+        API.get(`/clinical-notes/?patient=${patientId}`, config).catch(() => ({ data: [] })),
+        API.get(`/prescriptions/?patient=${patientId}`, config).catch(() => ({ data: [] })),
+        API.get(`/lab-results/?patient=${patientId}`, config).catch(() => ({ data: [] })),
+        API.get(`/imaging/?patient=${patientId}`, config).catch(() => ({ data: [] })),
+        API.get(`/chemo-sessions/?patient=${patientId}`, config).catch(() => ({ data: [] })),
+        API.get(`/bills/?patient=${patientId}`, config).catch(() => ({ data: [] })),
       ]);
 
       setAppointments(appRes.data.results || appRes.data || []);
@@ -61,46 +71,43 @@ const PatientDashboard = ({ onLogout }) => {
     } catch (error) {
       console.error("Error retrieving contextual medical files:", error);
     }
-  }, []);
+  }, [getRequestConfig]);
 
-  const fetchComprehensivePatientData = async () => {
+  // Initial dashboard load to find the baseline logged-in user profile
+  const fetchComprehensivePatientData = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const patientRes = await API.get('/patients/').catch(() => ({ data: [] }));
+      const config = getRequestConfig();
+      const patientRes = await API.get('/patients/', config);
       const patientList = patientRes.data.results || patientRes.data || [];
       
-      const assignedProfile = patientList[0] || {
-        id: 1,
-        name: "COLLINS KIMATHI MWITI",
-        health_record_number: "SCC-001/26",
-        national_id: "29482024",
-        gender: "MALE",
-        phone: "254712346105",
-        email: "collin****ti@gmail.com",
-        cancer_type: "Colorectal Carcinoma (Stage III)",
-        address: "Nyeri, Central Region",
-        next_of_kin_name: "Mary Mwiti",
-        next_of_kin_phone: "+254 711 222333"
-      };
+      if (patientList.length === 0) {
+        throw new Error("No accessible patient profile linked to this account session.");
+      }
       
+      // Use the authenticated endpoint profile as base data
+      const assignedProfile = patientList[0];
       setPatientData(assignedProfile);
       
-      // Target the active selection context ID over baseline if set
+      // Target the active selection context ID over baseline if explicitly focused
       const activeId = selectedPatientContext?.id || assignedProfile.id;
       await fetchPatientSubRecords(activeId);
 
     } catch (err) {
       console.error("Critical error mapping client dashboard metrics array:", err);
+      setError(err.message || "Failed to load core workspace context.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [getRequestConfig, selectedPatientContext?.id, fetchPatientSubRecords]);
 
+  // Handle baseline initialization
   useEffect(() => {
     fetchComprehensivePatientData();
   }, []);
 
-  // Proactively re-trigger query dependency arrays when active context scope updates
+  // Proactively re-trigger query dependency arrays instantly when workspace context changes
   useEffect(() => {
     if (currentPatient?.id) {
       fetchPatientSubRecords(currentPatient.id);
@@ -142,7 +149,25 @@ const PatientDashboard = ({ onLogout }) => {
       <div className="flex min-h-screen w-full items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
-          <p className="text-sm font-medium text-slate-500">Initializing Core Workspace Layout...</p>
+          <p className="text-sm font-medium text-slate-500">Initializing Workspace Environment...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center bg-slate-50 p-6">
+        <div className="bg-white border border-red-200 p-6 rounded-2xl max-w-md w-full shadow-sm text-center">
+          <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <h3 className="text-lg font-bold text-slate-900 mb-2">Workspace Error</h3>
+          <p className="text-sm text-slate-600 mb-6">{error}</p>
+          <button 
+            onClick={fetchComprehensivePatientData}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-xl transition-colors"
+          >
+            Retry Connection
+          </button>
         </div>
       </div>
     );

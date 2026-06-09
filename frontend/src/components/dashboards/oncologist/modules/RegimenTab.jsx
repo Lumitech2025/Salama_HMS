@@ -230,6 +230,7 @@ const RegimenTab = () => {
   const handleSubmitRegimenBlueprint = (e) => {
     if (e) e.preventDefault();
     
+    // Guard clause to ensure form completeness
     if (!primarySite || !cancerType || !regimenName || selectedStages.length === 0) {
       setFormStatus({ type: 'error', message: 'Please select a Site, Cancer Type, Regimen Name, and at least one Stage.' });
       return;
@@ -241,51 +242,70 @@ const RegimenTab = () => {
       return;
     }
 
-    // Capture explicit text designations right here prior to executing lifecycle state wipe
-    const explicitSiteName = allSites.find(s => s.id === parseInt(primarySite))?.name || '';
-    const explicitTypeName = availableVariants.find(v => v.id === parseInt(cancerType))?.name || '';
+    // Resolve the display names from local lookup state to avoid ReferenceErrors
+    const targetSiteObj = allSites.find(s => s.id === parseInt(primarySite));
+    const explicitSiteName = targetSiteObj ? targetSiteObj.name : `Site ID: ${primarySite}`;
 
+    const targetVariantObj = availableVariants.find(v => v.id === parseInt(cancerType));
+    const explicitTypeName = targetVariantObj ? targetVariantObj.name : `Type ID: ${cancerType}`;
+
+    // BUILD THE PAYLOAD DIRECTLY AGAINST YOUR IN-USE MODELS
     const protocolPayload = {
+      // Top-Level 'Protocol' Fields
       name: regimenName.toUpperCase().trim(),
+      description: "", // Fallback empty description
+      total_cycles: Number(cycles),
+      cycle_duration_days: Number(cycleDuration),
+      
+      // Core structural IDs (passed strictly as parsed integers)
       primary_site_id: parseInt(primarySite),
       cancer_type_id: parseInt(cancerType),
-      regimen_id: selectedTemplateId ? parseInt(selectedTemplateId) : null,
-      regimen_name: regimenName.toUpperCase().trim(),
-      total_cycles: Number(cycles),
-      cycle_duration_days: Number(cycleDuration), // Embedded explicitly into submission map
+      regimen_template_id: selectedTemplateId ? parseInt(selectedTemplateId) : null,
+      
       applicable_stages: selectedStages,
+      total_cost_per_cycle: 0.00, // Handled automatically or by finance teams later
+
+      // Nested 'ProtocolIngredient' fields mapped directly to the serializer's 'components' property
       components: medications.map(m => ({
-        medication_name: m.medicationName,
+        medication_name: m.medicationName.trim(),
         base_dosage: parseFloat(m.dosageValue),
         dosage_unit: m.unit,
-        route_of_administration: m.route
+        route_of_administration: m.route,
+        cost_per_cycle: null // Left null initially per model rules
       }))
     };
 
-    fetch('/api/protocol-masters/', {
+    fetch('/api/protocols/', {
       method: 'POST',
       headers: getAuthHeaders(), 
       body: JSON.stringify(protocolPayload)
     })
       .then(async (res) => {
-        if (!res.ok) throw new Error('Failed to save the treatment regimen configuration.');
+        // Capture detailed Django REST / API error arrays if they exist
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          const systemMessage = errorData.detail || errorData.message || JSON.stringify(errorData);
+          throw new Error(systemMessage || 'Failed to save the treatment regimen configuration.');
+        }
         return res.json();
       })
       .then((savedData) => {
-        setFormStatus({ type: 'success', message: `Regimen [${protocolPayload.regimen_name}] saved successfully.` });
+        setFormStatus({ 
+          type: 'success', 
+          message: `Regimen [${protocolPayload.name}] saved successfully.` 
+        });
         
-        // Append explicit labels to prevent unrendered indices on quick updates
+        // Contextually enrich the record returned from the backend matrix list view row
         const UIReadyRecord = {
           ...savedData,
           primary_site_name: explicitSiteName,
           cancer_type_name: explicitTypeName
         };
 
-        // Feed table view instantly
         setProtocolsList(prev => [UIReadyRecord, ...prev]);
         clearFormState();
       })
-      .catch(err => setFormStatus({ type: 'error', message: err.message }));
+      .catch(err => setFormStatus({ type: 'error', message: `API Error: ${err.message}` }));
   };
 
   const filteredMedications = medications.filter(med => 

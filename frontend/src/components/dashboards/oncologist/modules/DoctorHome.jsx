@@ -184,7 +184,7 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
                                     <tr key={pat.id} className="hover:bg-blue-50/20 transition-all group">
                                         <td className="px-10 py-8">
                                             <p className="font-black text-slate-900 text-lg uppercase tracking-tight">{pat.patient_name}</p>
-                                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest italic font-mono">UCRN: {pat.patient_id_no}</p>
+                                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest italic font-mono"> {pat.patient_id_no}</p>
                                         </td>
                                         <td className="px-10 py-8">
                                             <span className="text-sm font-bold font-mono text-blue-600 bg-blue-50/50 border border-blue-100/70 px-3 py-1.5 rounded-lg">

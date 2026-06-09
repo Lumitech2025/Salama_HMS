@@ -28,6 +28,8 @@ from django.core.cache import cache
 from django.shortcuts import get_object_or_404
 from .mpesa import MpesaClient
 import logging
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 
 from appointments.utils import dispatch_async_notifications
 
@@ -35,7 +37,7 @@ from appointments.utils import dispatch_async_notifications
 from .models import (
     LabPanel, Patient, Protocol, Requisition, Treatment, ChemoSession, Drug, 
     LabResult, LabOrder, Bill, Appointment, VitalSign, Queue, 
-    LabInventoryItem, StockAdjustment, Prescription, 
+    LabInventoryItem, StockAdjustment, Prescription, StockTake,
     PrescriptionItem, ClinicalNote, ImagingRecord, RegistrationRecord, InventoryItem, PsychologyEnrollment, SessionLog, BereavementLog, 
     OutreachCampaign, ReferralPartner, SocialMediaPost, MarketingRequisitionExtension, LabReference, LabTestRegistry, 
     ProtocolMaster, ProtocolDrug, DrugGuardrail, ProtocolIngredient,
@@ -47,9 +49,11 @@ from .models import (
     Supplier,
     PurchaseOrder, GoodsReceivedNote, 
     PurchaseInvoice, PaymentVoucher,
-    NurseServiceOrder
+    NurseServiceOrder, FixedAsset, Expense
     
 )
+
+
 from .serializers import (
     LabOrderSerializer, LabReferenceSerializer, LabResultSerializer, 
     OncologyClinicalPortalSerializer, PatientSerializer, 
@@ -57,7 +61,7 @@ from .serializers import (
     TreatmentSerializer, ChemoSessionSerializer, DrugSerializer, 
     CancerSiteSerializer, CancerTypeSerializer, RegimenSerializer, RegimenDrugSerializer,
     BillSerializer, SalamaTokenObtainPairSerializer, LabInventorySerializer, 
-    StockAdjustmentSerializer, AppointmentSerializer, VitalSignSerializer, 
+    StockAdjustmentSerializer, StockTakeSerializer, AppointmentSerializer, VitalSignSerializer, 
     QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer, RegistrationRecordSerializer, InventoryItemSerializer, PsychologyEnrollmentSerializer, 
     SessionLogSerializer, 
     BereavementLogSerializer, OutreachCampaignSerializer, ReferralPartnerSerializer, SocialMediaPostSerializer,RequisitionSerializer, MarketingRequisitionSerializer, LabTestRegistrySerializer, ProtocolMasterSerializer,
@@ -68,7 +72,8 @@ from .serializers import (
     PurchaseOrderSerializer, GoodsReceivedNoteSerializer, 
     PurchaseInvoiceSerializer, PaymentVoucherSerializer,
     ImagingOrderSerializer, ImagingResultSerializer,
-    NurseServiceOrderSerializer
+    NurseServiceOrderSerializer,
+    FixedAssetSerializer, RequisitionItemSerializer, ExpenseSerializer
 )
 
 
@@ -266,18 +271,48 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         patient_id = self.request.query_params.get('patient')
         status_val = self.request.query_params.get('status')
+        visit_id = self.request.query_params.get('visit')  # NEW: Filter by visit encounter
+        
         qs = self.queryset
-        if patient_id: qs = qs.filter(patient_id=patient_id)
-        if status_val: qs = qs.filter(status=status_val)
+        
+        if patient_id: 
+            qs = qs.filter(patient_id=patient_id)
+        if status_val: 
+            qs = qs.filter(status=status_val)
+        if visit_id:
+            qs = qs.filter(visit_id=visit_id)
+            
         return qs
 
     @action(detail=False, methods=['get'], url_path='summary')
     def pharmacy_summary(self, request):
+        """
+        Provides metrics for the active pharmacy dashboard tracking panel.
+        """
         today = timezone.now().date()
+        
+        # Fallback check: Look up if your Drug model uses stock_quantity vs quantity_in_stock
+        has_stock_qty_field = hasattr(Drug, 'stock_quantity')
+        stock_field = 'stock_quantity' if has_stock_qty_field else 'quantity_in_stock'
+        
+        low_stock_filter = {f"{stock_field}__lte": F('reorder_level')}
+        
+        dispensed_count = Prescription.objects.filter(
+            created_at__date=today, 
+            status='DISPENSED'
+        ).count()
+        
+        revenue_calc = Bill.objects.filter(
+            created_at__date=today, 
+            is_paid=True
+        ).aggregate(total=Sum('total_amount'))['total'] or 0
+        
+        low_stock_count = Drug.objects.filter(**low_stock_filter).count()
+        
         return Response({
-            'dispensed_today': Prescription.objects.filter(created_at__date=today, status='DISPENSED').count(),
-            'revenue_today': Bill.objects.filter(created_at__date=today, is_paid=True).aggregate(Sum('total_amount'))['total_amount__sum'] or 0,
-            'low_stock_items': Drug.objects.filter(quantity_in_stock__lte=F('reorder_level')).count()
+            'dispensed_today': dispensed_count,
+            'revenue_today': revenue_calc,
+            'low_stock_items': low_stock_count
         })
 
 # --- 6. APPOINTMENTS & BILLING ---
@@ -524,6 +559,7 @@ class LabTestRegistryViewSet(viewsets.ModelViewSet):
                 
             return Response(serializer.data)
         
+@method_decorator(csrf_exempt, name='dispatch') 
 class ImagingOrderViewSet(viewsets.ModelViewSet):
     # Optimizing database queries to prevent expensive database round-trips
     queryset = ImagingOrder.objects.all().select_related('patient', 'visit').order_by('-created_at')
@@ -539,11 +575,59 @@ class ImagingOrderViewSet(viewsets.ModelViewSet):
     search_fields = ['patient__name', 'visit__id']
 
     def perform_create(self, serializer):
-        # Captures raw data elements seamlessly before processing creation pipelines
-        imaging_skus = self.request.data.get('imaging_skus', [])
-        serializer.save()
+        """
+        Intercepts the creation routine safely within a database transaction block.
+        Automatically checks for or constructs a parent visit session invoice, attaches
+        the individual procedure records, and forwards routing tokens to Radiology.
+        """
+        raw_procedures = self.request.data.get('requested_procedures', [])
+        
+        with transaction.atomic():
+            # 1. Persist the core ImagingOrder record to database
+            imaging_order = serializer.save(status='PENDING')
 
-    # --- Custom Actions Tailored for Your Operational Profiles ---
+            # 2. Step A: Parent Invoice Resolution Workspace
+            # Ensure the active outpatient session has a grouped parent bill matrix container
+            if imaging_order.visit and imaging_order.patient:
+                invoice, created = PatientInvoice.objects.get_or_create(
+                    visit=imaging_order.visit,
+                    patient=imaging_order.patient,
+                    defaults={'status': 'UNPAID'}
+                )
+
+                # 3. Step B: Process Requisition Line Item Ledgers
+                # Update this block inside your loops in views.py:
+        for procedure in raw_procedures:
+            scan_sku_id = str(procedure.get('scan_id', '')).strip()
+            
+            # Use __iexact for a case-insensitive, robust SKU match
+            service_catalog_item = Service.objects.filter(sku__iexact=scan_sku_id, active=True).first()
+
+            if service_catalog_item:
+                PatientBillableItem.objects.create(
+                    invoice=invoice,
+                    service=service_catalog_item,
+                    quantity=1
+                    # Your model save() hook will automatically pull service_catalog_item.price here!
+                )
+            else:
+                # Fallback if it TRULY does not exist in your Service catalog table
+                PatientBillableItem.objects.create(
+                    invoice=invoice,
+                    station='Radiology',
+                    name=procedure.get('label', 'Radiology Procedure Requisition'),
+                    unit_price=procedure.get('price', procedure.get('cost', 0.00)), # Try 'price' or default to 0
+                    quantity=1
+                )
+            
+            # 4. Step C: Workspace Board Routing Orchestration
+            if imaging_order.visit:
+                Queue.objects.filter(visit=imaging_order.visit).update(
+                    current_station='RADIOLOGY',
+                    status='WAITING'
+                )
+
+    # --- Custom Actions Tailored for Your Operational Profiles (Fixed Indentation) ---
 
     @action(detail=False, methods=['get'], url_path='active-queue')
     def active_queue(self, request):
@@ -589,7 +673,6 @@ class ImagingOrderViewSet(viewsets.ModelViewSet):
         orders = self.get_queryset().filter(patient_id=patient_id)
         serializer = self.get_serializer(orders, many=True)
         return Response(serializer.data)
-
 
 class ImagingResultViewSet(viewsets.ModelViewSet):
     queryset = ImagingResult.objects.all().select_related('patient', 'visit', 'imaging_order').order_by('-created_at')
@@ -944,14 +1027,29 @@ class InventoryItemViewSet(viewsets.ModelViewSet):
     queryset = InventoryItem.objects.all().order_by('-added_at')
     serializer_class = InventoryItemSerializer
 
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['department']
+
     @action(detail=False, methods=['get'], url_path='unique-catalog')
-    def unique_catalog(self):
+    def unique_catalog(self, request):
         """
         Returns a clean list of unique product names, grouped by department 
         and bundled with their default baseline unit costs for the procurement engine.
         """
         items = InventoryItem.objects.values('name', 'department', 'cost_per_unit').distinct()
         return Response(items)
+
+
+class StockTakeViewSet(viewsets.ModelViewSet):
+    serializer_class = StockTakeSerializer
+
+
+    def get_queryset(self):
+        return StockTake.objects.all().select_related('item', 'performed_by').order_by('-created_at')
+
+    def perform_create(self, serializer):
+        stock_take = serializer.save()
+        
 
 class PsychologyEnrollmentViewSet(viewsets.ModelViewSet):
     queryset = PsychologyEnrollment.objects.all().order_by('-created_at')
@@ -1024,7 +1122,11 @@ class RequisitionViewSet(viewsets.ModelViewSet):
     The main clearinghouse endpoint for the Finance Office.
     Provides data feeds for the Lab, Pharmacy, and Marketing tabs simultaneously.
     """
-    queryset = Requisition.objects.all().prefetch_related('items__lab_item', 'items__pharmacy_item', 'marketing_meta__campaign')
+    # ALIGNED: Changed prefetch references to target the new unified relationship 'items__inventory_item'
+    queryset = Requisition.objects.all().prefetch_related(
+        'items__inventory_item', 
+        'marketing_meta__campaign'
+    )
     serializer_class = RequisitionSerializer
     permission_classes = [IsAuthenticated]
     
@@ -1042,7 +1144,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
         officers to view everything.
         """
         user = self.request.user
-        # Replace with your actual user role flag (e.g., user.is_finance or user.role == 'FINANCE')
         if getattr(user, 'is_staff', False) or user.groups.filter(name='Finance').exists():
             return self.queryset
         return self.queryset.filter(requested_by=user)
@@ -1705,32 +1806,52 @@ class PatientInvoiceViewSet(viewsets.ModelViewSet):
 
 logger = logging.getLogger(__name__)
 
+
+@method_decorator(csrf_exempt, name='dispatch')
 class MpesaPaymentTriggerView(APIView):
     """Triggers the STK Push when called by our React POS frontend."""
     def post(self, request):
-        invoice_id = request.data.get("invoice_id")
-        phone_number = request.data.get("phone_number")
-        
-        if not invoice_id or not phone_number:
-            return Response({"error": "Missing invoice_id or phone_number"}, status=400)
+        try:
+            invoice_id = request.data.get("invoice_id")
+            phone_number = request.data.get("phone_number")
+            validated_items = request.data.get("validated_items", []) # Pull cart values directly
             
-        invoice = get_object_or_404(PatientInvoice, id=invoice_id)
-        
-        # Calculate invoice sum dynamically
-        total_amount = sum(item.quantity * item.unit_price for item in invoice.billable_items.all())
-        if total_amount <= 0:
-            return Response({"error": "Cannot bill an empty invoice ledger"}, status=400)
+            if not invoice_id or not phone_number:
+                return Response({"error": "Missing invoice_id or phone_number"}, status=400)
+                
+            invoice = get_object_or_404(PatientInvoice, id=invoice_id)
+            
+            if validated_items:
+                # Calculate from the array items React passed us
+                total_amount = sum(float(item.get('price', 0)) for item in validated_items)
+            else:
+                # If frontend payload didn't include it, look for standard reverse relations
+                if hasattr(invoice, 'items'):
+                    total_amount = sum(float(item.price) for item in invoice.items.all())
+                elif hasattr(invoice, 'invoiceitem_set'):
+                    total_amount = sum(float(item.price) for item in invoice.invoiceitem_set.all())
+                else:
+                    # Absolute generic emergency default fallback value if database layout is locked
+                    return Response({"error": "Invoice items structure could not be parsed dynamically by the backend template manager."}, status=400)
 
-        client = MpesaClient()
-        result = client.send_stk_push(phone_number, total_amount, invoice.id)
-        
-        if result["status"] == "success":
-            invoice.mpesa_checkout_id = result["checkout_request_id"]
-            invoice.status = "PROCESSING"
-            invoice.save()
-            return Response({"message": "STK Push sent!", "checkout_id": result["checkout_request_id"]})
+            if total_amount <= 0:
+                return Response({"error": "Cannot bill an empty invoice ledger"}, status=400)
+
+            client = MpesaClient()
+            result = client.send_stk_push(phone_number, total_amount, invoice.id)
             
-        return Response({"error": result["message"]}, status=500)
+            if result["status"] == "success":
+                # Ensure these fields are explicitly defined in your PatientInvoice model!
+                if hasattr(invoice, 'mpesa_checkout_id'):
+                    invoice.mpesa_checkout_id = result["checkout_request_id"]
+                invoice.status = "PROCESSING"
+                invoice.save()
+                return Response({"message": "STK Push sent!", "checkout_id": result["checkout_request_id"]})
+                
+            return Response({"error": result["message"]}, status=400)
+            
+        except Exception as e:
+            return Response({"error": f"Internal Server Crash: {str(e)}"}, status=500)
 
 
 @api_view(['POST'])
@@ -1755,10 +1876,78 @@ def mpesa_callback_webhook(request):
         invoice.receipt_number = mpesa_receipt
         invoice.payment_method = "MPESA"
         invoice.save()
+
+        invoice.items.update(is_paid=True)
         
         return Response({"ResultCode": 0, "ResultDesc": "Success acknowledged"}, status=200)
     else:
-        # Code rejected or timed out by patient
         invoice.status = "UNPAID"
         invoice.save()
         return Response({"ResultCode": 0, "ResultDesc": "Failure acknowledged"}, status=200)
+    
+# backend/core/views.py
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def check_invoice_status(request, invoice_id):
+    """
+    Lightweight endpoint for frontend polling to monitor transaction resolution state.
+    """
+    try:
+        invoice = PatientInvoice.objects.get(id=invoice_id)
+        return Response({
+            "status": invoice.status, 
+            "receipt_number": getattr(invoice, 'receipt_number', None)
+        }, status=200)
+    except PatientInvoice.DoesNotExist:
+        return Response({"error": "Invoice not found"}, status=404)
+    
+
+
+
+class FixedAssetViewSet(viewsets.ModelViewSet):
+    """
+    A simple interface to list, create, update, and delete hospital assets.
+    """
+    queryset = FixedAsset.objects.all()
+    serializer_class = FixedAssetSerializer
+    
+    # Enables easy searching and filtering on the backend
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name', 'sku', 'department']
+
+    def get_queryset(self):
+        """
+        Optional feature: If the frontend requests a specific department 
+        via an address like /api/fixed-assets/?dept=RADIOLOGY, 
+        we filter the list automatically.
+        """
+        queryset = FixedAsset.objects.all()
+        department = self.request.query_params.get('dept', None)
+        
+        if department is not None and department != 'ALL':
+            queryset = queryset.filter(department=department)
+            
+        return queryset
+    
+class ExpenseViewSet(viewsets.ModelViewSet):
+    queryset = Expense.objects.all()
+    serializer_class = ExpenseSerializer
+    
+    # Enable filtering capabilities matching frontend UI features
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    
+    # Exact category filtering for your left sidebar selection list
+    filterset_fields = ['category', 'behavior']
+    
+    # Dynamic search matching your frontend search bar field
+    search_fields = ['description', 'reference', 'id']
+    
+    # Default list ordering layout sorting by most recent entries first
+    ordering_fields = ['date', 'amount', 'created_at']
+    ordering = ['-date', '-created_at']
+
+    def perform_create(self, serializer):
+        # Additional custom hooks can be appended here if you want to link the 
+        # voucher creator account instance directly (e.g., recorded_by=self.request.user)
+        serializer.save()
