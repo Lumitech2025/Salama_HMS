@@ -387,29 +387,27 @@ const InsuranceClaimsHub = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl">
           <div className="p-4 rounded-2xl w-fit mb-6 bg-blue-50 text-blue-600"><TrendingUp size={28} /></div>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Outstanding Claims</p>
+          <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Outstanding Claims</h2>
           <h3 className="text-3xl font-black text-slate-900 tracking-tighter italic uppercase leading-none">
             KES {claims.filter(c => c.status !== 'APPROVED').reduce((acc, curr) => acc + parseFloat(curr.total_amount_billed || 0), 0).toLocaleString()}
           </h3>
-          <p className="text-[10px] font-bold text-slate-500 mt-2 italic">Awaiting Insurer Settlement Responses</p>
+         
         </div>
 
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl">
           <div className="p-4 rounded-2xl w-fit mb-6 bg-rose-50 text-rose-600"><XCircle size={28} /></div>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Disputed / Rejected Value</p>
+          <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Disputed / Rejected Value</h2>
           <h3 className="text-3xl font-black text-rose-600 tracking-tighter italic uppercase leading-none">
             KES {claims.filter(c => c.status === 'REJECTED' || c.status === 'DISPUTED').reduce((acc, curr) => acc + parseFloat(curr.total_amount_billed || 0), 0).toLocaleString()}
           </h3>
-          <p className="text-[10px] font-bold text-rose-400 mt-2 italic">Requires claim reconciliation edit</p>
         </div>
 
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl">
           <div className="p-4 rounded-2xl w-fit mb-6 bg-teal-50 text-teal-600"><CheckCircle2 size={28} /></div>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Logged Remittance Value</p>
+          <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Remittance Value</h2>
           <h3 className="text-3xl font-black text-teal-600 tracking-tighter italic uppercase leading-none">
             KES {remitBatches.reduce((acc, curr) => acc + parseFloat(curr.total_amount_received || 0), 0).toLocaleString()}
           </h3>
-          <p className="text-[10px] font-bold text-teal-600 mt-2 italic">Successfully batched from bank advice</p>
         </div>
       </div>
 

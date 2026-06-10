@@ -1663,11 +1663,8 @@ class PatientDiagnosisSerializer(serializers.ModelSerializer):
 
 
 class SupplierSerializer(serializers.ModelSerializer):
-    # Read-only field for rendering pretty labels on the React directory cards
     category_display = serializers.CharField(source='get_category_display', read_only=True)
     
-    # We can explicitly mark compliance files as optional at serializer layer, 
-    # but handle multi-part file payloads safely.
     kra_pin_doc = serializers.FileField(required=False, allow_null=True)
     incorporation_doc = serializers.FileField(required=False, allow_null=True)
     regulatory_license_doc = serializers.FileField(required=False, allow_null=True)
@@ -1686,20 +1683,54 @@ class SupplierSerializer(serializers.ModelSerializer):
             'tax_compliance_doc', 'tax_compliance_expiry', 'notes', 'is_active'
         ]
 
+    def to_internal_value(self, data):
+        """
+        Intercepts incoming data and sanitizes frontend string errors without
+        triggering a deep copy on active file streams.
+        """
+        # Determine if we are dealing with a Django QueryDict
+        is_querydict = hasattr(data, '_mutable')
+        
+        if is_querydict:
+            # Bypass the deepcopy error by temporarily unlocking the existing QueryDict object directly
+            old_mutable = data._mutable
+            data._mutable = True
+            mutable_data = data
+        else:
+            # If it's already a standard python dictionary, a shallow copy is completely safe
+            mutable_data = data.copy() if hasattr(data, 'copy') else data
+        
+        file_fields = [
+            'contract_document', 'kra_pin_doc', 'incorporation_doc', 
+            'regulatory_license_doc', 'bank_confirmation_doc', 'tax_compliance_doc'
+        ]
+        
+        try:
+            for field in file_fields:
+                if field in mutable_data:
+                    val = mutable_data[field]
+                    # Clean up instances where frontend passes text representation strings of null values
+                    if val == "" or val in ["null", "undefined"]:
+                        mutable_data[field] = None
+                        
+            # Pass the modified object into DRF validation pipeline
+            return super().to_internal_value(mutable_data)
+            
+        finally:
+            # Always restore the original QueryDict state to prevent leaking mutability
+            if is_querydict:
+                data._mutable = old_mutable
+
     def validate(self, data):
-        """
-        Object-level validation to safeguard our compliance workflows.
-        """
         tax_doc = data.get('tax_compliance_doc')
         expiry_date = data.get('tax_compliance_expiry')
 
-        # Rule 1: If TCC is uploaded, the expiration date must be supplied for Dorcas' system to track it
+        # If tax_doc has been scrubbed to None, skip checking this validation requirement
         if tax_doc and not expiry_date:
             raise serializers.ValidationError({
                 "tax_compliance_expiry": "You must provide an expiration date when uploading a Tax Compliance Certificate."
             })
             
-        # Rule 2: Warning validation flag if they try to onboard an already expired document
         if expiry_date and expiry_date < timezone.now().date():
             raise serializers.ValidationError({
                 "tax_compliance_expiry": "The provided Tax Compliance Certificate has already expired."
@@ -2039,39 +2070,41 @@ class FixedAssetSerializer(serializers.ModelSerializer):
         return float(max(0, (cost - salvage) * rate * quantity))
     
 class ExpenseSerializer(serializers.ModelSerializer):
-    # Display plain text labels for choices instead of raw keys in GET requests
     category_display = serializers.CharField(source='get_category_display', read_only=True)
     behavior_display = serializers.CharField(source='get_behavior_display', read_only=True)
-    
-    # Read-only field to cleanly show only the file name to the frontend
     document_name = serializers.SerializerMethodField()
+    
+    amount_paid = serializers.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    
+    status = serializers.SerializerMethodField()
 
     class Meta:
         model = Expense
         fields = [
-            'id', 
-            'description', 
-            'category', 
-            'category_display', 
-            'behavior', 
-            'behavior_display', 
-            'date', 
-            'amount', 
-            'reference', 
-            'document', 
-            'document_name',
-            'created_at', 
-            'updated_at'
+            'id', 'description', 'category', 'category_display', 
+            'behavior', 'behavior_display', 'date', 'amount', 
+            'amount_paid', 'status', 'reference', 'document', 
+            'document_name', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'status', 'created_at', 'updated_at']
 
     def get_document_name(self, obj):
         if obj.document:
             return os.path.basename(obj.document.name)
         return None
 
+    def get_status(self, obj):
+        # Access properties using native object formats safely
+        amount = float(obj.amount or 0)
+        paid = float(obj.amount_paid or 0)
+
+        if paid >= amount and amount > 0:
+            return "PAID"
+        elif 0 < paid < amount:
+            return "PARTIAL"
+        return "UNPAID"
+
     def validate_reference(self, value):
-        # Convert empty strings or spaces from frontend inputs into the clean pending flag
         if not value or str(value).strip() == "":
             return "PENDING_SORT"
         return value

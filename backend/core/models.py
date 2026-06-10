@@ -1,6 +1,5 @@
 from decimal import Decimal
 from enum import unique
-
 from django.db import models, transaction
 from django.conf import settings
 from django.utils import timezone
@@ -11,6 +10,7 @@ from django.db import models
 from django.contrib.postgres.fields import ArrayField 
 from datetime import datetime
 from django.utils import timezone
+from django.apps import apps
 
 import math
 import random
@@ -86,7 +86,7 @@ class RegistrationRecord(models.Model):
     last_name = models.CharField(max_length=100)
     id_number = models.CharField(max_length=50) 
     phone = models.CharField(max_length=20)
-    email = models.EmailField(blank=True, null=True) # Allowed null to prevent unique blank string clashes
+    email = models.EmailField(blank=True, null=True) 
     
     age = models.PositiveIntegerField()
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
@@ -183,7 +183,6 @@ class RegistrationRecord(models.Model):
     
 
 # --- Appointment & Triage Workflow ---
-
 class Appointment(models.Model):
     VISIT_TYPE_CHOICES = [('NEW', 'New Visit'), ('SUBSEQUENT', 'Subsequent Visit')]
     STATUS_CHOICES = [
@@ -238,8 +237,8 @@ class Queue(models.Model):
 
     STATUS_CHOICES = [
         ('WAITING', 'Waiting'), 
-        ('UNDER_CONSULTATION', 'Under Consultation'), # For Doctor KPI
-        ('AWAITING_MEDICATION', 'Awaiting Medication'), # For Pharmacist KPI
+        ('UNDER_CONSULTATION', 'Under Consultation'), 
+        ('AWAITING_MEDICATION', 'Awaiting Medication'), 
         ('COMPLETED', 'Completed')
     ]
     PRIORITY_CHOICES = [('NORMAL', 'Normal Priority'), ('HIGH', 'High Priority'), ('EMERGENCY', 'Emergency')]
@@ -2058,13 +2057,9 @@ class DrugGuardrail(models.Model):
 
 @receiver(post_save, sender=LabOrder)
 def auto_generate_lab_results(sender, instance, created, **kwargs):
-    """
-    Listens to newly stored clinician orders and instantly updates the
-    LabResult processing queues to map clinical workloads seamlessly.
-    """
+  
     if created:
-        # 🔴 FIX: Safe fallback if requested_tests isn't a direct DB field,
-        # or change 'test_names' / 'tests' to whatever field name is on your LabOrder model
+       
         requested_tests = getattr(instance, 'requested_tests', None)
         
         # If it's a JSON string or comma-separated string, parse it. 
@@ -2395,7 +2390,6 @@ class FixedAsset(models.Model):
     
 
 class Expense(models.Model):
-    # Expense categories matching your sidebar options
     CATEGORY_CHOICES = [
         ('SALARIES', 'Salaries'),
         ('WAGES', 'Wages'),
@@ -2413,26 +2407,30 @@ class Expense(models.Model):
         ('UTILITIES', 'Utilities (Water & Elec)'),
     ]
 
-    # Schedule behavior type
     BEHAVIOR_CHOICES = [
         ('Fixed', 'Fixed (Auto-Renewable)'),
         ('Variable', 'Variable (On-Demand)'),
+    ]
+
+    STATUS_CHOICES = [
+        ('UNPAID', 'Unpaid'),
+        ('PARTIAL', 'Partially Paid'),
+        ('PAID', 'Fully Paid'),
     ]
 
     description = models.CharField(max_length=255)
     category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='SALARIES')
     behavior = models.CharField(max_length=15, choices=BEHAVIOR_CHOICES, default='Fixed')
     date = models.DateField(default=timezone.now)
-    amount = models.DecimalField(max_digits=12, decimal_places=2)
     
-    # Transaction reference (e.g., MPESA code, Cheque No). 
-    # Can be blank or set to 'PENDING_SORT' for auto-generated fixed items.
+    # Financial fields tracking invoice vs actual offsets
+    amount = models.DecimalField(max_digits=12, decimal_places=2, help_text="Total expense amount invoiced/due")
+    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Amount paid to offset expense")
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='UNPAID')
+    
     reference = models.CharField(max_length=100, blank=True, null=True, default='PENDING_SORT')
-    
-    # Stores uploaded payment proofs/receipts in an 'expense_proofs/' directory
     document = models.FileField(upload_to='expense_proofs/', blank=True, null=True)
     
-    # Audit tracking timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2441,13 +2439,18 @@ class Expense(models.Model):
         verbose_name = "Expense Voucher"
         verbose_name_plural = "Expense Vouchers"
 
+    def save(self, *args, **kwargs):
+        # Auto-compute status dynamically based on amount logged prior to saving
+        if self.amount_paid <= 0:
+            self.status = 'UNPAID'
+        elif self.amount_paid < self.amount:
+            self.status = 'PARTIAL'
+        else:
+            self.status = 'PAID'
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"{self.description} ({self.category}) - KES {self.amount}"
-
-
-
-
-
+        return f"{self.description} ({self.category}) - Paid: KES {self.amount_paid}/{self.amount}"
 
 class LabInventoryItem(models.Model):
     CATEGORY_CHOICES = [
@@ -2463,7 +2466,6 @@ class LabInventoryItem(models.Model):
     min_stock = models.IntegerField(default=5)
     unit = models.CharField(max_length=50, default="Units")
     
-    # REQUIRED FOR FINANCE: Base cost tracking for auto-calculating totals
     buying_price = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     updated_at = models.DateTimeField(auto_now=True)
 

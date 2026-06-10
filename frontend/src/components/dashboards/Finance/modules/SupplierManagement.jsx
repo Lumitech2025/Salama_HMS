@@ -6,7 +6,6 @@ import {
   Trash2, Clock, CheckCircle2, Award, Upload, Calendar, Edit2, MoreVertical
 } from 'lucide-react';
 
-// --- MAIN COMPONENT ---
 const SupplierManagement = () => {
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [suppliers, setSuppliers] = useState([]);
@@ -14,7 +13,7 @@ const SupplierManagement = () => {
   const [editingSupplier, setEditingSupplier] = useState(null);
   const [selectedSupplier, setSelectedSupplier] = useState(null);
 
-  const [supplierForm, setSupplierForm] = useState({
+  const initialFormState = {
     name: '', category: 'PHARMA', contact_person: '', email: '', phone: '',
     tin_number: '', license_number: '', bank_name: '', account_number: '', swift_code: '',
     payment_terms: 'Net 30',
@@ -24,9 +23,10 @@ const SupplierManagement = () => {
     incorporation_doc: null,
     regulatory_license_doc: null,
     bank_confirmation_doc: null
-  });
+  };
 
-  // 2. Robust Submission Logic
+  const [supplierForm, setSupplierForm] = useState(initialFormState);
+
   const handleSupplierSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -40,17 +40,24 @@ const SupplierManagement = () => {
       }
     });
 
+    // FORCE AXIOS TO RECOGNIZE MULTIPART ENTRIES
+    const config = {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    };
+
     try {
       if (editingSupplier) {
-        // Update existing supplier
-        await API.put(`/suppliers/${editingSupplier.id}/`, formData);
+        // Pass the config object as the third argument for PUT requests
+        await API.put(`/suppliers/${editingSupplier.id}/`, formData, config);
       } else {
-        // Create new supplier
-        await API.post('/suppliers/', formData);
-      };
+        // Pass the config object as the third argument for POST requests
+        await API.post('/suppliers/', formData, config);
+      }
       
       setShowSupplierModal(false);
-      setEditingSupplier(null)
+      setEditingSupplier(null);
       setSupplierForm({
         name: '', category: 'PHARMA', contact_person: '', email: '', phone: '',
         tin_number: '', license_number: '', bank_name: '', account_number: '', swift_code: '',
@@ -63,12 +70,12 @@ const SupplierManagement = () => {
       console.error("Submission Error:", err.response?.data || err);
       alert("Error: Failed to save supplier. Please verify all fields and documents."); 
     } finally { 
-      loading(false); 
+      setLoading(false); // Make sure this is setLoading, not loading()!
     }
   };
 
   const handleFileChange = (field, file) => {
-    setSupplierForm(prev => ({ ...prev, [field]: file }));
+    setSupplierForm(prev => ({ ...prev, [field]: file || null }));
   };
 
   const fetchSuppliers = async () => {
@@ -138,7 +145,11 @@ const SupplierManagement = () => {
         </div>
         
         <button 
-          onClick={() => setShowSupplierModal(true)}
+          onClick={() => {
+            setEditingSupplier(null);
+            setSupplierForm(initialFormState);
+            setShowSupplierModal(true);
+          }}
           className="bg-[#020617] text-teal-400 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 hover:bg-slate-900 transition-all shadow-xl active:scale-95"
         >
           <Plus size={18} /> Add Supplier
@@ -210,7 +221,10 @@ const SupplierManagement = () => {
                       <td className="px-8 py-6 text-right" onClick={(e) => e.stopPropagation()}>
                         <button 
                           onClick={() => {
-                            setSupplierForm(vendor);
+                            setSupplierForm({
+                              ...initialFormState,
+                              ...vendor // Hydrates existing vendor string paths correctly
+                            });
                             setEditingSupplier(vendor);
                             setShowSupplierModal(true);
                           }}
@@ -236,7 +250,7 @@ const SupplierManagement = () => {
               <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm" onClick={() => setShowSupplierModal(false)}></div>
               <div className="relative bg-white w-full max-w-4xl rounded-[3rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
                   <div className="p-10 border-b border-slate-50 flex justify-between items-center bg-slate-50/50 px-12">
-                      <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Vendor <span className="text-teal-600">Onboarding</span></h3>
+                      <h3 className="text-2xl font-black text-slate-900 uppercase italic leading-none">Vendor {editingSupplier ? <span className="text-amber-500">Modification</span> : <span className="text-teal-600">Onboarding</span>}</h3>
                       <button onClick={() => setShowSupplierModal(false)} className="text-slate-400 hover:text-rose-500 transition-all"><X size={24}/></button>
                   </div>
                   
@@ -286,25 +300,25 @@ const SupplierManagement = () => {
 
                       {/* Section 2: Critical Document Checklist Upload Engine */}
                       <div className="p-8 bg-slate-50 rounded-[2rem] space-y-6">
-                        <p className="text-[10px] font-black text-slate-900 uppercase tracking-[0.3em] flex items-center gap-2"><Upload size={14}/> Required Compliance Documentation</p>
+                        <p className="text-[10px] font-black text-slate-900 uppercase tracking-[0.3em] flex items-center gap-2"><Upload size={14}/> Optional Compliance Documentation</p>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          {/* KRA PIN Doc */}
+                          {/* KRA PIN Doc - UNBOUND FOR OPTIONAL USE */}
                           <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-3">
                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">1. Tax Registration (KRA PIN Document)</label>
-                            <input required={!editingSupplier} type="file" accept=".pdf" onChange={(e) => handleFileChange('kra_pin_doc', e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer w-full" />
+                            <input type="file" accept=".pdf" onChange={(e) => handleFileChange('kra_pin_doc', e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer w-full" />
                           </div>
 
-                          {/* Certificate of Incorporation */}
+                          {/* Certificate of Incorporation - UNBOUND FOR OPTIONAL USE */}
                           <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-3">
                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">2. Certificate of Incorporation / Reg</label>
-                            <input required={!editingSupplier} type="file" accept=".pdf" onChange={(e) => handleFileChange('incorporation_doc', e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer w-full" />
+                            <input type="file" accept=".pdf" onChange={(e) => handleFileChange('incorporation_doc', e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer w-full" />
                           </div>
 
-                          {/* Regulatory Medical/Trade License */}
+                          {/* Regulatory Medical/Trade License - UNBOUND FOR OPTIONAL USE */}
                           <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-3">
                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">3. Operating License (PPB / Commercial)</label>
-                            <input required={!editingSupplier} type="file" accept=".pdf" onChange={(e) => handleFileChange('regulatory_license_doc', e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer w-full" />
+                            <input type="file" accept=".pdf" onChange={(e) => handleFileChange('regulatory_license_doc', e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer w-full" />
                           </div>
 
                           {/* Bank Details Confirmation */}
@@ -318,11 +332,11 @@ const SupplierManagement = () => {
                         <div className="bg-white p-6 rounded-2xl border border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
                           <div className="space-y-2">
                             <label className="text-[10px] font-black text-rose-600 uppercase tracking-wider block">5. Valid Tax Compliance Certificate (TCC)</label>
-                            <input required={!editingSupplier} type="file" accept=".pdf" onChange={(e) => handleFileChange('tax_compliance_doc', e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-rose-50 file:text-rose-700 hover:file:bg-rose-100 cursor-pointer w-full" />
+                            <input type="file" accept=".pdf" onChange={(e) => handleFileChange('tax_compliance_doc', e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-rose-50 file:text-rose-700 hover:file:bg-rose-100 cursor-pointer w-full" />
                           </div>
                           <div className="space-y-2">
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><Calendar size={12}/> Document Expiration Date</label>
-                            <input required type="date" value={supplierForm.tax_compliance_expiry} onChange={(e) => setSupplierForm({...supplierForm, tax_compliance_expiry: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2.5 px-4 text-xs font-bold outline-none" />
+                            <input type="date" value={supplierForm.tax_compliance_expiry} onChange={(e) => setSupplierForm({...supplierForm, tax_compliance_expiry: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-xl py-2.5 px-4 text-xs font-bold outline-none" />
                           </div>
                         </div>
                       </div>

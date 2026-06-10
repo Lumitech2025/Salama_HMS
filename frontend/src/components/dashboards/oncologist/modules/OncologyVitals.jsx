@@ -523,7 +523,7 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                                     <VitalCard icon={<Heart size={18} className="text-rose-500"/>} label="Blood Pressure" value={vitals ? `${vitals.systolic_bp}/${vitals.diastolic_bp}` : '--/--'} unit="mmHg" />
                                     <VitalCard icon={<Activity size={18} className="text-blue-500"/>} label="Pulse Rate" value={vitals?.heart_rate || '--'} unit="bpm" />
                                     <VitalCard icon={<Thermometer size={18} className="text-orange-500"/>} label="Temperature" value={vitals?.temperature || '--'} unit="°C" />
-                                    <VitalCard icon={<Wind size={18} className="text-teal-500"/>} label="SpO2 Saturation" value={vitals?.oxygen_saturation_percentage || '--'} unit="%" />
+                                    <VitalCard icon={<Wind size={18} className="text-teal-500"/>} label="SpO2 Saturation" value={vitals?.spo2 || '--'} unit="%" />
                                     <VitalCard icon={<Scale size={18} className="text-indigo-500"/>} label="Weight Metric" value={vitals?.weight || '--'} unit="kg" />
                                     <VitalCard icon={<Activity size={18} className="text-slate-500"/>} label="Patient Height" value={vitals?.height || '--'} unit="cm" />
                                 </div>

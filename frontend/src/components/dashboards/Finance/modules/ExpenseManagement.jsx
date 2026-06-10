@@ -7,7 +7,9 @@ import {
   Plus, 
   Search, 
   FileText,
-  Edit2
+  Edit2,
+  CheckCircle2,
+  DollarSign
 } from 'lucide-react';
 
 const EXPENSE_CATEGORIES = [
@@ -28,7 +30,6 @@ const EXPENSE_CATEGORIES = [
   { id: 'UTILITIES', label: 'Utilities (Water & Elec)' }
 ];
 
-// Fallback utility URL base (Update this matching your internal URL router structures if serving via a distinct proxy subpath)
 const API_BASE_URL = '/api/expenses/';
 
 export default function ExpensesManagement() {
@@ -41,12 +42,11 @@ export default function ExpensesManagement() {
   
   const [formData, setFormData] = useState({
     description: '', category: 'SALARIES', behavior: 'Fixed',
-    date: new Date().toISOString().split('T')[0], amount: '', reference: '', document: null, documentName: ''
+    date: new Date().toISOString().split('T')[0], amount: '', amount_paid: '0', reference: '', document: null, documentName: ''
   });
 
   const [selectedExpense, setSelectedExpense] = useState(null);
 
-  // Fetch data live from backend using Django Viewset filtering hooks
   const fetchExpenses = async () => {
     try {
       setLoading(true);
@@ -75,17 +75,19 @@ export default function ExpensesManagement() {
     }
   };
 
-  // Re-run whenever filter tabs or search strings change
   useEffect(() => {
     fetchExpenses();
   }, [activeTab, searchQuery]);
 
-  // Aggregate Metrics derived cleanly from the database array state
-  const currentMonthTotal = expenses.reduce((sum, item) => sum + parseFloat(item.amount || 0), 0);
-  const fixedCommitments = expenses.filter(e => e.behavior === 'Fixed').reduce((sum, item) => sum + parseFloat(item.amount || 0), 0);
-  const unvouchedCount = expenses.filter(e => !e.document).length;
+  // Aggregate Metrics derived cleanly from state (Fixed Mismatch Formulations)
+  const totalExpensesMetric = expenses.reduce((sum, item) => sum + parseFloat(item.amount || 0), 0);
+  const paidExpensesMetric = expenses.reduce((sum, item) => sum + parseFloat(item.amount_paid || 0), 0);
+  const unpaidExpensesMetric = expenses.reduce((sum, item) => {
+    const due = parseFloat(item.amount || 0);
+    const paid = parseFloat(item.amount_paid || 0);
+    return sum + Math.max(0, due - paid);
+  }, 0);
 
-  // Handle creating a new expense voucher with multipart/form-data support
   const handleFormSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -95,6 +97,8 @@ export default function ExpensesManagement() {
       uploadData.append('behavior', formData.behavior);
       uploadData.append('date', formData.date);
       uploadData.append('amount', formData.amount);
+      uploadData.append('amount_paid', formData.amount_paid || '0');
+      
       if (formData.reference) {
         uploadData.append('reference', formData.reference);
       }
@@ -104,7 +108,7 @@ export default function ExpensesManagement() {
 
       const response = await fetch(API_BASE_URL, {
         method: 'POST',
-        body: uploadData, // Browser automatically applies correct multipart form bounds header
+        body: uploadData,
       });
 
       if (!response.ok) throw new Error('Failed to post voucher ledger entry.');
@@ -112,9 +116,9 @@ export default function ExpensesManagement() {
       setIsModalOpen(false);
       setFormData({ 
         description: '', category: 'SALARIES', behavior: 'Fixed', 
-        date: new Date().toISOString().split('T')[0], amount: '', reference: '', document: null, documentName: '' 
+        date: new Date().toISOString().split('T')[0], amount: '', amount_paid: '0', reference: '', document: null, documentName: '' 
       });
-      fetchExpenses(); // Reload data instantly
+      fetchExpenses();
     } catch (error) {
       alert(error.message);
     }
@@ -125,14 +129,13 @@ export default function ExpensesManagement() {
     setIsEditModalOpen(true);
   };
 
-  // Handle updating payment reference and proof document records via HTTP PATCH
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     try {
       const updateData = new FormData();
       updateData.append('reference', selectedExpense.reference);
+      updateData.append('amount_paid', selectedExpense.amount_paid);
       
-      // Only append if a new file object is selected locally
       if (selectedExpense.newFileUploaded && selectedExpense.documentFileObject) {
         updateData.append('document', selectedExpense.documentFileObject);
       }
@@ -167,26 +170,26 @@ export default function ExpensesManagement() {
         </button>
       </div>
 
-      {/* METRIC BADGES CARD GROUP */}
+      {/* FIXED METRIC BADGES CARD GROUP (Requirement 1 Met) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 flex flex-col justify-between h-28">
-          <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">TOTAL CURRENT VIEW OPEX</span>
+        <div className="bg-white p-6 rounded-2xl border border-slate-100 flex flex-col justify-between h-28 shadow-2xs">
+          <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">TOTAL EXPENSES</span>
           <h2 className="text-2xl font-bold text-[#051924] italic">
-            KES {currentMonthTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            KES {totalExpensesMetric.toLocaleString(undefined, { minimumFractionDigits: 2 })}
           </h2>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 flex flex-col justify-between h-28">
-          <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">FIXED OBLIGATIONS RETRIEVED</span>
-          <h2 className="text-2xl font-bold text-[#051924] italic">
-            KES {fixedCommitments.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+        <div className="bg-white p-6 rounded-2xl border border-slate-100 flex flex-col justify-between h-28 shadow-2xs">
+          <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">PAID EXPENSES</span>
+          <h2 className="text-2xl font-bold text-emerald-600 italic">
+            KES {paidExpensesMetric.toLocaleString(undefined, { minimumFractionDigits: 2 })}
           </h2>
         </div>
 
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 flex flex-col justify-between h-28">
-          <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">UNVOUCHED ALERTS</span>
-          <h2 className={`text-2xl font-bold italic ${unvouchedCount > 0 ? 'text-rose-500' : 'text-slate-800'}`}>
-            {unvouchedCount} BATCHES
+        <div className="bg-white p-6 rounded-2xl border border-slate-100 flex flex-col justify-between h-28 shadow-2xs">
+          <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">UNPAID EXPENSES</span>
+          <h2 className={`text-2xl font-bold italic ${unpaidExpensesMetric > 0 ? 'text-amber-600' : 'text-slate-800'}`}>
+            KES {unpaidExpensesMetric.toLocaleString(undefined, { minimumFractionDigits: 2 })}
           </h2>
         </div>
       </div>
@@ -207,7 +210,7 @@ export default function ExpensesManagement() {
       <div className="flex flex-col lg:flex-row gap-6 items-start">
         
         {/* LEFT-SIDE CATEGORY NAVIGATION */}
-        <div className="w-full lg:w-64 bg-white p-4 rounded-2xl border border-slate-100 flex flex-col gap-1 shrink-0">
+        <div className="w-full lg:w-64 bg-white p-4 rounded-2xl border border-slate-100 flex flex-col gap-1 shrink-0 shadow-2xs">
           <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase px-3 mb-2 block">Ledger Filter</span>
           {EXPENSE_CATEGORIES.map((tab) => (
             <button
@@ -225,7 +228,7 @@ export default function ExpensesManagement() {
         </div>
 
         {/* MAIN DATA TABLE VIEW */}
-        <div className="flex-1 w-full bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+        <div className="flex-1 w-full bg-white rounded-2xl border border-slate-100 shadow-xs overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
@@ -234,7 +237,7 @@ export default function ExpensesManagement() {
                   <th className="p-4">Category</th>
                   <th className="p-4">Type</th>
                   <th className="p-4">Date</th>
-                  <th className="p-4 text-right">Amount</th>
+                  <th className="p-4 text-right">Offset metrics (Paid/Total)</th>
                   <th className="p-4 text-center">Status / Receipt</th>
                 </tr>
               </thead>
@@ -271,24 +274,40 @@ export default function ExpensesManagement() {
                         </span>
                       </td>
                       <td className="p-4 font-mono text-slate-400">{exp.date}</td>
-                      <td className="p-4 text-right font-bold text-[#051924] italic text-sm">
-                        KES {parseFloat(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      <td className="p-4 text-right font-medium text-slate-500 italic text-xs">
+                        <span className="font-bold text-emerald-600">
+                          KES {parseFloat(exp.amount_paid || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-slate-300 mx-1">/</span>
+                        <span className="font-bold text-[#051924]">
+                          KES {parseFloat(exp.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </span>
                       </td>
-                      <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td className="p-4 text-center flex flex-col items-center gap-1 justify-center" onClick={(e) => e.stopPropagation()}>
+                        {/* Dynamic Status Pill (Fixed: Expecting API Field Status String) */}
+                        {exp.status === 'PAID' ? (
+                          <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide">Fully Paid</span>
+                        ) : exp.status === 'PARTIAL' ? (
+                          <span className="bg-amber-100 text-amber-800 text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide">Partially Paid</span>
+                        ) : (
+                          <span className="bg-slate-100 text-slate-600 text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wide">Unpaid</span>
+                        )}
+
+                        {/* Document Voucher Pill */}
                         {exp.document ? (
                           <div 
                             onClick={() => openEditRow(exp)}
-                            className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-700 px-2.5 py-1 rounded-md text-[10px] font-bold cursor-pointer max-w-[120px] truncate"
+                            className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-0.5 rounded text-[9px] font-bold cursor-pointer max-w-[120px] truncate"
                             title={exp.document_name || "Verified Receipt"}
                           >
-                            <FileText size={12} /> {exp.document_name || "Verified"}
+                            <FileText size={10} /> {exp.document_name || "Receipt"}
                           </div>
                         ) : (
                           <button 
                             onClick={() => openEditRow(exp)}
-                            className="inline-flex items-center gap-1 bg-rose-50 text-rose-600 px-2.5 py-1 rounded-md text-[10px] font-bold border border-rose-100 uppercase animate-pulse"
+                            className="inline-flex items-center gap-0.5 bg-rose-50 text-rose-600 px-2 py-0.5 rounded text-[9px] font-bold border border-rose-100 uppercase animate-pulse"
                           >
-                            <AlertTriangle size={11} /> Missing Proof
+                            <AlertTriangle size={10} /> No Receipt
                           </button>
                         )}
                       </td>
@@ -321,6 +340,18 @@ export default function ExpensesManagement() {
             </div>
             
             <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Amount Paid / Offset (KES)</label>
+                <input 
+                  type="number" required step="0.01" max={selectedExpense.amount}
+                  placeholder="Enter total amount settled so far"
+                  value={selectedExpense.amount_paid || ''}
+                  onChange={(e) => setSelectedExpense({...selectedExpense, amount_paid: e.target.value})}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:bg-white font-bold text-emerald-600"
+                />
+                <span className="text-[10px] text-slate-400 block mt-1">Total invoiced value: KES {selectedExpense.amount}</span>
+              </div>
+
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Transaction Ref / Check ID</label>
                 <input 
@@ -427,7 +458,7 @@ export default function ExpensesManagement() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Amount (KES)</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Total Amount Due (KES)</label>
                   <input 
                     type="number" required step="0.01" placeholder="0.00"
                     value={formData.amount}
@@ -435,6 +466,18 @@ export default function ExpensesManagement() {
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:bg-white font-bold"
                   />
                 </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Amount Paid Immediately (KES)</label>
+                  <input 
+                    type="number" step="0.01" placeholder="0.00"
+                    value={formData.amount_paid}
+                    onChange={(e) => setFormData({...formData, amount_paid: e.target.value})}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:bg-white font-bold text-emerald-600"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Posting Date</label>
                   <input 
@@ -444,11 +487,8 @@ export default function ExpensesManagement() {
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:bg-white font-medium text-slate-500"
                   />
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Transaction Ref</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Transaction Ref (Optional)</label>
                   <input 
                     type="text" placeholder="e.g., MPESA / CHQ ID"
                     value={formData.reference}
@@ -456,28 +496,29 @@ export default function ExpensesManagement() {
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:bg-white font-medium"
                   />
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Verification Document</label>
-                  <label className="flex items-center justify-center border border-dashed border-slate-200 rounded-lg bg-slate-50 h-[34px] cursor-pointer hover:bg-slate-100 transition text-[11px] font-bold text-slate-500">
-                    <Paperclip size={12} className="mr-1.5 text-slate-400" />
-                    <span className="truncate max-w-[150px]">
-                      {formData.documentName ? formData.documentName : "Attach File"}
-                    </span>
-                    <input 
-                      type="file" className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files[0];
-                        if (file) {
-                          setFormData({
-                            ...formData, 
-                            document: file, 
-                            documentName: file.name
-                          });
-                        }
-                      }}
-                    />
-                  </label>
-                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Verification Document</label>
+                <label className="flex items-center justify-center border border-dashed border-slate-200 rounded-lg bg-slate-50 h-[34px] cursor-pointer hover:bg-slate-100 transition text-[11px] font-bold text-slate-500">
+                  <Paperclip size={12} className="mr-1.5 text-slate-400" />
+                  <span className="truncate max-w-[150px]">
+                    {formData.documentName ? formData.documentName : "Attach File"}
+                  </span>
+                  <input 
+                    type="file" className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      if (file) {
+                        setFormData({
+                          ...formData, 
+                          document: file, 
+                          documentName: file.name
+                        });
+                      }
+                    }}
+                  />
+                </label>
               </div>
 
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100 mt-2">
