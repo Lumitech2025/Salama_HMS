@@ -125,7 +125,7 @@ urlpatterns = [
 
     # Viewset Namespace Bindings - Resolves the frontend /api prefix breakdown
     path('api/', include(router.urls)), 
-    path('', include(router.urls)), # Fallback for root path resolution compatibility
+    path('', include(router.urls)), 
 ]
 
 if settings.DEBUG:

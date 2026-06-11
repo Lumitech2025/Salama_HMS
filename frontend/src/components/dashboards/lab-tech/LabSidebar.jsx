@@ -13,7 +13,6 @@ const LabSidebar = ({ activeTab, setActiveTab, onLogout }) => {
         { id: 'overview', label: 'Home', icon: <LayoutGrid size={18} /> },
         { id: 'diagnostics', label: 'Diagnostics', icon: <FlaskConical size={18} /> },
         { id: 'history', label: 'Patient History', icon: <History size={18} /> },
-        { id: 'reference', label: 'Reference Desk', icon: <BookOpen size={18} /> },
         { id: 'inventory', label: 'Inventory', icon: <PackageSearch size={18} /> },
         { id: 'requisitions', label: 'Lab Requisitions', icon: <PackageSearch size={18} /> }
     ];

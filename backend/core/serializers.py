@@ -234,14 +234,20 @@ class RegistrationAnalyticsSerializer(serializers.Serializer):
 # 4. CLINICAL EMR
 # ─────────────────────────────────────────────────────────────────────────────
 class VitalSignSerializer(serializers.ModelSerializer):
-    # Explicitly declare the model properties as read-only fields
+    patient_name = serializers.CharField(source='patient.name', read_only=True)
+    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
+    
+    # Grab Age & HRN safely via the active RegistrationRecord instance linked to 'visit'
+    patient_age = serializers.IntegerField(source='visit.age', read_only=True)
+    health_record_number = serializers.CharField(source='visit.health_record_number', read_only=True)
     bmi = serializers.ReadOnlyField()
     bsa = serializers.ReadOnlyField()
 
     class Meta:
         model = VitalSign
         fields = [
-            'id', 'patient', 'visit', 'queue_entry', 
+            'id', 'patient', 'visit', 'queue_entry', 'patient_name', 'patient_gender', 'patient_age', 
+            'health_record_number',
             'temperature', 'systolic_bp', 'diastolic_bp', 
             'heart_rate', 'respiratory_rate', 'weight', 'height', 'spo2',
             'bmi', 'bsa', 'created_at'
@@ -360,10 +366,13 @@ class LabResultSerializer(serializers.ModelSerializer):
     test_name_display = serializers.CharField(source='get_test_name_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     patient_name = serializers.CharField(source='patient.name', read_only=True)
+    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
+    patient_age = serializers.IntegerField(source='visit.age', read_only=True)
+    health_record_number = serializers.CharField(source='visit.health_record_number', read_only=True)
 
     class Meta:
         model = LabResult
-        fields = '__all__' 
+        fields = '__all__'
 
 class LabOrderSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.name', read_only=True)

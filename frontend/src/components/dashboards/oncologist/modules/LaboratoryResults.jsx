@@ -1,68 +1,101 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Search, 
   User, 
   FlaskConical, 
-  Scale, 
-  Activity, 
-  FileText, 
-  Clock, 
   RefreshCw, 
-  ChevronRight,
-  AlertCircle
+  AlertCircle,
+  Download,
+  ChevronDown,
+  ShieldAlert
 } from 'lucide-react';
 
+import SalamaLogo from "@/assets/Salama Cancer Centre logo.png";
+
+// Comprehensive multi-panel reference standard registry matching Django models
+const REFERENCE_REGISTRY = {
+  // 1. CBC PANEL
+  cbc_hb: { name: 'Hb (Hemoglobin)', unit: 'g/dL', low: 12.0, high: 17.5, type: 'numeric' },
+  cbc_wbc: { name: 'WBC (Total White Cell Count)', unit: 'x10³/µL', low: 4.0, high: 11.0, type: 'numeric' },
+  cbc_neut: { name: 'Absolute Neutrophils', unit: 'x10³/µL', low: 1.5, high: 7.5, type: 'numeric' },
+  cbc_plt: { name: 'Platelets (Plt)', unit: 'x10³/µL', low: 150.0, high: 450.0, type: 'numeric' },
+  cbc_mcv: { name: 'Mean Corpuscular Volume (MCV)', unit: 'fL', low: 80.0, high: 100.0, type: 'numeric' },
+  
+  // 2. U&E PANEL
+  ue_na: { name: 'Sodium (Na+)', unit: 'mmol/L', low: 135.0, high: 145.0, type: 'numeric' },
+  ue_k: { name: 'Potassium (K+)', unit: 'mmol/L', low: 3.5, high: 5.1, type: 'numeric' },
+  ue_urea: { name: 'Urea', unit: 'mmol/L', low: 2.5, high: 7.8, type: 'numeric' },
+  ue_creatinine: { name: 'Serum Creatinine (Cr)', unit: 'µmol/L', low: 50.0, high: 110.0, type: 'numeric' },
+  
+  // 3. LFT PANEL
+  lft_alt: { name: 'Alanine Transaminase (ALT)', unit: 'U/L', low: 7.0, high: 56.0, type: 'numeric' },
+  lft_ast: { name: 'Aspartate Transaminase (AST)', unit: 'U/L', low: 10.0, high: 40.0, type: 'numeric' },
+  lft_tbil: { name: 'Total Bilirubin (T.BIL)', unit: 'µmol/L', low: 3.0, high: 21.0, type: 'numeric' },
+  lft_dbil: { name: 'Direct Bilirubin (D.BIL)', unit: 'µmol/L', low: 0.0, high: 5.1, type: 'numeric' },
+  lft_alp: { name: 'Alkaline Phosphatase (ALP)', unit: 'U/L', low: 40.0, high: 130.0, type: 'numeric' },
+  lft_albumin: { name: 'Albumin (ALB)', unit: 'g/L', low: 35.0, high: 52.0, type: 'numeric' },
+  
+  // 4. ONCOLOGY BIOMARKERS
+  psa_total: { name: 'Total Prostate Specific Antigen (PSA)', unit: 'ng/mL', low: 0.0, high: 4.0, type: 'numeric' },
+  
+  // 5. ROUTINE URINALYSIS
+  urine_color: { name: 'Urine Color', unit: 'Visual', expected: 'Yellow', type: 'categorical' },
+  urine_clarity: { name: 'Urine Clarity', unit: 'Visual', expected: 'Clear', type: 'categorical' },
+  urine_glucose: { name: 'Urine Glucose', unit: 'Dipstick', expected: 'Negative', type: 'categorical' },
+  urine_protein: { name: 'Urine Protein', unit: 'Dipstick', expected: 'Negative', type: 'categorical' },
+  urine_nitrites: { name: 'Urine Nitrites', unit: 'Dipstick', expected: 'Negative', type: 'categorical' },
+  urine_blood: { name: 'Urine Blood', unit: 'Dipstick', expected: 'Negative', type: 'categorical' },
+
+  // 6. BG_CROSS MATCH
+  bg_abo: { name: 'ABO Blood Grouping', unit: 'Agglutination', type: 'informational' },
+  bg_rhesus: { name: 'Rhesus (Rh) Factor', unit: 'Agglutination', type: 'informational' },
+  bg_compatibility: { name: 'Crossmatch Compatibility', unit: 'Coombs', expected: 'Compatible', type: 'categorical' },
+
+  // 7. INFECTIOUS PARASITOLOGY (MALARIA_BS)
+  malaria_mps: { name: 'Malaria Blood Slide Status (MPS)', unit: 'Microscopy', expected: 'Not Seen', type: 'categorical' },
+  malaria_species: { name: 'Identified Parasite Species', unit: 'Microscopy', type: 'informational' }
+};
+
 const LaboratoryResults = () => {
-  // Core Component View States
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-
-  // Core Data Stores matching your DRF architecture patterns
-  const [labOrdersList, setLabOrdersList] = useState([]);
-  const [selectedPatientData, setSelectedPatientData] = useState(null);
-  const [patientVitals, setPatientVitals] = useState(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   
-  // Filtering and Searching Query State
-  const [searchQuery, setSearchQuery] = useState('');
+  const [labResultsList, setLabResultsList] = useState([]); 
+  const [selectedVisitId, setSelectedVisitId] = useState(null);
+  const [activePatientData, setActivePatientData] = useState(null);
+  const [activeVitals, setActiveVitals] = useState(null);
 
-  const API_BASE = 'http://127.0.0.1:8000/api';
+  const PANEL_LABELS = {
+    'CBC': 'Full Blood Count (CBC)',
+    'PSA': 'Prostate Specific Antigen (PSA)',
+    'UE': 'Urea, Electrolytes & Creatinine (U&E)',
+    'LFT': 'Liver Function Test (LFT)',
+    'URINALYSIS': 'Urinalysis (Routine)',
+    'BG_CROSS': 'Blood Group & Cross Match',
+    'MALARIA_BS': 'Blood Slide for Malaria'
+  };
 
-  // Secure Header Resolution Token Lookup Strategy
   const getHeaders = () => {
-    const token = localStorage.getItem('token') || localStorage.getItem('access_token');
+    const token = localStorage.getItem('access_token') || sessionStorage.getItem('token');
     const headers = { 'Content-Type': 'application/json' };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     return headers;
   };
 
-  // Pull records from your verified successful "/api/lab-orders/" route
-  const fetchLabOrdersData = async () => {
+  const fetchLabResultsData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/lab-orders/`, { 
+      const res = await fetch(`/api/lab-results/?status=COMPLETED`, { 
         method: 'GET', 
         headers: getHeaders() 
       });
       
-      if (!res.ok) throw new Error(`Server tracking returned status code: ${res.status}`);
+      if (!res.ok) throw new Error(`Server returned response status code: ${res.status}`);
       
       const data = await res.json();
-      // Handle either direct array representations or paginated data payloads
-      const ordersArray = Array.isArray(data) ? data : data.results || [];
-      setLabOrdersList(ordersArray);
-
-      // Hot reload the active patient mapping matrices if a refresh occurs while selected
-      if (selectedPatientData?.patient) {
-        const updatedOrders = ordersArray.filter(order => {
-          const pt = order.patient_details || order.patient;
-          const ptId = pt?.id || (typeof order.patient === 'number' ? order.patient : null);
-          return ptId === selectedPatientData.patient.id;
-        });
-        setSelectedPatientData(prev => prev ? { ...prev, orders: updatedOrders } : null);
-      }
+      const resultsArray = Array.isArray(data) ? data : data.results || [];
+      setLabResultsList(resultsArray);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -71,321 +104,429 @@ const LaboratoryResults = () => {
   };
 
   useEffect(() => {
-    fetchLabOrdersData();
+    fetchLabResultsData();
   }, []);
 
-  // WORKFLOW STEP 1: Process and group un-duplicated patients who have actual lab orders
-  const getDistinctPatientsFromHistory = () => {
-    const seenPatients = new Set();
+  const getDistinctPatients = () => {
+    const seen = new Set();
     const uniquePatients = [];
 
-    labOrdersList.forEach(order => {
-      // Unpack nested serializer representation objects safely with fallback logic
-      const pt = order.patient_details || order.patient;
-      const ptId = pt?.id || (typeof order.patient === 'number' ? order.patient : null);
+    labResultsList.forEach(record => {
+      const visit = record.visit;
+      const patient = record.patient;
+      
+      let visitId = null;
+      if (visit && typeof visit === 'object') visitId = visit.id;
+      else if (visit) visitId = visit;
+      else if (patient && typeof patient === 'object') visitId = patient.id;
+      else if (patient) visitId = patient;
+      else visitId = record.id;
 
-      if (ptId && !seenPatients.has(ptId)) {
-        seenPatients.add(ptId);
+      if (visitId && !seen.has(visitId)) {
+        seen.add(visitId);
+
+        let resolvedName = "";
+
+        if (record.patient_details?.full_name) {
+          resolvedName = record.patient_details.full_name;
+        } else if (visit && typeof visit === 'object') {
+          if (visit.first_name || visit.last_name) {
+            const first = visit.first_name || "";
+            const middle = visit.middle_name ? `${visit.middle_name} ` : "";
+            const last = visit.last_name || "";
+            resolvedName = `${first} ${middle}${last}`.trim();
+          } else if (visit.full_name) {
+            resolvedName = visit.full_name;
+          }
+        } 
+        
+        if (!resolvedName && patient && typeof patient === 'object') {
+          resolvedName = patient.name || patient.full_name || `${patient.first_name || ""} ${patient.last_name || ""}`.trim();
+        }
+
+        if (!resolvedName) {
+          resolvedName = record.patient_name || record.patient_full_name || `Patient Reference (#${visitId})`;
+        }
+
+        const hrn = (typeof visit === 'object' && visit?.health_record_number) || 
+                    (typeof patient === 'object' && patient?.health_record_number) || 
+                    record.health_record_number || "SCC-—/—";
+
+        const age = (typeof visit === 'object' && visit?.age) || 
+                    (typeof patient === 'object' && patient?.age) || 
+                    record.patient_age || "—";
+        
+        let resolvedGender = "—";
+        const rawGender = (typeof visit === 'object' && visit?.gender) || 
+                          (typeof patient === 'object' && patient?.gender) || 
+                          record.patient_gender;
+        if (rawGender === 'M' || rawGender === 'Male') resolvedGender = 'Male';
+        if (rawGender === 'F' || rawGender === 'Female') resolvedGender = 'Female';
+
+        const paymentMode = (typeof visit === 'object' && visit?.payment_mode) || record.payment_mode || 'CASH';
+
         uniquePatients.push({
-          id: ptId,
-          name: pt?.name || pt?.full_name || order.patient_name || `Patient ID Reference: #${ptId}`,
-          registry_no: pt?.health_record_number || pt?.registry_no || order.health_record_number || order.token_id || `HRN-${ptId}`,
-          age: pt?.age || order.patient_age || order.age || '—',
-          gender: pt?.gender || order.patient_gender || order.gender || '—'
+          visit_id: visitId,
+          name: resolvedName,
+          health_record_number: hrn,
+          age: age,
+          gender: resolvedGender,
+          payment_mode: paymentMode
         });
       }
     });
-
     return uniquePatients;
   };
 
-  // WORKFLOW STEP 2 & 3: Gather patient metrics and cross-reference order history maps
-  const handleSelectPatient = async (patient) => {
-    setError(null);
-    setPatientVitals(null); // Clear previous vitals to avoid calculations bleeding together
+  const distinctPatients = getDistinctPatients();
 
-    // Find all lab records linked directly to this selected patient
-    const associatedOrders = labOrdersList.filter(order => {
-      const pt = order.patient_details || order.patient;
-      const ptId = pt?.id || (typeof order.patient === 'number' ? order.patient : null);
-      return ptId === patient.id;
+  const handlePatientSelect = async (patientNode) => {
+    setSelectedVisitId(patientNode.visit_id);
+    setIsDropdownOpen(false);
+
+    const records = labResultsList.filter(r => {
+      const vId = r.visit && typeof r.visit === 'object' ? r.visit.id : r.visit;
+      const pId = r.patient && typeof r.patient === 'object' ? r.patient.id : r.patient;
+      return vId === patientNode.visit_id || pId === patientNode.visit_id;
+    });
+    
+    setActivePatientData({
+      info: patientNode,
+      records: records
     });
 
-    setSelectedPatientData({
-      patient: patient,
-      orders: associatedOrders
-    });
-
-    // Query vital-signs endpoint for Height/Weight parameter tracking
     try {
-      const vitalsRes = await fetch(`${API_BASE}/vital-signs/?patient=${patient.id}`, { 
+      const vitalsRes = await fetch(`/api/vital-signs/?visit=${patientNode.visit_id}`, { 
         method: 'GET', 
         headers: getHeaders() 
       });
       if (vitalsRes.ok) {
         const vitalsData = await vitalsRes.json();
         const latestVitals = Array.isArray(vitalsData) ? vitalsData[0] : vitalsData.results?.[0] || null;
-        setPatientVitals(latestVitals);
-      } else {
-        console.warn(`Vitals lookup failed with status code: ${vitalsRes.status}`);
+        setActiveVitals(latestVitals);
       }
     } catch (err) {
-      console.warn("Unable to sync vital-signs calculation vectors seamlessly:", err);
+      console.warn("Vital telemetry fallback log:", err);
     }
   };
 
-  // WORKFLOW STEP 2 FORMULAS: Robust telemetry extracts for BMI & BSA metrics
-  const calculateBMI = () => {
-    // 1. Direct model tracking payload fallbacks
-    if (patientVitals?.bmi) return Number(patientVitals.bmi).toFixed(1);
-    if (selectedPatientData?.patient?.bmi) return Number(selectedPatientData.patient.bmi).toFixed(1);
-
-    // 2. Dynamic parameter resolution from active weights/heights
-    const currentWeight = patientVitals?.weight || patientVitals?.weight_kg || selectedPatientData?.patient?.weight || null;
-    const currentHeight = patientVitals?.height || patientVitals?.height_cm || selectedPatientData?.patient?.height || null;
-
-    if (!currentWeight || !currentHeight) return '—';
-    
-    const heightInMeters = currentHeight / 100;
-    const bmi = currentWeight / (heightInMeters * heightInMeters);
-    return isNaN(bmi) || !isFinite(bmi) ? '—' : bmi.toFixed(1);
+  const getCalculatedBmi = () => {
+    if (activeVitals?.bmi) return `${Number(activeVitals.bmi).toFixed(1)} kg/m²`;
+    if (!activeVitals?.weight || !activeVitals?.height) return '—';
+    const heightM = parseFloat(activeVitals.height) / 100;
+    return `${(parseFloat(activeVitals.weight) / (heightM * heightM)).toFixed(1)} kg/m²`;
   };
 
-  const calculateBSA = () => {
-    // 1. Direct payload parameter checks
-    if (patientVitals?.bsa) return `${Number(patientVitals.bsa).toFixed(2)} m²`;
-    if (selectedPatientData?.patient?.bsa) return `${Number(selectedPatientData.patient.bsa).toFixed(2)} m²`;
-
-    // 2. Dynamic resolution extraction using the Mosteller standard calculation matrix
-    const currentWeight = patientVitals?.weight || patientVitals?.weight_kg || selectedPatientData?.patient?.weight || null;
-    const currentHeight = patientVitals?.height || patientVitals?.height_cm || selectedPatientData?.patient?.height || null;
-
-    if (!currentWeight || !currentHeight) return '—';
-    
-    const bsa = Math.sqrt((currentWeight * currentHeight) / 3600);
-    return isNaN(bsa) || !isFinite(bsa) ? '—' : `${bsa.toFixed(2)} m²`;
+  const getCalculatedBsa = () => {
+    if (activeVitals?.bsa) return `${Number(activeVitals.bsa).toFixed(2)} m²`;
+    if (!activeVitals?.weight || !activeVitals?.height) return '—';
+    const calculated = Math.sqrt((parseFloat(activeVitals.height) * parseFloat(activeVitals.weight)) / 3600);
+    return `${calculated.toFixed(2)} m²`;
   };
 
-  // Search filter computations
-  const distinctPatients = getDistinctPatientsFromHistory();
-  const filteredPatients = distinctPatients.filter(p => {
-    const query = searchQuery.toLowerCase();
-    return p.name.toLowerCase().includes(query) || p.registry_no.toString().toLowerCase().includes(query);
-  });
+  const parseLabRecordsToRows = () => {
+    if (!activePatientData?.records) return [];
+    const tabularRows = [];
+
+    activePatientData.records.forEach(record => {
+      Object.keys(record).forEach(field => {
+        if (REFERENCE_REGISTRY[field]) {
+          const val = record[field];
+          if (val !== null && val !== undefined && val !== '') {
+            const config = REFERENCE_REGISTRY[field];
+            
+            let evaluation = 'WITHIN RANGE';
+            let evaluationStyle = 'text-emerald-600 font-extrabold bg-emerald-50 px-2 py-0.5 rounded';
+            let referenceDisplay = `${config.low} - ${config.high}`;
+
+            if (config.type === 'numeric') {
+              const floatVal = parseFloat(val);
+              if (config.high !== undefined && floatVal > config.high) {
+                evaluation = 'HIGH';
+                evaluationStyle = 'text-rose-600 font-extrabold bg-rose-50 px-2 py-0.5 rounded';
+              } else if (config.low !== undefined && floatVal < config.low) {
+                evaluation = 'LOW';
+                evaluationStyle = 'text-amber-600 font-extrabold bg-amber-50 px-2 py-0.5 rounded';
+              }
+            } else if (config.type === 'categorical') {
+              referenceDisplay = `Expected: ${config.expected}`;
+              if (val.toString().toLowerCase() !== config.expected.toLowerCase()) {
+                evaluation = 'ABNORMAL';
+                evaluationStyle = 'text-rose-600 font-extrabold bg-rose-50 px-2 py-0.5 rounded';
+              }
+            } else {
+              referenceDisplay = 'Diagnostic';
+              evaluation = 'RECORDED';
+              evaluationStyle = 'text-blue-600 font-extrabold bg-blue-50 px-2 py-0.5 rounded';
+            }
+
+            tabularRows.push({
+              id: `${record.id}-${field}`,
+              panel: PANEL_LABELS[record.test_name] || record.test_name,
+              parameter: config.name,
+              value: val.toString(),
+              unit: config.unit || '—',
+              range: referenceDisplay,
+              evaluation,
+              evaluationStyle
+            });
+          }
+        }
+      });
+    });
+    return tabularRows;
+  };
+
+  const finalTableRows = parseLabRecordsToRows();
+
+  const getInvestigationScopeText = () => {
+    if (!activePatientData?.records) return '—';
+    const distinctPanels = [...new Set(activePatientData.records.map(r => r.test_name))];
+    return distinctPanels.map(p => PANEL_LABELS[p] || p).join(', ');
+  };
 
   return (
-    <div className="p-6 bg-slate-50 min-h-screen text-slate-800 font-sans">
+    <div className="w-full h-full flex flex-col max-w-none px-4 pb-6 text-left animate-in fade-in duration-300 antialiased font-sans bg-slate-50 min-h-screen text-slate-800 print:p-0 print:bg-white">
       
-      {/* Top Controls Banner */}
-      <div className="flex justify-between items-center mb-6">
+      {/* Control Actions Frame */}
+      <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4 mb-5 mt-2 print:hidden shrink-0">
         <div>
-          <h1 className="text-xl font-bold text-slate-950 flex items-center gap-2">
-            <FlaskConical className="h-6 w-6 text-indigo-600" />
-            Lab Results Portal
+          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <FlaskConical className="h-6 w-6 text-teal-600 stroke-[1.8]" />
+            Laboratory Diagnostic Gateway
           </h1>
+          <p className="text-[10px] text-slate-400 mt-0.5 tracking-wider font-bold uppercase">Active Diagnostic Reporting Matrices</p>
         </div>
+        
         <button 
-          onClick={fetchLabOrdersData}
-          className="flex items-center gap-1.5 bg-white border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 text-xs font-semibold shadow-sm transition-all"
+          onClick={fetchLabResultsData}
+          disabled={loading}
+          className="self-start sm:self-center flex items-center gap-2 bg-white border border-slate-200 px-3.5 py-2 rounded-xl hover:bg-slate-100 text-xs font-bold shadow-2xs text-slate-700 transition-all cursor-pointer disabled:opacity-50"
         >
-          <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin text-indigo-600" : "h-3.5 w-3.5"} /> Refresh
+          <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin text-teal-600" : "h-3.5 w-3.5"} /> 
+          <span>Sync Database Entries</span>
         </button>
       </div>
 
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg flex items-center gap-2">
-          <AlertCircle className="h-4 w-4 text-red-500" />
-          <span>Error parsing database payload: {error}</span>
+        <div className="mb-4 p-3 bg-rose-50 border border-rose-100 text-rose-800 text-xs font-bold rounded-xl flex items-center gap-2 print:hidden">
+          <AlertCircle className="h-4 w-4 text-rose-500 shrink-0" />
+          <span>Error parsing active data streams: {error}</span>
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-        
-        {/* WORKFLOW STEP 1: DISTINCT PATIENT EXPLORER AND FILTER COLUMN */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 xl:col-span-1">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
-            <Clock className="h-4 w-4 text-indigo-500" /> 1. Select Patient (Had Lab Tests)
-          </h2>
-          
-          <div className="relative mb-3">
-            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Search by name or HRN..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8 pr-3 py-1.5 w-full border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/50"
-            />
-          </div>
+      {/* Dropdown Selector Component */}
+      <div className="w-full bg-white border border-slate-200 rounded-2xl p-5 mb-4 shadow-2xs shrink-0 z-30 print:hidden">
+        <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
+          <User className="h-4 w-4 text-teal-600" /> 1. Select Patient Document Reference File
+        </label>
+        <div className="relative max-w-xl w-full">
+          <button
+            type="button"
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            className="w-full flex items-center justify-between bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600 transition-all cursor-pointer"
+          >
+            <span className="truncate">
+              {activePatientData ? activePatientData.info.name : "-- Choose Verified Lab Profile From Menu --"}
+            </span>
+            <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+          </button>
 
-          <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
-            {loading && filteredPatients.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-400 animate-pulse">Scanning backend lab histories...</div>
-            ) : filteredPatients.length === 0 ? (
-              <p className="text-xs text-slate-400 text-center py-6 border border-dashed border-slate-200 rounded-lg">No historical lab orders located in system dataset.</p>
-            ) : (
-              filteredPatients.map((pt) => {
-                const isSelected = selectedPatientData?.patient?.id === pt.id;
-                return (
-                  <div
-                    key={pt.id}
-                    onClick={() => handleSelectPatient(pt)}
-                    className={`p-3 rounded-lg border cursor-pointer transition-all flex items-center justify-between ${
-                      isSelected 
-                        ? 'border-indigo-600 bg-indigo-50/40 shadow-sm' 
-                        : 'border-slate-100 hover:border-slate-300 bg-slate-50/50'
+          {isDropdownOpen && (
+            <div className="absolute left-0 right-0 mt-2 bg-white border border-slate-200 shadow-xl rounded-xl max-h-64 overflow-y-auto z-50 animate-in slide-in-from-top-2 duration-150">
+              {distinctPatients.length === 0 ? (
+                <div className="p-4 text-center text-xs font-medium text-slate-400 italic">No completed diagnostic logs ready for visualization.</div>
+              ) : (
+                distinctPatients.map(pt => (
+                  <button
+                    key={pt.visit_id}
+                    type="button"
+                    onClick={() => handlePatientSelect(pt)}
+                    className={`w-full flex flex-col gap-0.5 px-4 py-2.5 text-left text-xs border-b border-slate-50 last:border-none transition-colors hover:bg-slate-50 cursor-pointer ${
+                      selectedVisitId === pt.visit_id ? 'bg-teal-50/50 text-teal-900 font-bold' : 'text-slate-700'
                     }`}
                   >
-                    <div className="truncate mr-2">
-                      <div className="font-bold text-xs text-slate-900 truncate">{pt.name}</div>
-                      <div className="text-[10px] text-slate-500 mt-0.5 font-mono">HRN: {pt.registry_no}</div>
-                    </div>
-                    <ChevronRight className={`h-4 w-4 transition-transform ${isSelected ? 'text-indigo-600 translate-x-0.5' : 'text-slate-300'}`} />
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* COMPONENT CONTENT CORE WORKSPACE VIEW */}
-        <div className="xl:col-span-3 space-y-6">
-          {selectedPatientData ? (
-            <>
-              {/* WORKFLOW STEP 2: PATIENT SUMMARY COMPONENT (NAME, HRN, AGE, GENDER, BMI, BSA) */}
-              <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-1.5">
-                  <User className="h-4 w-4 text-indigo-500" /> 2. Selected Patient Demographics
-                </h2>
-                
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 col-span-2 sm:col-span-3 md:col-span-2">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Patient Full Name</span>
-                    <span className="text-sm font-bold text-slate-900 truncate block mt-0.5 uppercase">{selectedPatientData.patient.name}</span>
-                  </div>
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Health Rec No (HRN)</span>
-                    <span className="text-sm font-mono font-bold text-indigo-700 block mt-0.5">{selectedPatientData.patient.registry_no}</span>
-                  </div>
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Age</span>
-                    <span className="text-sm font-bold text-slate-900 block mt-0.5">
-                      {selectedPatientData.patient.age !== '—' && selectedPatientData.patient.age !== 'N/A' ? `${selectedPatientData.patient.age} Yrs` : '—'}
+                    <span className="font-black text-slate-900">{pt.name}</span>
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      HRN: {pt.health_record_number} • Age: {pt.age} Yrs • Gender: {pt.gender}
                     </span>
-                  </div>
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Gender</span>
-                    <span className="text-sm font-bold text-slate-900 block mt-0.5 uppercase">
-                      {selectedPatientData.patient.gender === 'M' || selectedPatientData.patient.gender === 'MALE' ? 'Male' : selectedPatientData.patient.gender === 'F' || selectedPatientData.patient.gender === 'FEMALE' ? 'Female' : selectedPatientData.patient.gender}
-                    </span>
-                  </div>
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Calculated BMI</span>
-                    <span className="text-sm font-bold text-slate-900 flex items-center gap-1 mt-0.5">
-                      <Scale className="h-3.5 w-3.5 text-slate-400" /> {calculateBMI()}
-                    </span>
-                  </div>
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
-                    <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Surface Area (BSA)</span>
-                    <span className="text-sm font-bold text-slate-900 flex items-center gap-1 mt-0.5">
-                      <Activity className="h-3.5 w-3.5 text-slate-400" /> {calculateBSA()}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* WORKFLOW STEPS 3 & 4: LAB MATRIX */}
-              <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="p-4 bg-slate-50/50 border-b border-slate-100">
-                  <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <FileText className="h-4 w-4 text-indigo-500" /> 3 & 4. Associated Diagnostic Test Results Sheet
-                  </h2>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-left text-xs">
-                    <thead className="bg-slate-50/80 text-slate-500 font-bold uppercase tracking-wider border-b border-slate-200">
-                      <tr>
-                        <th className="p-3 pl-5">Test / Parameter Name</th>
-                        <th className="p-3">Observed Result</th>
-                        <th className="p-3 text-red-700 bg-red-50/20">Critical High Range</th>
-                        <th className="p-3 text-blue-700 bg-blue-50/20">Critical Low Range</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {selectedPatientData.orders.length === 0 ? (
-                        <tr>
-                          <td colSpan="4" className="p-6 text-center text-slate-400 italic bg-slate-50/20">
-                            No active laboratory assessments found logged for this client profile.
-                          </td>
-                        </tr>
-                      ) : (
-                        selectedPatientData.orders.map((order) => {
-                          // Extract lab result sets across variations of nested DRF array properties
-                          const investigationParameters = order.investigation_parameters || order.results_details || order.requested_tests || order.parameters || [];
-
-                          // Normalized parameter mapping loop strategy
-                          const processedParameters = investigationParameters.length > 0 ? investigationParameters : [{
-                            parameter_name: order.test_name || order.investigation_name || 'Laboratory Assessment Panel',
-                            observed_value: order.result_summary || order.result || order.observed_value || 'Pending Verification',
-                            critical_high: order.critical_high || order.high_range || '—',
-                            critical_low: order.critical_low || order.low_range || '—'
-                          }];
-
-                          return processedParameters.map((param, index) => {
-                            const isStringOnly = typeof param === 'string';
-                            
-                            const testName = isStringOnly ? param : (param.parameter_name || param.name || param.investigation_name || 'Laboratory Parameter');
-                            const displayResult = isStringOnly ? (order.result || 'Pending Verification') : (param.observed_value || param.measured_value || param.result || 'Pending Verification');
-                            const criticalHigh = isStringOnly ? (order.critical_high || '—') : (param.critical_high || param.high_range || '—');
-                            const criticalLow = isStringOnly ? (order.critical_low || '—') : (param.critical_low || param.low_range || '—');
-
-                            const isPending = displayResult === 'Pending Verification' || displayResult === 'PENDING' || displayResult === 'Processing';
-
-                            return (
-                              <tr key={`${order.id}-${index}`} className="hover:bg-slate-50/40 transition-colors">
-                                <td className="p-3 pl-5 font-semibold text-slate-700">
-                                  <div className="uppercase tracking-tight">{testName}</div>
-                                  <div className="text-[10px] text-slate-400 font-normal mt-0.5">Order Ref Code: #{order.id}</div>
-                                </td>
-                                
-                                <td className="p-3">
-                                  <span className={`px-2 py-0.5 rounded font-mono text-xs font-bold border ${
-                                    isPending
-                                      ? 'bg-amber-50 text-amber-700 border-amber-100'
-                                      : 'bg-emerald-50 text-emerald-800 border-emerald-100'
-                                  }`}>
-                                    {displayResult}
-                                  </span>
-                                </td>
-                                
-                                <td className="p-3 font-mono font-semibold text-red-600 bg-red-50/5">
-                                  {criticalHigh}
-                                </td>
-                                
-                                <td className="p-3 font-mono font-semibold text-blue-600 bg-blue-50/5">
-                                  {criticalLow}
-                                </td>
-                              </tr>
-                            );
-                          });
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-col justify-center items-center h-[350px] bg-white rounded-xl border border-dashed border-slate-200 text-center p-6 text-slate-400">
-              <FlaskConical className="h-8 w-8 text-slate-300 stroke-[1.5] mb-2 animate-pulse" />
-              <p className="text-xs font-semibold">No Patient Worksheet Loaded</p>
-              <p className="text-[11px] max-w-xs mt-0.5">Please choose a patient layout from the diagnostic history list on the left side to compile active metrics structures.</p>
+                  </button>
+                 ))
+              )}
             </div>
           )}
         </div>
-
       </div>
+
+      {activePatientData ? (
+        <div className="w-full flex-1 min-h-0 space-y-4">
+          
+          {/* Demographics Area Card */}
+          <div className="w-full bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs transition-all print:hidden">
+            <h2 className="text-[10px] font-bold uppercase tracking-wider text-teal-700 mb-3.5 flex items-center gap-1.5 border-b border-slate-100 pb-2">
+              2. Active Patient Workspace Context
+            </h2>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 col-span-2 sm:col-span-1">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Patient Designation</span>
+                <span className="text-sm font-black text-slate-900 block mt-0.5 uppercase truncate">{activePatientData.info.name}</span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Health Record Number</span>
+                <span className="text-sm font-mono font-bold text-slate-800 block mt-0.5">{activePatientData.info.health_record_number}</span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Age / Gender Matrix</span>
+                <span className="text-sm font-bold text-slate-900 block mt-0.5">{activePatientData.info.age} Yrs / {activePatientData.info.gender}</span>
+              </div>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Billing Mode Allocation</span>
+                <span className="text-sm font-bold font-mono text-slate-600 block mt-0.5 uppercase">{activePatientData.info.payment_mode}</span>
+              </div>
+            </div>
+
+            {activeVitals ? (
+              <div className="mt-4 pt-3.5 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-y-3 gap-x-6 text-xs">
+                <div>
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Temperature</span>
+                  <span className="font-extrabold text-slate-900">{activeVitals.temperature} °C</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Blood Pressure</span>
+                  <span className="font-extrabold text-slate-900">{activeVitals.systolic_bp}/{activeVitals.diastolic_bp} mmHg</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Pulse / O₂ Saturation</span>
+                  <span className="font-extrabold text-slate-900">{activeVitals.heart_rate} bpm / {activeVitals.spo2 || '—'}%</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Body Metrics Index</span>
+                  <span className="font-black text-teal-700 block mt-0.5">{getCalculatedBmi()} | {getCalculatedBsa()}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] font-medium italic text-slate-400">
+                No clinical vital telemetry markers registered for this active billing visit entry sequence.
+              </div>
+            )}
+          </div>
+
+          {/* Download Action row */}
+          <div className="flex justify-between items-center pt-1 print:hidden">
+            <button 
+              onClick={() => setActivePatientData(null)}
+              className="text-xs font-bold text-slate-400 hover:text-rose-600 transition-colors px-1"
+            >
+              Clear Workspace View
+            </button>
+            <button 
+              onClick={() => window.print()}
+              className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold tracking-wide px-5 py-2.5 rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+            >
+              <Download className="h-4 w-4" /> DOWNLOAD PRINTABLE LAB SHEET
+            </button>
+          </div>
+
+          {/* Printable Report Form Layout — Now takes full screen preview container width */}
+          <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-8 w-full max-w-none print:border-none print:shadow-none print:p-0 print:mx-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            
+            {/* Letterhead */}
+            <div className="flex items-start justify-between border-b-2 border-slate-800 pb-4">
+              <div className="flex items-center gap-4">
+                <img src={SalamaLogo} alt="Salama Cancer Centre" className="h-14 w-14 object-contain" onError={(e) => e.target.style.display='none'} />
+                <div>
+                  <h2 className="text-base font-black tracking-wide text-slate-900 uppercase">Salama Cancer Centre</h2>
+                  <p className="text-[11px] font-bold text-slate-500 italic">Holistic Cancer and Palliative Care</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5 leading-tight">
+                    P.O BOX 19619-40123, Kisumu, Kenya<br />
+                    Tel: +254 756 364 419 | Email: scanccentre@gmail.com
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <h1 className="text-sm font-black tracking-widest text-teal-600 uppercase">Official Laboratory Report</h1>
+                <p className="text-[11px] font-bold text-slate-400 mt-1">Date: 11/06/2026</p>
+              </div>
+            </div>
+
+            {/* Meta Indexes — Fully displays Name, HRN, Age, Gender directly in preview pane layout */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-y-2 py-4 text-[11px] border-b border-slate-200">
+              <div className="sm:col-span-7 space-y-1">
+                <p className="text-slate-800"><span className="font-bold text-slate-900">Patient Full Name:</span> {activePatientData.info.name}</p>
+                <p className="text-slate-800"><span className="font-bold text-slate-900">Health Record Number (HRN):</span> <span className="font-mono">{activePatientData.info.health_record_number}</span></p>
+              </div>
+              <div className="sm:col-span-5 sm:text-right space-y-1">
+                <p className="text-slate-800"><span className="font-bold text-slate-900">Age:</span> {activePatientData.info.age} Yrs</p>
+                <p className="text-slate-800"><span className="font-bold text-slate-900">Gender:</span> {activePatientData.info.gender}</p>
+                <p className="text-slate-800 leading-snug mt-1">
+                  <span className="font-bold text-slate-900">Investigation Profile:</span> <span className="text-slate-600 font-semibold">{getInvestigationScopeText()}</span>
+                </p>
+              </div>
+            </div>
+
+            {/* Results Table */}
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full border-collapse text-left text-[11px] bg-white">
+                <thead>
+                  <tr className="border-b border-slate-300 text-slate-400 font-bold uppercase text-[9px]">
+                    <th className="pb-2 font-bold tracking-wide">Test Category Panel</th>
+                    <th className="pb-2 font-bold tracking-wide">Lab Test Parameters</th>
+                    <th className="pb-2 font-black tracking-wide text-slate-950">Result Value</th>
+                    <th className="pb-2 font-bold tracking-wide">Unit</th>
+                    <th className="pb-2 font-bold tracking-wide">Standard Reference Range</th>
+                    <th className="pb-2 font-bold tracking-wide text-right">Evaluation State</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-800 font-medium">
+                  {finalTableRows.map((row) => (
+                    <tr key={row.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="py-2 text-slate-400 text-[10px] font-bold uppercase truncate max-w-[140px]">{row.panel}</td>
+                      <td className="py-2 font-bold text-slate-900">{row.parameter}</td>
+                      <td className="py-2 font-black font-mono text-slate-950 text-xs">{row.value}</td>
+                      <td className="py-2 text-slate-500 font-medium">{row.unit}</td>
+                      <td className="py-2 text-slate-400 font-mono">{row.range}</td>
+                      <td className="py-2 text-right">
+                        <span className={`text-[9px] tracking-wider ${row.evaluationStyle}`}>
+                          {row.evaluation}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Technician Notes Footer section */}
+            <div className="mt-6 pt-4 border-t border-slate-200">
+              <h3 className="text-[9px] font-bold tracking-wider text-slate-400 uppercase">Technician Remarks & Notes</h3>
+              <div className="mt-1.5 p-3 bg-slate-50/60 rounded-xl border border-slate-100 text-[11px] text-slate-700 min-h-[45px] print:bg-white print:border-none print:p-0">
+                {activePatientData.records[0]?.technician_notes ? (
+                  <span className="whitespace-pre-wrap">{activePatientData.records[0].technician_notes}</span>
+                ) : (
+                  <span className="text-slate-400 italic">All evaluated biomarker coordinates confirm stable alignment configuration margins. No out-of-band physiological anomalies flags triggered.</span>
+                )}
+              </div>
+            </div>
+
+            {/* Footnote stamp marker */}
+            <div className="mt-14 pt-4 border-t border-slate-100 grid grid-cols-2 text-[10px] text-slate-400 font-medium">
+              <div><p>Report Generated Electronically — Salama HMS Lab Platform</p></div>
+              <div className="text-right"><p className="italic font-semibold text-slate-500">Authorized Signatory Stamp: ______________________</p></div>
+            </div>
+
+          </div>
+
+        </div>
+      ) : (
+        <div className="w-full flex-1 border border-dashed border-slate-300 rounded-2xl p-12 text-center flex flex-col items-center justify-center bg-white shadow-2xs">
+          <ShieldAlert size={36} className="text-slate-300 mb-2 stroke-[1.5]" />
+          <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Workspace View Locked</h4>
+          <p className="text-xs text-slate-400 max-w-xs mt-1">
+            Select a verified patient profile from the drop-down menu above to load laboratory reports.
+          </p>
+        </div>
+      )}
     </div>
   );
 };

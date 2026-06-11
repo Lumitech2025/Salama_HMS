@@ -202,7 +202,7 @@ const VitalsTab = ({ vitals = [], patientData }) => {
                     <td className="p-4 text-center font-mono font-bold text-slate-900 text-base">{renderBP(item)}</td>
                     <td className="p-4 text-center font-mono text-base">{item.heart_rate || '—'}</td>
                     <td className="p-4 text-center font-mono text-base">{item.respiratory_rate || '—'}</td>
-                    <td className="p-4 text-center font-mono text-base">{item.temperature ? `${item.temperature}°C` : '—'}</td>
+                    <td className="p-4 text-center font-mono text-base">{vitals.temperature ? `${item.temperature}°C` : '—'}</td>
                     <td className="p-4 text-center font-mono font-bold text-emerald-600 text-base">{item.spo2 ? `${item.spo2}%` : '—'}</td>
                     <td className="p-4 text-center font-mono text-sm">{item.weight || '—'}kg / {item.height || '—'}cm</td>
                     <td className="p-4 text-center font-mono font-bold text-indigo-700 bg-indigo-50/40 text-base">
