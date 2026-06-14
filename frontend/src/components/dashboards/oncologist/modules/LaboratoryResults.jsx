@@ -293,19 +293,12 @@ const LaboratoryResults = () => {
         <div>
           <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
             <FlaskConical className="h-6 w-6 text-teal-600 stroke-[1.8]" />
-            Laboratory Diagnostic Gateway
+            Patient Lab Results
           </h1>
-          <p className="text-[10px] text-slate-400 mt-0.5 tracking-wider font-bold uppercase">Active Diagnostic Reporting Matrices</p>
+         
         </div>
         
-        <button 
-          onClick={fetchLabResultsData}
-          disabled={loading}
-          className="self-start sm:self-center flex items-center gap-2 bg-white border border-slate-200 px-3.5 py-2 rounded-xl hover:bg-slate-100 text-xs font-bold shadow-2xs text-slate-700 transition-all cursor-pointer disabled:opacity-50"
-        >
-          <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin text-teal-600" : "h-3.5 w-3.5"} /> 
-          <span>Sync Database Entries</span>
-        </button>
+        
       </div>
 
       {error && (
@@ -317,9 +310,7 @@ const LaboratoryResults = () => {
 
       {/* Dropdown Selector Component */}
       <div className="w-full bg-white border border-slate-200 rounded-2xl p-5 mb-4 shadow-2xs shrink-0 z-30 print:hidden">
-        <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-1.5">
-          <User className="h-4 w-4 text-teal-600" /> 1. Select Patient Document Reference File
-        </label>
+        
         <div className="relative max-w-xl w-full">
           <button
             type="button"
@@ -327,7 +318,7 @@ const LaboratoryResults = () => {
             className="w-full flex items-center justify-between bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600 transition-all cursor-pointer"
           >
             <span className="truncate">
-              {activePatientData ? activePatientData.info.name : "-- Choose Verified Lab Profile From Menu --"}
+              {activePatientData ? activePatientData.info.name : " Select Patient"}
             </span>
             <ChevronDown size={14} className={`text-slate-400 shrink-0 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
           </button>
@@ -359,58 +350,111 @@ const LaboratoryResults = () => {
       </div>
 
       {activePatientData ? (
-        <div className="w-full flex-1 min-h-0 space-y-4">
-          
-          {/* Demographics Area Card */}
-          <div className="w-full bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs transition-all print:hidden">
-            <h2 className="text-[10px] font-bold uppercase tracking-wider text-teal-700 mb-3.5 flex items-center gap-1.5 border-b border-slate-100 pb-2">
-              2. Active Patient Workspace Context
-            </h2>
+  <div className="w-full flex-1 min-h-0 space-y-4">
+    
+    {/* Demographics & Clinical Telemetry Workspace Card */}
+    <div className="w-full bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs transition-all print:hidden">
+      
+      {/* Section Header */}
+      <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 mb-4">
+        <h2 className="text-[11px] font-black uppercase tracking-wider text-teal-700 flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-teal-500 animate-pulse"></span>
+          Active Patient
+        </h2>
+        
+      </div>
+      
+      {/* Row 1: Core Demographics Split Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-3.5">
+        
+        <div className="bg-slate-50/70 p-3 rounded-xl border border-slate-100 transition-hover hover:bg-slate-50">
+          <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Patient Name</span>
+          <span className="text-sm font-black text-slate-900 block mt-0.5 uppercase truncate tracking-tight">
+            {activePatientData.info.name}
+          </span>
+        </div>
+
+        <div className="bg-slate-50/70 p-3 rounded-xl border border-slate-100 transition-hover hover:bg-slate-50">
+          <span className="block text-[10px] font-black uppercase tracking-widest text-slate-500">Health Record Number</span>
+          <span className="text-sm font-mono font-extrabold text-slate-800 block mt-0.5 tracking-wide">
+            {activePatientData.info.health_record_number}
+          </span>
+        </div>
+
+        <div className="bg-slate-50/70 p-3 rounded-xl border border-slate-100 transition-hover hover:bg-slate-50">
+          <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Age</span>
+          <span className="text-sm font-extrabold text-slate-900 block mt-0.5">
+            {activePatientData.info.age} <span className="text-xs font-semibold text-slate-500">Years</span>
+          </span>
+        </div>
+
+        <div className="bg-slate-50/70 p-3 rounded-xl border border-slate-100 transition-hover hover:bg-slate-50">
+          <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Gender</span>
+          <span className="text-sm font-extrabold text-slate-900 block mt-0.5 uppercase tracking-tight">
+            {activePatientData.info.gender}
+          </span>
+        </div>
+
+      </div>
+
+      {/* Row 2: Clinical Vitals Telemetry Grid */}
+      <div className="mt-4 pt-4 border-t border-slate-100">
+        <span className="block text-[12px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">
+          Vitals
+        </span>
+
+        {activeVitals ? (
+          <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
             
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 col-span-2 sm:col-span-1">
-                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Patient Designation</span>
-                <span className="text-sm font-black text-slate-900 block mt-0.5 uppercase truncate">{activePatientData.info.name}</span>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Health Record Number</span>
-                <span className="text-sm font-mono font-bold text-slate-800 block mt-0.5">{activePatientData.info.health_record_number}</span>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Age / Gender Matrix</span>
-                <span className="text-sm font-bold text-slate-900 block mt-0.5">{activePatientData.info.age} Yrs / {activePatientData.info.gender}</span>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Billing Mode Allocation</span>
-                <span className="text-sm font-bold font-mono text-slate-600 block mt-0.5 uppercase">{activePatientData.info.payment_mode}</span>
+            {/* Temperature Tile */}
+            <div className="bg-linear-to-b from-slate-50/30 to-slate-50 p-3 rounded-xl border border-slate-100">
+              <span className="text-slate-400 block text-[9px] font-bold uppercase tracking-tight">Temperature</span>
+              <div className="flex items-baseline gap-1 mt-0.5">
+                <span className="text-base font-black text-slate-900">{activeVitals.temperature}</span>
+                <span className="text-xs font-bold text-slate-500">°C</span>
               </div>
             </div>
 
-            {activeVitals ? (
-              <div className="mt-4 pt-3.5 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-y-3 gap-x-6 text-xs">
-                <div>
-                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Temperature</span>
-                  <span className="font-extrabold text-slate-900">{activeVitals.temperature} °C</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Blood Pressure</span>
-                  <span className="font-extrabold text-slate-900">{activeVitals.systolic_bp}/{activeVitals.diastolic_bp} mmHg</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Pulse / O₂ Saturation</span>
-                  <span className="font-extrabold text-slate-900">{activeVitals.heart_rate} bpm / {activeVitals.spo2 || '—'}%</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Body Metrics Index</span>
-                  <span className="font-black text-teal-700 block mt-0.5">{getCalculatedBmi()} | {getCalculatedBsa()}</span>
-                </div>
+            {/* Blood Pressure Tile */}
+            <div className="bg-linear-to-b from-slate-50/30 to-slate-50 p-3 rounded-xl border border-slate-100">
+              <span className="text-slate-400 block text-[9px] font-bold uppercase tracking-tight">Blood Pressure</span>
+              <div className="flex items-baseline gap-1 mt-0.5">
+                <span className="text-base font-black text-slate-900">
+                  {activeVitals.systolic_bp}<span className="text-slate-300 mx-0.5">/</span>{activeVitals.diastolic_bp}
+                </span>
+                <span className="text-xs font-bold text-slate-500">mmHg</span>
               </div>
-            ) : (
-              <div className="mt-3 pt-3 border-t border-slate-100 text-[11px] font-medium italic text-slate-400">
-                No clinical vital telemetry markers registered for this active billing visit entry sequence.
+            </div>
+
+            {/* Pulse & SpO2 Tile */}
+            <div className="bg-linear-to-b from-slate-50/30 to-slate-50 p-3 rounded-xl border border-slate-100">
+              <span className="text-slate-600 block text-[9px] font-bold uppercase tracking-tight">Pulse / O₂ Saturation</span>
+              <div className="flex items-baseline gap-1 mt-0.5">
+                <span className="text-base font-black text-slate-900">{activeVitals.heart_rate}</span>
+                <span className="text-xs font-semibold text-slate-400">bpm</span>
+                <span className="text-slate-300 mx-1">|</span>
+                <span className="text-base font-black text-slate-900">{activeVitals.spo2 || '—'}</span>
+                <span className="text-xs font-semibold text-slate-400">%</span>
               </div>
-            )}
+            </div>
+
+            {/* BMI & BSA Summary Tile */}
+            <div className="bg-teal-50/30 p-3 rounded-xl border border-teal-100/60">
+              <span className="text-teal-800 block text-[9px] font-bold uppercase tracking-tight">(BMI | BSA)</span>
+              <span className="text-xs font-black text-teal-900 block mt-1 tracking-tight">
+                {getCalculatedBmi()} <span className="text-teal-300 mx-1">|</span> {getCalculatedBsa()}
+              </span>
+            </div>
+
           </div>
+        ) : (
+          <div className="w-full p-4 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center text-xs font-medium italic text-slate-400">
+            No active vital parameters telemetry metrics synchronized for this billing visit index block.
+          </div>
+        )}
+      </div>
+
+    </div>
 
           {/* Download Action row */}
           <div className="flex justify-between items-center pt-1 print:hidden">
@@ -421,15 +465,32 @@ const LaboratoryResults = () => {
               Clear Workspace View
             </button>
             <button 
-              onClick={() => window.print()}
+              onClick={() => {
+                // 1. Grab the clean HTML layout structure of just the laboratory sheet element
+                const printContents = document.getElementById('printable-lab-sheet').innerHTML;
+                // 2. Save the complete active application layout state in memory
+                const originalContents = document.body.innerHTML;
+
+                // 3. Temporarily isolate the document body context down to ONLY the targeted report
+                document.body.innerHTML = `<div id="printable-lab-sheet" style="padding:20px;">${printContents}</div>`;
+
+                // 4. Fire the print dialog
+                window.print();
+
+                // 5. Instantly restore your original live web application state seamlessly
+                document.body.innerHTML = originalContents;
+                
+                // Forcing a clean window reload ensures all React button action click bindings re-initialize perfectly
+                window.location.reload();
+              }}
               className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold tracking-wide px-5 py-2.5 rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
             >
-              <Download className="h-4 w-4" /> DOWNLOAD PRINTABLE LAB SHEET
-            </button>
+              <Download className="h-4 w-4" /> DOWNLOAD REPORT
+          </button>
           </div>
 
           {/* Printable Report Form Layout — Now takes full screen preview container width */}
-          <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-8 w-full max-w-none print:border-none print:shadow-none print:p-0 print:mx-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div id="printable-lab-sheet" className="bg-white rounded-2xl shadow-xs border border-slate-200 p-8 w-full max-w-none print:border-none print:shadow-none print:p-0 print:mx-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
             
             {/* Letterhead */}
             <div className="flex items-start justify-between border-b-2 border-slate-800 pb-4">
@@ -460,7 +521,7 @@ const LaboratoryResults = () => {
                 <p className="text-slate-800"><span className="font-bold text-slate-900">Age:</span> {activePatientData.info.age} Yrs</p>
                 <p className="text-slate-800"><span className="font-bold text-slate-900">Gender:</span> {activePatientData.info.gender}</p>
                 <p className="text-slate-800 leading-snug mt-1">
-                  <span className="font-bold text-slate-900">Investigation Profile:</span> <span className="text-slate-600 font-semibold">{getInvestigationScopeText()}</span>
+                  <span className="font-bold text-slate-900">Lab Tests:</span> <span className="text-slate-600 font-semibold">{getInvestigationScopeText()}</span>
                 </p>
               </div>
             </div>

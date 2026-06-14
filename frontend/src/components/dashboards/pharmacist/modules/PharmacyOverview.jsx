@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api';
 import { 
   Users, Pill, AlertTriangle, TrendingUp, 
-  ArrowRight, RefreshCw, Loader2, Package, Activity, Eye
+  RefreshCw, Loader2, Package, Eye
 } from 'lucide-react';
 
 const PharmacyOverview = ({ onAction }) => {
@@ -15,187 +15,220 @@ const PharmacyOverview = ({ onAction }) => {
     revenue: 0
   });
 
-  // 1. Centralized Data Fetcher
+  // Centralized Data Fetcher
   const fetchData = useCallback(async () => {
     try {
       const [resQueue, resStats] = await Promise.all([
+        // Pulls all patients currently routed to the pharmacy workspace station
         API.get('/queue/?current_station=PHARMACY'),
+        // Catch block prevents dashboard crash if the analytics endpoint isn't fully registered yet
         API.get('/pharmacy/analytics/summary/').catch(() => ({ data: {} }))
       ]);
 
-      // Only show patients awaiting medication
       const rawQueue = resQueue.data.results || resQueue.data || [];
-      const pendingQueue = rawQueue.filter(p => p.status === 'AWAITING_MEDICATION');
+      
+      // Filter: Handles both backend station assignments safely
+      const pendingQueue = rawQueue.filter(p => 
+        p.current_station === 'PHARMACY' || 
+        p.status === 'AWAITING_MEDICATION' || 
+        p.status === 'WAITING'
+      );
       
       setQueue(pendingQueue);
       setStats({
         pending: pendingQueue.length,
-        completed: resStats.data.dispensed_today || 0,
-        lowStock: resStats.data.low_stock_items || 0,
-        revenue: resStats.data.revenue_today || 0
+        completed: resStats.data?.dispensed_today || 0,
+        lowStock: resStats.data?.low_stock_items || 0,
+        revenue: resStats.data?.revenue_today || 0
       });
     } catch (err) {
-      console.error("Pharma Sync Error", err);
+      console.error("Pharmacy Sync Pipeline Error:", err);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // 2. Real-time Listening: Poll every 10 seconds
+  // Poll every 10 seconds to catch incoming items instantly
   useEffect(() => { 
     fetchData(); 
     const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // 3. Process Logic
-  const handleProcessOrder = async (patient) => {
-    try {
-      // Optimistic UI update
-      setStats(prev => ({
-        ...prev,
-        pending: Math.max(0, prev.pending - 1)
-      }));
-      setQueue(prevQueue => prevQueue.filter(p => p.id !== patient.id));
+  // Process Logic
+  const handleProcessOrder = (patient) => {
+    // Optimistic UI state adjustment
+    setStats(prev => ({
+      ...prev,
+      pending: Math.max(0, prev.pending - 1)
+    }));
+    setQueue(prevQueue => prevQueue.filter(p => p.id !== patient.id));
 
-      // Trigger navigation to detailed view
-      onAction(patient, 'prescriptions'); 
-    } catch (err) {
-      console.error("Process error", err);
-      onAction(patient, 'prescriptions');
-    }
+    // Safely trigger navigation and pass the active patient to your sheet dispenser view
+    onAction(patient, 'prescriptions'); 
   };
 
   return (
-    <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700 font-['Inter']">
+    <div className="space-y-8 animate-in fade-in duration-700 font-['Inter']">
       
-      {/* HIGH-CONTRAST KPI TIER */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        
-        {/* 1. Pending Queue */}
-        <div className="bg-[#020617] p-8 rounded-[2.5rem] border border-white/5 shadow-2xl relative overflow-hidden group hover:border-teal-500/30 transition-all">
-          <div className="relative z-10">
-            <div className="flex items-center gap-2 mb-4">
-               <Users size={16} className="text-teal-500" />
-               <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">Pending Orders</p>
-            </div>
-            <h4 className="text-5xl font-black text-white italic tracking-tighter">{stats.pending}</h4>
-            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2 italic">Awaiting Dispense</p>
-          </div>
-          <Users size={120} className="absolute -right-8 -bottom-8 text-white/[0.02] group-hover:text-teal-500/[0.05] transition-colors" />
-        </div>
-
-        {/* 2. Fulfillment Rate */}
-        <div className="bg-[#020617] p-8 rounded-[2.5rem] border border-white/5 shadow-2xl relative overflow-hidden group hover:border-blue-500/30 transition-all">
-          <div className="relative z-10">
-            <div className="flex items-center gap-2 mb-4">
-               <Activity size={16} className="text-blue-500" />
-               <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">Fulfillment Rate</p>
-            </div>
-            <h4 className="text-5xl font-black text-white italic tracking-tighter">{stats.completed}</h4>
-            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2 italic">Transacted Today</p>
-          </div>
-          <Pill size={120} className="absolute -right-8 -bottom-8 text-white/[0.02] group-hover:rotate-12 transition-transform" />
-        </div>
-
-        {/* 3. Inventory Alerts */}
-        <div className={`p-8 rounded-[2.5rem] border shadow-2xl relative overflow-hidden group transition-all ${stats.lowStock > 0 ? 'bg-rose-950/20 border-rose-500/30' : 'bg-[#020617] border-white/5'}`}>
-          <div className="relative z-10">
-            <div className="flex items-center gap-2 mb-4">
-               <Package size={16} className={stats.lowStock > 0 ? 'text-rose-500' : 'text-slate-500'} />
-               <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">Inventory Alerts</p>
-            </div>
-            <h4 className={`text-5xl font-black italic tracking-tighter ${stats.lowStock > 0 ? 'text-rose-500' : 'text-white'}`}>{stats.lowStock}</h4>
-            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2 italic">Items Below Threshold</p>
-          </div>
-          <AlertTriangle size={120} className={`absolute -right-8 -bottom-8 ${stats.lowStock > 0 ? 'text-rose-500/[0.08]' : 'text-white/[0.02]'}`} />
-        </div>
-
-        {/* 4. Daily Revenue */}
-        <div className="bg-[#020617] p-8 rounded-[2.5rem] border border-emerald-500/20 shadow-2xl relative overflow-hidden group">
-          <div className="relative z-10">
-            <div className="flex items-center gap-2 mb-4">
-               <TrendingUp size={16} className="text-emerald-500" />
-               <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">Daily Revenue</p>
-            </div>
-            <div className="flex items-baseline gap-1">
-               <span className="text-emerald-500 font-black text-sm uppercase">Ksh</span>
-               <h4 className="text-3xl font-black text-white italic tracking-tighter">{stats.revenue.toLocaleString()}</h4>
-            </div>
-            <p className="text-[10px] text-slate-500 font-bold uppercase mt-2 text-right italic">Settled Invoices</p>
-          </div>
-          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 blur-[80px]" />
-        </div>
+      {/* 4-CARD LIGHT KPI TIER */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <KPICard 
+          label="Pending Orders" 
+          value={stats.pending} 
+          icon={<Users className="text-teal-600"/>} 
+          color="teal" 
+        />
+        <KPICard 
+          label="Fulfillment Rate" 
+          value={stats.completed} 
+          icon={<Pill className="text-blue-600"/>} 
+          color="blue" 
+        />
+        <KPICard 
+          label="Inventory Alerts" 
+          value={stats.lowStock} 
+          icon={<Package className={stats.lowStock > 0 ? "text-red-600" : "text-purple-600"}/>} 
+          color={stats.lowStock > 0 ? "red" : "purple"} 
+        />
+        <KPICard 
+          label="Daily Revenue" 
+          value={`Ksh ${stats.revenue.toLocaleString()}`} 
+          icon={<TrendingUp className="text-green-600"/>}  
+          color="green" 
+        />
       </div>
 
-      {/* PIPELINE TABLE - REMOVED QUEUE DURATION COLUMN */}
-      <div className="bg-white rounded-[3.5rem] border border-slate-100 shadow-xl overflow-hidden">
+      {/* PIPELINE TABLE CONTAINER */}
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden min-h-[500px]">
         <div className="p-10 border-b border-slate-50 flex justify-between items-center bg-slate-50/30">
           <div className="flex items-center gap-4">
             <div className="w-3 h-3 bg-teal-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(20,184,166,0.4)]" />
             <h3 className="font-black text-slate-900 uppercase italic tracking-tighter text-xl">Prescription Pipeline</h3>
           </div>
-          <button onClick={fetchData} className="p-3 hover:bg-white rounded-2xl transition-all border border-transparent hover:border-slate-200 group">
+          <button onClick={fetchData} className="p-3 hover:bg-slate-50 rounded-2xl transition-all border border-transparent hover:border-slate-200 group">
               <RefreshCw size={20} className={`text-slate-400 group-hover:text-teal-600 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
 
-        <div className="overflow-x-auto min-h-[400px]">
+        <div className="overflow-x-auto">
           <table className="w-full text-left">
-            <thead>
-              <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] bg-slate-50/50">
-                <th className="px-12 py-8">Patient Identity</th>
-                <th className="px-12 py-8">Token</th>
-                <th className="px-12 py-8">Clinic Status</th>
-                <th className="px-12 py-8 text-right">Workflow</th>
+            <thead className="bg-slate-50/50 border-b border-slate-100">
+              <tr className="text-[11px] font-black text-slate-400 uppercase tracking-widest">
+                <th className="p-10">Incoming Patient</th>
+                <th className="p-10">Record Number</th>
+                <th className="p-10 text-center">Token ID</th>
+                <th className="p-10 text-center">Clinic Status</th>
+                <th className="p-10 text-right pr-16">Workflow</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {loading && queue.length === 0 ? (
                 <tr>
-                  <td colSpan="4" className="py-32 text-center">
-                    <Loader2 className="animate-spin mx-auto text-teal-500" size={40} />
+                  <td colSpan="5" className="py-40 text-center">
+                    <Loader2 className="animate-spin mx-auto text-teal-500" size={32} />
                     <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-4">Syncing Pipeline Data...</p>
                   </td>
                 </tr>
-              ) : queue.map((patient) => (
-                <tr key={patient.id} className="group hover:bg-teal-50/10 transition-all border-l-4 border-l-transparent hover:border-l-teal-500">
-                  <td className="px-12 py-10">
-                    <p className="font-black text-slate-900 text-lg uppercase tracking-tight">{patient.patient_name}</p>
-                    <p className="text-[11px] font-bold text-slate-400 mt-1 uppercase tracking-widest italic">UCRN: {patient.patient_id_no}</p>
-                  </td>
-                  <td className="px-12 py-10">
-                    <span className="bg-slate-900 text-white font-mono font-bold px-4 py-2 rounded-xl text-sm shadow-lg group-hover:bg-teal-600 transition-colors">
-                      {patient.token_id}
-                    </span>
-                  </td>
-                  <td className="px-12 py-10">
-                    <span className="px-4 py-2 bg-teal-50 text-teal-700 rounded-xl text-[9px] font-black uppercase tracking-widest border border-teal-100/50 shadow-sm">
-                      Orders Transmitted
-                    </span>
-                  </td>
-                  <td className="px-12 py-10 text-right">
-                    <button 
-                      onClick={() => handleProcessOrder(patient)}
-                      className="bg-slate-900 text-white px-8 py-4 rounded-[1.5rem] text-[10px] font-black uppercase tracking-widest flex items-center gap-3 hover:bg-teal-600 transition-all shadow-xl active:scale-95 ml-auto"
-                    >
-                      View Prescription <Eye size={16} />
-                    </button>
+              ) : queue.length > 0 ? (
+                queue.map((patient) => (
+                  <tr key={patient.id} className="hover:bg-teal-50/20 transition-all group">
+                    {/* Patient Identity */}
+                    <td className="px-10 py-8">
+                      <p className="font-black text-slate-900 text-lg uppercase tracking-tight">
+                        {patient.patient_name || patient.patient?.name || "Unknown Patient"}
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest italic font-mono mt-1">
+                        {patient.patient_id_no || "---_---_----"}
+                      </p>
+                    </td>
+
+                    {/* Record Number */}
+                    <td className="px-10 py-8">
+                      <span className="text-sm font-bold font-mono text-teal-600 bg-teal-50/50 border border-teal-100/70 px-3 py-1.5 rounded-lg">
+                        {patient.health_record_number || `REF-${patient.id}`}
+                      </span>
+                    </td>
+
+                    {/* Token ID */}
+                    <td className="px-10 py-8 text-center">
+                      <span className="bg-slate-900 text-white px-4 py-2 rounded-xl font-mono font-bold shadow-lg group-hover:bg-teal-600 transition-colors">
+                        {patient.queue_token || patient.token_id || `TK-${patient.id}`}
+                      </span>
+                    </td>
+
+                    {/* Clinic Status Badge */}
+                    <td className="px-10 py-8 text-center">
+                      <span className="px-4 py-2 bg-amber-50 text-amber-700 rounded-full text-[9px] font-black uppercase tracking-widest border border-amber-100 italic animate-pulse">
+                        Pending Dispense
+                      </span>
+                    </td>
+
+                    {/* Action Button */}
+                    <td className="px-10 py-8 text-right pr-16">
+                      <button 
+                        onClick={() => handleProcessOrder(patient)}
+                        className="bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 ml-auto hover:bg-teal-600 transition-all shadow-xl active:scale-95"
+                      >
+                        View Prescription <Eye size={14} />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="5" className="py-40 text-center">
+                    <Pill size={48} className="mx-auto mb-4 text-slate-200 opacity-40" />
+                    <p className="text-slate-300 font-black uppercase tracking-widest text-xs">
+                      Pipeline is currently clear
+                    </p>
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
-          {!loading && queue.length === 0 && (
-              <div className="py-40 text-center">
-                  <Pill size={64} className="mx-auto mb-6 text-slate-200 opacity-20" />
-                  <p className="text-slate-400 font-black uppercase tracking-[0.5em] text-xs italic">
-                      Pipeline is currently clear
-                  </p>
-              </div>
-          )}
         </div>
       </div>
+    </div>
+  );
+};
+
+/* REUSABLE LIGHTWEIGHT KPI CARD COMPONENT */
+const KPICard = ({ label, value, icon, sub, color }) => {
+  const borderColors = {
+    blue: 'hover:border-blue-500',
+    teal: 'hover:border-teal-500',
+    green: 'hover:border-green-500',
+    purple: 'hover:border-purple-500',
+    red: 'hover:border-red-500'
+  };
+
+  const textColors = {
+    blue: 'text-blue-600',
+    teal: 'text-teal-600',
+    green: 'text-green-600',
+    purple: 'text-purple-600',
+    red: 'text-red-600'
+  };
+
+  const pulseColors = {
+    blue: 'bg-blue-500',
+    teal: 'bg-teal-500',
+    green: 'bg-green-500',
+    purple: 'bg-purple-500',
+    red: 'bg-red-500'
+  };
+
+  return (
+    <div className={`bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm group transition-all ${borderColors[color] || 'hover:border-slate-500'}`}>
+      <div className="flex justify-between items-start mb-4">
+        <div className="p-3 bg-slate-50 rounded-xl group-hover:scale-110 transition-transform">{icon}</div>
+      </div>
+      <h4 className="text-3xl font-black text-slate-950 tracking-tighter italic break-words">{value}</h4>
+      <p className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-widest">{label}</p>
+      <p className={`text-[9px] font-black uppercase mt-3 flex items-center gap-2 ${textColors[color] || 'text-slate-600'}`}>
+        <span className={`w-1 h-1 rounded-full animate-pulse ${pulseColors[color] || 'bg-slate-500'}`} /> {sub}
+      </p>
     </div>
   );
 };

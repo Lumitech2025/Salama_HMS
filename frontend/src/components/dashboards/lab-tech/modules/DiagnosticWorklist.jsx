@@ -182,6 +182,17 @@ const DiagnosticWorklist = () => {
             const id = String(p.id || "");
             const token = (p.token_id || "").toLowerCase();
             const record = (p.health_record_number || "").toLowerCase();
+            const age = (typeof visit === 'object' && visit?.age) || 
+                    (typeof patient === 'object' && patient?.age) || 
+                    record.patient_age || "—";
+        
+        let resolvedGender = "—";
+        const rawGender = (typeof visit === 'object' && visit?.gender) || 
+                          (typeof patient === 'object' && patient?.gender) || 
+                          record.patient_gender;
+        if (rawGender === 'M' || rawGender === 'Male') resolvedGender = 'Male';
+        if (rawGender === 'F' || rawGender === 'Female') resolvedGender = 'Female';
+
             return name.includes(normQuery) || id.includes(normQuery) || token.includes(normQuery) || record.includes(normQuery);
         });
     }, [queue, searchQuery]);
@@ -426,17 +437,17 @@ const DiagnosticWorklist = () => {
                         overflow: visible !important;
                         background: white !important;
                     }
-                    body > div:not(#salama-print-template), 
-                    #root > div:not(#salama-print-template),
+                    body > div:not(#printable-lab-sheet), 
+                    #root > div:not(#printable-lab-sheet),
                     .screen-only { 
                         display: none !important; 
                         visibility: hidden !important;
                     }
-                    #salama-print-template { 
+                    #printable-lab-sheet { 
                         display: block !important; 
                         visibility: visible !important;
                         position: absolute; 
-                        left: 0; 
+                        left: 0; s
                         top: 0; 
                         width: 100%; 
                         padding: 10px;
@@ -540,7 +551,7 @@ const DiagnosticWorklist = () => {
                                         </p>
                                         {/* Dynamic Registration Fields extracted below */}
                                         <p className="text-xs font-mono font-black text-slate-500 uppercase tracking-wider bg-slate-100 px-3 py-1.5 rounded-xl inline-block border border-slate-200/40">
-                                            Age: {selectedPatient.age ?? "N/A"} Yrs | Sex: {formatGender(selectedPatient.gender || selectedPatient.sex)}
+                                            Age: {selectedPatient.age ?? "N/A"} Yrs | Sex: {formatGender(selectedPatient.rawGender || selectedPatient.sex)}
                                         </p>
                                     </div>
                                 </div>
@@ -605,14 +616,29 @@ const DiagnosticWorklist = () => {
                                         <Eye size={14} /> {showPreview ? "Hide Report Preview" : "1. View Report"}
                                     </button>
 
-                                    <button
-                                        type="button"
-                                        onClick={triggerNativePrint}
-                                        className="border-2 border-slate-200 hover:border-slate-800 text-slate-800 font-black text-xs uppercase tracking-widest p-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-sm"
-                                    >
-                                        <Download size={14} /> 2. Download PDF Report
-                                    </button>
-
+                                    <button 
+                                                  onClick={() => {
+                                                    // 1. Grab the clean HTML layout structure of just the laboratory sheet element
+                                                    const printContents = document.getElementById('printable-lab-sheet').innerHTML;
+                                                    // 2. Save the complete active application layout state in memory
+                                                    const originalContents = document.body.innerHTML;
+                                    
+                                                    // 3. Temporarily isolate the document body context down to ONLY the targeted report
+                                                    document.body.innerHTML = `<div id="printable-lab-sheet" style="padding:20px;">${printContents}</div>`;
+                                    
+                                                    // 4. Fire the print dialog
+                                                    window.print();
+                                    
+                                                    // 5. Instantly restore your original live web application state seamlessly
+                                                    document.body.innerHTML = originalContents;
+                                                    
+                                                    // Forcing a clean window reload ensures all React button action click bindings re-initialize perfectly
+                                                    window.location.reload();
+                                                  }}
+                                                  className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold tracking-wide px-5 py-2.5 rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
+                                                >
+                                                  <Download className="h-4 w-4" /> DOWNLOAD REPORT
+                                              </button>
                                     <button
                                         type="button"
                                         onClick={handleDispatch}
@@ -708,7 +734,7 @@ const DiagnosticWorklist = () => {
 
             {/* PRINTING ENGINE DOM TARGET */}
             {selectedPatient && (
-                <div id="salama-print-template" style={{ display: 'none' }}>
+                <div id="printable-lab-sheet" className="hidden print:block bg-white text-black text-left font-['Inter'] antialiased p-2">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #000', paddingBottom: '15px', fontFamily: 'sans-serif' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                             <img src={SalamaLogo} alt="Salama Cancer Centre" style={{ width: '70px', height: '70px', objectFit: 'contain' }} />

@@ -104,6 +104,7 @@
   }
 }
 
+
 #next-steps ul {
   list-style: none;
   padding: 0;
@@ -151,7 +152,7 @@
       box-sizing: border-box;
     }
   }
-}
+} 
 
 #spacer {
   height: 88px;
@@ -182,3 +183,5 @@
     border-right-color: var(--border);
   }
 }
+
+

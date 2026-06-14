@@ -57,7 +57,7 @@ from .models import (
 from .serializers import (
     LabOrderSerializer, LabReferenceSerializer, LabResultSerializer, 
     OncologyClinicalPortalSerializer, PatientSerializer, 
-    ProtocolSerializer, ProtocolIngredientSerializer, 
+    ProtocolSerializer, ProtocolIngredientSerializer, ProtocolDetailSerializer,
     TreatmentSerializer, ChemoSessionSerializer, DrugSerializer, 
     CancerSiteSerializer, CancerTypeSerializer, RegimenSerializer, RegimenDrugSerializer,
     BillSerializer, SalamaTokenObtainPairSerializer, LabInventorySerializer, 
@@ -220,8 +220,6 @@ class PatientViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name', 'registry_no', 'phone']
 
-    # FIX: Cleaned redundant duplicate queue creations out of standard model mutations
-
 class VitalSignViewSet(viewsets.ModelViewSet):
     serializer_class = VitalSignSerializer
     permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
@@ -264,57 +262,101 @@ class ImagingRecordViewSet(viewsets.ModelViewSet):
 # --- 5. PRESCRIPTIONS & PHARMACY ---
 
 class PrescriptionViewSet(viewsets.ModelViewSet):
-    queryset = Prescription.objects.all().order_by('-created_at')
     serializer_class = PrescriptionSerializer
     permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['patient', 'visit', 'pharmacy_status']
 
     def get_queryset(self):
-        patient_id = self.request.query_params.get('patient')
-        status_val = self.request.query_params.get('status')
-        visit_id = self.request.query_params.get('visit')  # NEW: Filter by visit encounter
+        """
+        Optimized queryset targeting the clinical network. Prefetches 
+        diagnoses and vitals to support the protocol-matching snapshot engines.
+        """
+        # 1. Base query with pre-fetch optimization strategies 
+        queryset = Prescription.objects.select_related(
+            'patient',
+            'visit', 
+            'visit__visit' # Links: Prescription -> Queue -> RegistrationRecord
+        ).prefetch_related(
+            'items__drug',
+            'visit__visit__vitals',      
+            'visit__visit__diagnoses',   # Mapped directly to avoid N+1 traps during serialization
+            'visit__visit__lab_orders'   # ✅ Fixed: Terminated lookup paths at the real model relationship boundary
+        )
+
+        # 2. Clinical Guardrails Strategy:
+        # Instead of completely blocking non-lab records from loading (which breaks pharmacy/billing visibility),
+        # we only filter active dashboard queues if requested, ensuring historical data remains safe.
+        station_filter = self.request.query_params.get('current_station')
+        if station_filter == 'DOCTOR':
+            queryset = queryset.filter(
+                visit__visit__lab_orders__status='COMPLETED'
+            ).distinct()
+
+        return queryset
+
+    def perform_create(self, serializer):
+        # Fallback security injection: ensure current session practitioner claims ownership
+        serializer.save(prescribed_by=self.request.user.get_full_name() or self.request.user.username)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        target_status = request.data.get('pharmacy_status') or request.data.get('status')
         
-        qs = self.queryset
-        
-        if patient_id: 
-            qs = qs.filter(patient_id=patient_id)
-        if status_val: 
-            qs = qs.filter(status=status_val)
-        if visit_id:
-            qs = qs.filter(visit_id=visit_id)
+        # If transitioning to DISPENSED and it wasn't dispensed already, execute routine
+        if target_status == 'DISPENSED' and instance.pharmacy_status != 'DISPENSED':
+            return self._dispense_prescription(request, instance)
             
-        return qs
+        return super().partial_update(request, *args, **kwargs)
 
-    @action(detail=False, methods=['get'], url_path='summary')
-    def pharmacy_summary(self, request):
+    def _dispense_prescription(self, request, prescription):
         """
-        Provides metrics for the active pharmacy dashboard tracking panel.
+        Processes transactional inventory depletion across the floor stock system
+        and automatically handles queue tracking forward logic.
         """
-        today = timezone.now().date()
-        
-        # Fallback check: Look up if your Drug model uses stock_quantity vs quantity_in_stock
-        has_stock_qty_field = hasattr(Drug, 'stock_quantity')
-        stock_field = 'stock_quantity' if has_stock_qty_field else 'quantity_in_stock'
-        
-        low_stock_filter = {f"{stock_field}__lte": F('reorder_level')}
-        
-        dispensed_count = Prescription.objects.filter(
-            created_at__date=today, 
-            status='DISPENSED'
-        ).count()
-        
-        revenue_calc = Bill.objects.filter(
-            created_at__date=today, 
-            is_paid=True
-        ).aggregate(total=Sum('total_amount'))['total'] or 0
-        
-        low_stock_count = Drug.objects.filter(**low_stock_filter).count()
-        
-        return Response({
-            'dispensed_today': dispensed_count,
-            'revenue_today': revenue_calc,
-            'low_stock_items': low_stock_count
-        })
+        with transaction.atomic():
+            for item in prescription.items.all():
+                if item.drug:
+                    try:
+                        # Row-locking query isolates concurrent pharmacy dispatchers
+                        locked_drug = Drug.objects.select_for_update().get(id=item.drug.id)
+                        
+                        # Parse numeric quantities out of dosage expressions (e.g. "250 mg" -> 250)
+                        match = re.search(r'\d+', item.dosage or '')
+                        deduction_qty = int(match.group()) if match else 1
+                        
+                        if locked_drug.stock_quantity >= deduction_qty:
+                            locked_drug.stock_quantity -= deduction_qty
+                            locked_drug.save()
+                        else:
+                            return Response(
+                                {
+                                    "error": f"Insufficient stock for {locked_drug.name}. "
+                                             f"Requested: {deduction_qty}, Available: {locked_drug.stock_quantity}"
+                                },
+                                status=status.HTTP_400_BAD_REQUEST
+                            )
+                    except Drug.DoesNotExist:
+                        return Response(
+                            {"error": f"Inventory reference broken for {item.medication_name} (ID: {item.drug_id})"},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+            
+            # Apply state change safely within atomic bounds
+            prescription.pharmacy_status = 'DISPENSED'
+            prescription.save()
 
+            # --- AUTOMATION BONUS: Advance the Patient Queue Ticket ---
+            # Now that medication is dispensed, update their location in the building
+            if prescription.visit:  # prescription.visit refers to the Queue row
+                queue_ticket = prescription.visit
+                queue_ticket.current_station = 'BILLING'
+                queue_ticket.status = 'COMPLETED'
+                queue_ticket.save()
+            
+        serializer = self.get_serializer(prescription)
+        return Response(serializer.data)
+    
 # --- 6. APPOINTMENTS & BILLING ---
 
 class AppointmentViewSet(viewsets.ModelViewSet):
@@ -410,12 +452,9 @@ class BillViewSet(viewsets.ModelViewSet):
 # --- 7. INVENTORY & LAB ---
 
 class LabOrderViewSet(viewsets.ModelViewSet):
-    # Optimizing database queries with select_related to prevent N+1 issues when fetching patient/visit details
+    # ✅ Optimized database queries with select_related to prevent N+1 issues when fetching patient/visit details
     queryset = LabOrder.objects.all().select_related('patient', 'visit').order_by('-created_at')
     serializer_class = LabOrderSerializer
-    
-    # Keeping your permissions intact
-    permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['visit', 'status', 'patient']
@@ -423,21 +462,26 @@ class LabOrderViewSet(viewsets.ModelViewSet):
     # Updated search fields to match your relational fields (using patient name or queue/token id)
     search_fields = ['patient__name', 'visit__queue_id']
 
+    # ✅ FIX: Dynamic permissions so pharmacists can read data, but only clinical staff can write/edit
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            # Allows Pharmacists, Doctors, and Lab Techs to read clinical states
+            return [permissions.IsAuthenticated()]
+        else:
+            # Restrict POST, PUT, PATCH, DELETE strictly to authorized clinical personnel
+            return [permissions.IsAuthenticated(), IsClinicalStaff()]
+
     def perform_create(self, serializer):
         test_skus = self.request.data.get('test_skus', [])
-        
-        serializer.save()
-        
+        # ✅ Process and attach your test skus safely during serialization instantiation if needed
+        instance = serializer.save()
+        # Custom logic to add test items to billing ledger or inventory goes here...
 
-    # --- Custom Actions Tailored for Your 4 User Profiles ---
+    # --- Custom Actions Tailored for Your User Profiles ---
 
     @action(detail=False, methods=['get'], url_path='active-queue')
     def active_queue(self, request):
-        """
-        1. FOR THE LAB TECH
-        Returns only PENDING orders so they can see their active workload 
-        without getting bogged down by historic, completed data.
-        """
+       
         pending_orders = self.get_queryset().filter(status='PENDING')
         
         # Optional: Filter specifically by a specific queue_id if passed in query params
@@ -450,11 +494,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='billing-pending')
     def billing_pending(self, request):
-        """
-        2. FOR THE BILLING OFFICER
-        Returns lab orders that are completed or pending but need financial clearance.
-        Can easily filter by visit to attach to a running consultation invoice.
-        """
+        
         visit_id = request.query_params.get('visit', None)
         orders = self.get_queryset()
         if visit_id:
@@ -466,17 +506,17 @@ class LabOrderViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='patient-history')
     def patient_history(self, request):
         """
-        3. FOR THE PATIENT / DOCTOR
+        3. FOR THE PATIENT / DOCTOR / PHARMACIST
         Quickly pull all historical lab orders for a specific patient.
         """
         patient_id = request.query_params.get('patient', None)
         if not patient_id:
-            return Response({"error": "Patient ID parameter is required"}, status=400)
+            return Response({"error": "Patient ID parameter is required"}, status=status.HTTP_400_BAD_REQUEST)
             
         orders = self.get_queryset().filter(patient_id=patient_id)
         serializer = self.get_serializer(orders, many=True)
         return Response(serializer.data)
-
+    
 class LabResultViewSet(viewsets.ModelViewSet):
     queryset = LabResult.objects.all().order_by('-created_at') 
     serializer_class = LabResultSerializer
@@ -753,68 +793,67 @@ class DrugViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'batch_number']
 
 class ProtocolViewSet(viewsets.ModelViewSet):
-    # Optimized using prefetch_related so reading protocols fetches all drugs in a single database hit
+    # Prefetch child components cleanly to prevent database stuttering on reads
     queryset = Protocol.objects.all().prefetch_related('components')
     serializer_class = ProtocolSerializer
-    
-    # Keeping it secure; adjust permission classes as per your system roles
     permission_classes = [permissions.IsAuthenticated]
 
-    # OPTIONAL CUSTOM ACTION: 
-    # If other personnel (e.g., finance) want to update only specific drug costs 
-    # without submitting the whole complex protocol form payload again.
+    def get_serializer_class(self):
+        """
+        Dynamic routing for serializers: Use DetailSerializer on retrieval 
+        operations to show the cached drug stock variables smoothly.
+        """
+        if self.action in ['retrieve']:
+            return ProtocolDetailSerializer
+        return super().get_serializer_class()
+
     @action(detail=True, methods=['patch'], url_path='update-costs')
     def update_costs(self, request, pk=None):
         """
-        Allows billing/finance teams to submit an array of updated ingredient costs.
-        Payload expectation:
-        {
-            "costs": [
-                {"ingredient_id": 12, "cost_per_cycle": 15000.00},
-                {"ingredient_id": 13, "cost_per_cycle": 8500.00}
-            ]
-        }
+        Allows finance/billing teams to patch specific component costs.
+        Calculates cumulative totals safely via database aggregations.
         """
         protocol = self.get_object()
         costs_data = request.data.get('costs', [])
         
         if not costs_data:
             return Response(
-                {"error": "No cost data provided"}, 
+                {"error": "No cost data matrix provided"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
             
-        updated_ingredients = []
-        running_total = 0.00
-        
-        for item in costs_data:
-            ing_id = item.get('ingredient_id')
-            cost = item.get('cost_per_cycle')
-            
-            try:
-                # Ensure the ingredient actually belongs to this specific protocol
-                ingredient = protocol.components.get(id=ing_id)
-                ingredient.cost_per_cycle = cost
-                ingredient.save()
-                updated_ingredients.append(ingredient)
-            except ProtocolIngredient.DoesNotExist:
-                return Response(
-                    {"error": f"Ingredient ID {ing_id} not found under this protocol"}, 
-                    status=status.HTTP_404_NOT_FOUND
-                )
-        
-        # Automatically recalculate the total cumulative cost for the protocol master
-        for ing in protocol.components.all():
-            if ing.cost_per_cycle:
-                running_total += float(ing.cost_per_cycle)
+        # Wrap everything in an explicit ACID database transaction block
+        with transaction.atomic():
+            for item in costs_data:
+                ing_id = item.get('ingredient_id')
+                raw_cost = item.get('cost_per_cycle')
                 
-        protocol.total_cost_per_cycle = running_total
-        protocol.save()
+                if ing_id is None or raw_cost is None:
+                    return Response(
+                        {"error": "Each record requires an ingredient_id and cost_per_cycle value"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                try:
+                    # Target the element directly through the protocol relationship lookup
+                    ingredient = protocol.components.get(id=ing_id)
+                    ingredient.cost_per_cycle = Decimal(str(raw_cost))
+                    ingredient.save()
+                except ProtocolIngredient.DoesNotExist:
+                    return Response(
+                        {"error": f"Ingredient ID {ing_id} does not exist under this protocol blueprint"}, 
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+            
+            # Optimization: Let the database engine calculate the sum instead of a Python loop
+            aggregation = protocol.components.aggregate(total=Sum('cost_per_cycle'))
+            protocol.total_cost_per_cycle = aggregation['total'] or Decimal('0.00')
+            protocol.save()
         
-        # Return the updated protocol info
+        # Return the newly updated profile data
         serializer = self.get_serializer(protocol)
         return Response(serializer.data, status=status.HTTP_200_OK)
-
+    
 class ChemoSessionViewSet(viewsets.ModelViewSet):
     queryset = ChemoSession.objects.all()
     serializer_class = ChemoSessionSerializer

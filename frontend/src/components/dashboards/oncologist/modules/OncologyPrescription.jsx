@@ -1,482 +1,791 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import API from '@/api/api';
-import { 
-  Pill, Plus, Trash2, Send, Calculator, 
-  User, ChevronDown, Save, Loader2, RefreshCcw, FileText, AlertTriangle
-} from 'lucide-react';
+import { Plus, Trash2, Send, Printer, User, ChevronDown, Loader2, RefreshCcw, Activity } from 'lucide-react';
+import SalamaLogo from "@/assets/Salama Cancer Centre logo.png";
 
 const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
-  // --- STATE MANAGEMENT ---
-  const [queue, setQueue] = useState([]);
-  const [protocols, setProtocols] = useState([]);
+  const [labReadyQueue, setLabReadyQueue] = useState([]);
   const [drugsMasterList, setDrugsMasterList] = useState([]); 
-  const [selectedPatient, setSelectedPatient] = useState(selectedPatientFromParent || null);
+  const [protocolsList, setProtocolsList] = useState([]);
   const [selectedProtocolId, setSelectedProtocolId] = useState('');
-  const [prescriptions, setPrescriptions] = useState([]);
+  const [selectedPatient, setSelectedPatient] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [clinicalNotes, setClinicalNotes] = useState('');
-
-  // Local state for tracking a regimen/medication adding entry
-  const [manualDrug, setManualDrug] = useState({
-    drug_id: '', 
-    medication_name: '',
-    dosage: '',
-    route: 'IV Infusion',
-    frequency: 'Once',
-    duration: '1 Day',
-    instructions: ''
+  const [isLoadingClinicalData, setIsLoadingClinicalData] = useState(false);
+  const reportPrintRef = useRef(null);
+  
+  const [patientMeta, setPatientMeta] = useState({
+    age: '', sex: '', date: new Date().toISOString().split('T')[0],
+    diagnosis: '', protocol: '', cycleNo: '1', totalCycles: '', allergies: ''
   });
 
-  const routes = ["IV Infusion", "IV Push", "Oral", "SC Injection"];
-  const frequencies = ["Once", "Daily", "Twice Daily", "Weekly", "Every 14 Days", "Every 21 Days"];
-  const durations = ["1 Day", "3 Days", "5 Days", "7 Days", "14 Days", "1 Cycle"];
+  const [activeVitals, setActiveVitals] = useState(null);
+  const [activeLabs, setActiveLabs] = useState([]); 
+  const [patientDiagnoses, setPatientDiagnoses] = useState([]); 
 
-  // --- INITIALIZATION DATA FETCH ---
-  const fetchSystemData = useCallback(async () => {
+  const [preChemoOrders, setPreChemoOrders] = useState([
+    { id: 'pc1', name: 'IV Metoclopramide 10mg STAT', checked: true },
+    { id: 'pc2', name: 'IV Chlorpheniramine 10mg STAT', checked: true },
+    { id: 'pc3', name: 'IV Ondansetron 8mg STAT', checked: true },
+    { id: 'pc4', name: 'IV Dexamethasone 8mg STAT', checked: true }
+  ]);
+  const [postChemoOrders, setPostChemoOrders] = useState([
+    { id: 'po1', name: 'PO FeSO4/FA 200mg/1 tab OD × 5/7', checked: true },
+    { id: 'po2', name: 'PO Ondansetron 8mg 1 tab BD × 5/7', checked: true },
+    { id: 'po3', name: 'PO Metoclopramide 10mg 1 tab TDS × 5/7', checked: true },
+    { id: 'po4', name: 'PO Dexamethasone 4mg 1 tab BD × 5/7', checked: true }
+  ]);
+  
+  const [chemoRows, setChemoRows] = useState([
+    { id: Date.now(), drug_id: '', name: '', calc_factor: 'Mg/m2', factor_value: '', calculated_dose: '', route: 'I.V', diluent: 'NS', volume: '500', duration: '3 hrs' }
+  ]);
+  const [doseAdjustmentNotes, setDoseAdjustmentNotes] = useState('');
+
+  const calculationFactors = ["Mg/m2", "Mg/kg", "AUC", "IU/KG", "Flat Rate", "mcg"];
+  const commonRoutes = ["I.V", "P.O", "S.C", "I.M", "IV Infusion"];
+  const diluents = ["NS", "D5W", "RL", "None"];
+
+  const getVitalVal = useCallback((key) => {
+    if (!activeVitals) return '---';
+    return activeVitals[key] ?? '---';
+  }, [activeVitals]);
+
+  const getLabParameterVal = useCallback((keyName) => {
+    if (!activeLabs || !Array.isArray(activeLabs) || activeLabs.length === 0) return '---';
+    for (const testObj of activeLabs) {
+      if (testObj && testObj[keyName] !== undefined && testObj[keyName] !== null) {
+        return testObj[keyName];
+      }
+    }
+    return '---';
+  }, [activeLabs]);
+
+  // CRITICAL FIX: Re-added the missing definition to resolve the app crash runtime error!
+  const calculatedBMI = isLoadingClinicalData ? '---' : (getVitalVal('bmi') || '---');
+
+  const calculateRowDose = useCallback((factor, value) => {
+    if (!value) return '';
+    const val = parseFloat(value);
+    if (isNaN(val)) return '';
+
+    const normalizedFactor = factor.trim().toUpperCase();
+    let bsa = parseFloat(getVitalVal('bsa'));
+    const weight = parseFloat(getVitalVal('weight'));
+    const height = parseFloat(getVitalVal('height'));
+
+    if ((isNaN(bsa) || bsa <= 0) && !isNaN(weight) && !isNaN(height)) {
+      bsa = Math.sqrt((height * weight) / 3600);
+    }
+
+    switch (normalizedFactor) {
+      case 'MG/M2':
+        if (isNaN(bsa) || bsa <= 0) return 'Err: Missing BSA';
+        return `${Math.round(val * bsa)} mg`;
+      case 'MG/KG':
+        if (isNaN(weight) || weight <= 0) return 'Err: Missing Weight';
+        return `${Math.round(val * weight)} mg`;
+      case 'AUC':
+        let gfr = parseFloat(getLabParameterVal('ue_gfr')) || 100; 
+        if (isNaN(gfr) || gfr <= 0) return 'Err: Missing GFR';
+        return `${Math.round(val * (gfr + 25))} mg`;
+      case 'IU/KG':
+        if (isNaN(weight) || weight <= 0) return 'Err: Missing Weight';
+        return `${Math.round(val * weight)} IU`;
+      case 'MCG':
+        return `${val} mcg`;
+      case 'FLAT RATE':
+      default:
+        return `${val} mg`;
+    }
+  }, [getVitalVal, getLabParameterVal]); 
+
+  const handleProtocolTemplateSelected = useCallback((protocolId) => {
+    if (!protocolId) return;
+    const protocolTemplate = protocolsList.find(p => p.id === parseInt(protocolId));
+    if (!protocolTemplate) return;
+
+    setSelectedProtocolId(protocolId);
+    setPatientMeta(prev => ({
+      ...prev,
+      protocol: protocolTemplate.name,
+      totalCycles: protocolTemplate.total_cycles || prev.totalCycles
+    }));
+
+    if (protocolTemplate.components && protocolTemplate.components.length > 0) {
+      const compiledRows = protocolTemplate.components.map((comp, index) => {
+        let matchedStockId = comp.pharmacy_drug_id || '';
+        if (!matchedStockId && drugsMasterList.length > 0) {
+          const match = drugsMasterList.find(d => d.name.toLowerCase().includes(comp.medication_name.toLowerCase()));
+          if (match) matchedStockId = match.id;
+        }
+
+        let parsedFactor = "Mg/m2";
+        if (/mcg/i.test(comp.dosage_unit)) parsedFactor = "mcg";
+        else if (/kg/i.test(comp.dosage_unit)) parsedFactor = "Mg/kg";
+        else if (/auc/i.test(comp.dosage_unit)) parsedFactor = "AUC";
+        else if (/flat/i.test(comp.dosage_unit)) parsedFactor = "Flat Rate";
+
+        return {
+          id: Date.now() + index,
+          drug_id: matchedStockId,
+          name: comp.medication_name,
+          calc_factor: parsedFactor,
+          factor_value: comp.base_dosage,
+          calculated_dose: calculateRowDose(parsedFactor, comp.base_dosage),
+          route: comp.route_of_administration || 'I.V',
+          diluent: 'NS',
+          volume: '500',
+          duration: '3 hrs'
+        };
+      });
+
+      setChemoRows(compiledRows);
+    }
+  }, [protocolsList, drugsMasterList, calculateRowDose]);
+
+  const handlePatientSelectionContext = useCallback(async (queueNode) => {
+    if (!queueNode) return;
+    setIsLoadingClinicalData(true);
+    
+    setActiveVitals(null);
+    setActiveLabs([]);
+    setPatientDiagnoses([]);
+    setSelectedProtocolId('');
+    setPatientMeta({
+      age: '---', sex: '---', date: new Date().toISOString().split('T')[0],
+      diagnosis: '', protocol: '', cycleNo: '1', totalCycles: '', allergies: ''
+    });
+    setChemoRows([{ id: Date.now(), drug_id: '', name: '', calc_factor: 'Mg/m2', factor_value: '', calculated_dose: '', route: 'I.V', diluent: 'NS', volume: '500', duration: '3 hrs' }]);
+
     try {
-      const [queueRes, protocolsRes, drugsRes] = await Promise.all([
-        API.get('/queue?current_station=DOCTOR'),
-        API.get('/protocols/'),
-        API.get('/drugs/') 
+      const visitId = queueNode.visit_id || queueNode.visit?.id || queueNode.visit || queueNode.id;
+      
+
+      const [vitalsRes, labsRes, rxSnapshotRes] = await Promise.all([
+        API.get(`/vital-signs/?visit=${visitId}`).catch(() => null),
+        API.get(`/lab-results/?visit=${visitId}`).catch(() => null),
+        API.get(`/prescriptions/?visit=${visitId}`).catch(() => null)
       ]);
-      setQueue(queueRes.data.results || queueRes.data || []);
-      setProtocols(protocolsRes.data.results || protocolsRes.data || []);
-      setDrugsMasterList(drugsRes.data.results || drugsRes.data || []);
+
+      if (vitalsRes?.data) {
+        const data = vitalsRes.data.results || vitalsRes.data;
+        setActiveVitals(Array.isArray(data) ? data[0] : data);
+      }
+
+      if (labsRes?.data) {
+        const data = labsRes.data.results || labsRes.data;
+        setActiveLabs(Array.isArray(data) ? data : [data]);
+      }
+
+      let dxArray = [];
+      if (rxSnapshotRes?.data) {
+        const results = rxSnapshotRes.data.results || rxSnapshotRes.data;
+        if (results && results.length > 0 && results[0].diagnosis_snapshot) {
+          dxArray = results[0].diagnosis_snapshot;
+          setPatientDiagnoses(dxArray);
+        }
+      } else if (queueNode.diagnosis_snapshot) {
+        dxArray = queueNode.diagnosis_snapshot;
+        setPatientDiagnoses(dxArray);
+      }
+
+      let resolvedGender = "—";
+      const rawGender = queueNode.patient_gender || queueNode.patient?.gender || queueNode.visit?.gender || "—";
+      if (/^M/i.test(rawGender)) resolvedGender = 'Male';
+      if (/^F/i.test(rawGender)) resolvedGender = 'Female';
+      
+      const resolvedAge = queueNode.patient_age || queueNode.patient?.age || queueNode.visit?.age || "—";
+      
+      let computedDiagnosisStr = '';
+      if (dxArray.length > 0) {
+        computedDiagnosisStr = `${dxArray[0].icd10_code} - ${dxArray[0].description}`;
+      }
+
+      setPatientMeta(prev => ({
+        ...prev,
+        age: resolvedAge,
+        sex: resolvedGender,
+        diagnosis: computedDiagnosisStr || queueNode.diagnosis || prev.diagnosis,
+        protocol: queueNode.protocol || '',
+        allergies: queueNode.allergies || ''
+      }));
+
     } catch (err) {
-      console.error("Error loading prescription system dependencies", err);
+      console.error("Fault parsing historical clinical contexts:", err);
+    } finally {
+      setIsLoadingClinicalData(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchSystemData();
-  }, [fetchSystemData]);
-
-  useEffect(() => {
-    if (selectedPatientFromParent) {
-      setSelectedPatient(selectedPatientFromParent);
-    }
+    if (selectedPatientFromParent) setSelectedPatient(selectedPatientFromParent);
   }, [selectedPatientFromParent]);
 
-  const handleProtocolChange = (protocolId) => {
-    setSelectedProtocolId(protocolId);
-    if (!protocolId) {
-      setPrescriptions([]);
-      return;
+  useEffect(() => {
+    if (selectedPatient) handlePatientSelectionContext(selectedPatient);
+  }, [selectedPatient, handlePatientSelectionContext]);
+
+  useEffect(() => {
+    setChemoRows(prev => prev.map(row => ({
+      ...row,
+      calculated_dose: calculateRowDose(row.calc_factor, row.factor_value)
+    })));
+  }, [activeVitals, activeLabs, calculateRowDose]);
+
+  const fetchOncologyData = useCallback(async () => {
+    try {
+      const [drugsRes, queueRes, protocolsRes] = await Promise.all([
+        API.get('/drugs/'), 
+        API.get('/queue?current_station=DOCTOR'),
+        API.get('/protocols/')
+      ]);
+
+      setDrugsMasterList(drugsRes.data.results || drugsRes.data || []);
+      setLabReadyQueue(queueRes.data.results || queueRes.data || []);
+      setProtocolsList(protocolsRes.data.results || protocolsRes.data || []);
+    } catch (err) {
+      console.error("Initialization fault on lookup parameters", err);
     }
+  }, [API, setDrugsMasterList, setLabReadyQueue, setProtocolsList]);
 
-    const proto = protocols.find(p => p.id === parseInt(protocolId));
-    if (!proto || !proto.components) return;
+  useEffect(() => { 
+    fetchOncologyData(); 
+  }, [fetchOncologyData]);
 
-    const templateMeds = proto.components.map(comp => {
-      const compNameLower = comp.medication_name.toLowerCase();
-      const matchedDrug = drugsMasterList.find(d => {
-        const drugNameLower = d.name.toLowerCase();
-        return (
-          drugNameLower === compNameLower ||
-          drugNameLower.includes(compNameLower) ||
-          compNameLower.includes(drugNameLower)
-        );
-      });
-      
-      return {
-        id: Date.now() + Math.random(),
-        drug_id: matchedDrug ? matchedDrug.id : null,
-        medication_name: comp.medication_name,
-        dosage: `${comp.base_dosage} ${comp.dosage_unit}`,
-        route: comp.route_of_administration || 'IV Infusion',
-        frequency: 'Once',
-        duration: proto.cycle_duration_days ? `${proto.cycle_duration_days} Days` : '1 Cycle',
-        instructions: matchedDrug 
-          ? `Batch No: ${matchedDrug.batch_no} | Current Stock: ${matchedDrug.stock_quantity || matchedDrug.quantity_in_stock || 0}`
-          : '⚠️ ALERT: Unbound drug item! Not linked to live inventory tracking.'
-      };
-    });
-
-    setPrescriptions(templateMeds);
-  };
-
-  // Explicitly binds an inline selection fallback to avoid throwing away cards
-  const handleInlineItemLink = (uniqueCardId, inventoryDrugId) => {
-    const targetInvItem = drugsMasterList.find(d => d.id === parseInt(inventoryDrugId));
-    if (!targetInvItem) return;
-
-    setPrescriptions(prev => prev.map(item => {
-      if (item.id === uniqueCardId) {
-        return {
-          ...item,
-          drug_id: targetInvItem.id,
-          instructions: `Batch No: ${targetInvItem.batch_no} | Current Stock: ${targetInvItem.stock_quantity || targetInvItem.quantity_in_stock || 0}`
-        };
+  const handleChemoRowChange = (id, field, value) => {
+    setChemoRows(prev => prev.map(row => {
+      if (row.id === id) {
+        const updatedRow = { ...row, [field]: value };
+        if (field === 'drug_id') {
+          const matchedDrug = drugsMasterList.find(d => d.id === parseInt(value));
+          updatedRow.name = matchedDrug ? matchedDrug.name : '';
+        }
+        if (field === 'calc_factor' || field === 'factor_value' || field === 'drug_id') {
+          updatedRow.calculated_dose = calculateRowDose(updatedRow.calc_factor, updatedRow.factor_value);
+        }
+        return updatedRow;
       }
-      return item;
+      return row;
     }));
   };
 
-  // --- ACTIONS ---
-  const handleSelectDrugItem = (drugId) => {
-    const selectedDrug = drugsMasterList.find(d => d.id === parseInt(drugId));
-    if (selectedDrug) {
-      setManualDrug({
-        ...manualDrug,
-        drug_id: selectedDrug.id,
-        medication_name: selectedDrug.name,
-        instructions: `Batch No: ${selectedDrug.batch_no} | Current Stock: ${selectedDrug.stock_quantity || selectedDrug.quantity_in_stock || 0}`
-      });
-    }
+  const addChemoRow = () => {
+    setChemoRows(prev => [...prev, { id: Date.now(), drug_id: '', name: '', calc_factor: 'Mg/m2', factor_value: '', calculated_dose: '', route: 'I.V', diluent: 'NS', volume: '500', duration: '3 hrs' }]);
   };
 
-  const addManualDrug = () => {
-    if (!manualDrug.medication_name || !manualDrug.dosage) {
-      alert("Please specify drug items and amount values before processing.");
-      return;
-    }
-    setPrescriptions([...prescriptions, { ...manualDrug, id: Date.now() }]);
-    setManualDrug({ drug_id: '', medication_name: '', dosage: '', route: 'IV Infusion', frequency: 'Once', duration: '1 Day', instructions: '' });
+  const removeChemoRow = (id) => {
+    if (chemoRows.length > 1) setChemoRows(prev => prev.filter(r => r.id !== id));
   };
 
-  const removeDrug = (id) => setPrescriptions(prescriptions.filter(p => p.id !== id));
-
-  const handleSendToPharmacy = async () => {
-    if (prescriptions.length === 0) return alert("Please include at least one medication item.");
-    if (!selectedPatient) return alert("Select patient profile to execute operation.");
-
-    const hasUnboundDrugs = prescriptions.some(p => !p.drug_id);
-    if (hasUnboundDrugs) {
-      return alert("Validation Error: One or more medications are not linked to an inventory item. Please link or remove unmapped records before transmitting.");
-    }
-
+  const handleSubmitPrescription = async () => {
+    if (!selectedPatient) return alert("Select patient workspace first.");
     setIsSubmitting(true);
     try {
-      // Safely split Patient ID vs Queue Row Primary Keys
-      const targetPatientModelId = selectedPatient.patient || selectedPatient.patient_id || selectedPatient.id;
-      const targetQueueRowId = selectedPatient.id;
-      const targetVisitEncounterId = selectedPatient.visit || selectedPatient.visit_id || null;
-      
-      const payload = {
-        patient: parseInt(targetPatientModelId),
-        visit: targetVisitEncounterId ? parseInt(targetVisitEncounterId) : null,
-        protocol: selectedProtocolId ? parseInt(selectedProtocolId) : null,
-        status: 'PENDING',
-        notes: clinicalNotes || "", 
-        clinical_notes: clinicalNotes || "",         
-        items: prescriptions.map(p => ({
-          drug_id: parseInt(p.drug_id), 
-          medication_name: p.medication_name,
-          dosage: p.dosage,
-          frequency: p.frequency,
-          duration: p.duration,
-          route: p.route,
-          instructions: p.instructions
+      const itemsPayload = [
+        ...preChemoOrders.filter(o => o.checked).map(o => ({
+          stage: 'PRE_CHEMO', drug: null, medication_name: o.name, dosage: 'STAT',
+          calc_factor: 'Flat Rate', factor_value: '0', route: 'I.V', diluent: 'None', volume: '0', duration: 'STAT'
+        })),
+        ...chemoRows.filter(r => r.drug_id).map(r => ({
+          stage: 'CHEMO', drug: parseInt(r.drug_id), medication_name: r.name, dosage: r.calculated_dose,
+          calc_factor: r.calc_factor, factor_value: r.factor_value, route: r.route, diluent: r.diluent, volume: r.volume, duration: r.duration
+        })),
+        ...postChemoOrders.filter(o => o.checked).map(o => ({
+          stage: 'POST_CHEMO', drug: null, medication_name: o.name, dosage: 'Take Home',
+          calc_factor: 'Flat Rate', factor_value: '0', route: 'P.O', diluent: 'None', volume: '0', duration: 'As Tracked'
         }))
+      ];
+
+      const payload = {
+        patient: parseInt(selectedPatient.patient || selectedPatient.patient_id || selectedPatient.id),
+        visit: parseInt(selectedPatient.visit_id || selectedPatient.visit || selectedPatient.id), 
+        treatment_date: patientMeta.date,
+        pharmacy_status: 'PENDING', 
+        dose_adjustment_notes: doseAdjustmentNotes,
+        protocol: patientMeta.protocol, 
+        cycle_no: parseInt(patientMeta.cycleNo) || 1, 
+        total_cycles: parseInt(patientMeta.totalCycles) || null, 
+        allergies: patientMeta.allergies,
+        items: itemsPayload
       };
 
-      // 1. Fire prescription collection block
+      const visitId = parseInt(selectedPatient.id || selectedPatient.visit_id || selectedPatient.visit);
+
       await API.post('/prescriptions/', payload);
 
-      // 2. Update tracking state directly referencing queue index position
-      await API.patch(`/queue/${targetQueueRowId}/`, { 
+      await API.patch(`/queue/${visitId}/`, {
         current_station: 'PHARMACY',
-        status: 'AWAITING_MEDICATION' 
+        status: 'AWAITING_MEDICATION'
       });
 
-      alert("Success: Prescriptions generated and stock values adjusted.");
-      onTabSwitch('home'); 
+      alert("Chemotherapy regimen sent and tracked patient successfully advanced to Pharmacy Station.");
+      if (onTabSwitch) onTabSwitch('home');
     } catch (err) {
-      console.error("Submission error details:", err.response?.data);
-      const backendErrors = err.response?.data 
-        ? JSON.stringify(err.response.data) 
-        : "Verify network connection variables.";
-      alert("Pipeline failure: " + backendErrors);
-    } finally {
-      setIsSubmitting(false);
+      console.error(err);
+      alert("Error submitting oncology records chart registry.");
+    } finally { 
+      setIsSubmitting(false); 
     }
   };
-
-  return (
-    <div className="space-y-6 animate-in fade-in duration-500 font-['Inter'] pb-20 max-w-[1600px] mx-auto p-4">
       
-      {/* HEADER PATIENT SELECTION CONTAINER */}
-      <div className="bg-[#020617] border border-white/5 rounded-3xl p-6 shadow-xl text-white">
-        <div className="flex flex-col md:flex-row items-center gap-6 justify-between">
-          <div className="w-full md:w-1/2 flex items-center gap-3">
-            <div className="p-3 bg-blue-500/10 rounded-xl text-blue-400"><User size={20} /></div>
-            <div className="flex-1 relative">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Active Patient Context</label>
+  return (
+    <>
+      {/* INJECTED NATIVE CSS FOR PRINT CLEANUP */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @media print {
+          body, html, #root, .app-layout, main, .oncology-prescription-root {
+            background: white !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            width: 100% !important;
+          }
+          aside, nav, .no-print, header, .bg-white.p-4.flex.justify-between {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
+            overflow: hidden !important;
+          }
+          .bg-slate-50\\/50.border.border-slate-200\\/80 {
+            display: none !important;
+          }
+          .print-container {
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            width: 100% !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+          }
+          select, input, textarea {
+            background: transparent !important;
+            border: none !important;
+            appearance: none !important;
+            -webkit-appearance: none !important;
+          }
+        }
+      `}} />
+
+      <div className="space-y-6 max-w-[1650px] mx-auto p-6 font-['Roboto',_sans-serif] pb-24 text-slate-800 text-sm tracking-wide oncology-prescription-root">
+        
+        {/* GLOBAL ACTIONS AND DISPATCH HEADER ROW */}
+        <div className="bg-white p-4 flex justify-between items-center gap-4 no-print border border-slate-200 rounded-xl shadow-sm">
+          <div className="flex items-center gap-3 flex-1">
+            <div className="p-2 bg-slate-100 text-slate-600 rounded-lg">
+              {isLoadingClinicalData ? <Loader2 className="animate-spin text-blue-600" size={18} /> : <User size={18} />}
+            </div>
+            <div className="w-[400px] relative">
               <select 
-                className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 font-bold text-white text-xs outline-none focus:border-blue-500 appearance-none cursor-pointer"
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium text-slate-800 text-sm outline-none appearance-none cursor-pointer"
                 onChange={(e) => {
-                  const p = queue.find(item => item.id === parseInt(e.target.value));
-                  setSelectedPatient(p);
-                  setSelectedProtocolId('');
-                  setPrescriptions([]);
+                  const targetId = parseInt(e.target.value);
+                  const p = labReadyQueue.find(item => parseInt(item.id) === targetId);
+                  if (p) setSelectedPatient(p); 
                 }}
                 value={selectedPatient?.id || ''}
               >
-                <option value="" disabled>Choose active patient file...</option>
-                {queue.map(p => (
-                  <option key={p.id} value={p.id}>{p.patient_name} ({p.token_id || `ID: ${p.id}`})</option>
+                <option value="" disabled>-- Select Verified Patient Consultation Queue --</option>
+                {labReadyQueue.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.patient_name || `Record Reference ID: ${p.id}`} ({p.health_record_number || `Token: ${p.queue_token}`})
+                  </option>
                 ))}
               </select>
-              <ChevronDown className="absolute right-3 bottom-3.5 text-slate-400 pointer-events-none" size={14} />
+              <ChevronDown className="absolute right-3 top-3.5 text-slate-400 pointer-events-none" size={14} />
             </div>
-            <button type="button" onClick={fetchSystemData} className="p-3 hover:bg-white/5 rounded-xl transition-all mt-4">
-              <RefreshCcw size={16} className="text-slate-400" />
+            <button onClick={fetchOncologyData} className="p-2.5 hover:bg-slate-100 rounded-lg transition-all">
+              <RefreshCcw size={15} className="text-slate-400" />
             </button>
           </div>
           {selectedPatient && (
-            <div className="text-right">
-              <p className="text-xs text-slate-400 uppercase font-black tracking-widest">Active File Profile</p>
-              <h2 className="text-xl font-bold text-white">{selectedPatient.patient_name}</h2>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => window.print()} 
+                className="bg-slate-100 text-slate-700 font-bold text-xs uppercase tracking-wider px-5 py-2.5 rounded-lg hover:bg-slate-200 transition-all flex items-center gap-2 border border-slate-200 shadow-sm"
+              >
+                <Printer size={15} /> Download / Print Chart Sheet
+              </button>
+              <button 
+                onClick={handleSubmitPrescription} 
+                disabled={isSubmitting} 
+                className="bg-blue-600 text-white font-bold text-xs uppercase tracking-wider px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-all flex items-center gap-2 disabled:opacity-50 shadow-md active:scale-95"
+              >
+                {isSubmitting ? <Loader2 className="animate-spin" size={15}/> : <Send size={15}/>} Transmit to Pharmacy
+              </button>
             </div>
           )}
         </div>
-      </div>
 
-      {selectedPatient ? (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-          
-          {/* LEFT INTERACTIVE CONFIGURATION FORM CONTAINER */}
-          <div className="xl:col-span-5 space-y-6">
-            
-            {/* PROTOCOL MATCHER BLOCK */}
-            <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm">
-              <div className="flex items-center gap-2 mb-4">
-                <Calculator size={18} className="text-blue-600" />
-                <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider">Step 1: Select Treatment Protocol Blueprint</h3>
+        {/* VITALS BLOCKS */}
+        {selectedPatient && (
+          <div className="bg-slate-50/50 border border-slate-200/80 rounded-xl p-5 space-y-4 no-print">
+            <div className="flex justify-between items-center">
+              <h3 className="text-sm font-bold tracking-wide uppercase text-slate-500 flex items-center gap-2">
+                <Activity size={16} className="text-blue-500" /> Patient Vitals Metrics
+              </h3>
+              {calculatedBMI !== '---' && <span className="bg-emerald-50 text-emerald-700 font-bold px-3 py-1 rounded-full text-xs border border-emerald-100">BMI: {calculatedBMI}</span>}
+            </div>
+            <div className="grid grid-cols-5 gap-4">
+              <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Blood Pressure</span>
+                <span className="text-lg font-black text-slate-800">{isLoadingClinicalData ? '---' : `${getVitalVal('systolic_bp')}/${getVitalVal('diastolic_bp')}`}</span>
               </div>
-              
-              <div className="relative">
-                <select 
-                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 font-black text-slate-800 text-sm outline-none focus:border-blue-500 focus:bg-white appearance-none cursor-pointer"
-                  value={selectedProtocolId}
-                  onChange={(e) => handleProtocolChange(e.target.value)}
-                >
-                  <option value="">-- Manual Regimen Assembly (No Template) --</option>
-                  {protocols.map(proto => (
-                    <option key={proto.id} value={proto.id}>{proto.name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-4 bottom-4 text-slate-500 pointer-events-none" size={18} />
+              <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pulse Rate</span>
+                <span className="text-lg font-black text-slate-800">{isLoadingClinicalData ? '---' : getVitalVal('heart_rate')} <span className="text-xs text-slate-400 font-normal">bpm</span></span>
+              </div>
+              <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">BSA</span>
+                <span className="text-lg font-black text-blue-700">{isLoadingClinicalData ? '---' : getVitalVal('bsa')} <span className="text-xs font-normal text-slate-400">m²</span></span>
+              </div>
+              <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">SpO2</span>
+                <span className="text-lg font-black text-slate-800">{isLoadingClinicalData ? '---' : getVitalVal('spo2')} <span className="text-xs text-slate-400 font-normal">%</span></span>
+              </div>
+              <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Weight</span>
+                <span className="text-lg font-black text-slate-800">{isLoadingClinicalData ? '---' : getVitalVal('weight')} <span className="text-xs text-slate-400 font-normal">kg</span></span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CORE MEDICAL CLINICAL DIRECTORY RECORD CHART */}
+        {selectedPatient && (
+          <div ref={reportPrintRef} className="bg-white p-6 space-y-8 print-container text-slate-950 text-[13px] rounded-xl shadow-sm border border-slate-200">
+            
+            {/* DOSIMETRY LETTERHEAD HEADER */}
+            <div className="flex justify-between items-center pb-4 border-b border-slate-200">
+              <div className="flex items-center gap-4">
+                <img src={SalamaLogo} alt="Salama Cancer Centre" className="h-14 object-contain" />
+                <div>
+                  <h1 className="text-xl font-black text-slate-900 tracking-tight">SALAMA CANCER CENTRE</h1>
+                </div>
+              </div>
+              <div className="text-right text-xs text-slate-400 font-medium">
+                <span>Date: {new Date(patientMeta.date).toLocaleDateString()}</span>
               </div>
             </div>
 
-            {/* AD-HOC EXTRA MEDICINE BUILDER */}
-            <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-                <Pill size={18} className="text-slate-700" />
-                <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Step 2: Add Medication & Intake Details</h4>
+            {/* BASIC DEMOGRAPHICS ROW FIELDS */}
+            <div className="grid grid-cols-4 gap-x-6 gap-y-4">
+              <div className="flex items-center gap-2 col-span-2">
+                <span className="font-semibold text-slate-500 min-w-[60px]">Patient:</span>
+                <div className="w-full border-b border-slate-200 font-bold text-slate-900 pb-0.5 text-sm flex justify-between items-center">
+                  <span>{selectedPatient.patient_name || 'N/A'}</span>
+                  <span className="font-mono bg-slate-100 text-slate-600 font-bold text-xs px-2 py-0.5 rounded border border-slate-200">
+                    HRN: {selectedPatient.health_record_number || 'N/A'}
+                  </span>
+                </div>
               </div>
-              
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Select Drug from Inventory</label>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-500">Age:</span>
+                <span className="w-full border-b border-slate-200 font-bold text-slate-900 pb-0.5">{patientMeta.age}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-500">Sex:</span>
+                <span className="w-full border-b border-slate-200 font-bold text-slate-900 pb-0.5">{patientMeta.sex}</span>
+              </div>
+            </div>
+
+            {/* LAB METRICS BASELINES SNAPSHOT */}
+            <div className="space-y-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Lab Parameters Validation Index</span>
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <table className="w-full text-center divide-y divide-slate-200">
+                  <thead className="bg-slate-50 text-[11px] uppercase font-bold text-slate-500">
+                    <tr className="divide-x divide-slate-200">
+                      <th className="px-2 py-1.5 bg-slate-100/60" colSpan={4}>Complete Blood Count</th>
+                      <th className="px-2 py-1.5" colSpan={4}>Urea & Electrolytes</th>
+                      <th className="px-2 py-1.5 bg-slate-100/60" colSpan={4}>Liver Function Tests</th>
+                    </tr>
+                    <tr className="divide-x divide-slate-200 border-t border-slate-200 text-[10px]">
+                      <th className="px-1 py-1 text-blue-800 bg-blue-50/20">Hb</th>
+                      <th className="px-1 py-1">WBC</th>
+                      <th className="px-1 py-1">Neut</th>
+                      <th className="px-1 py-1">Plt</th>
+                      <th className="px-1 py-1 text-amber-800">Cr</th>
+                      <th className="px-1 py-1">Na</th>
+                      <th className="px-1 py-1">Urea</th>
+                      <th className="px-1 py-1">K</th>
+                      <th className="px-1 py-1 text-emerald-800 bg-emerald-50/20">AST</th>
+                      <th className="px-1 py-1">ALT</th>
+                      <th className="px-1 py-1">TBil</th>
+                      <th className="px-1 py-1">Alb</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-slate-200">
+                    <tr className="divide-x divide-slate-200 font-bold text-slate-900 text-sm">
+                      <td className="px-1 py-2 text-blue-800 bg-blue-50/5">{isLoadingClinicalData ? '---' : getLabParameterVal('cbc_hb')}</td>
+                      <td className="px-1 py-2">{isLoadingClinicalData ? '---' : getLabParameterVal('cbc_wbc')}</td>
+                      <td className="px-1 py-2">{isLoadingClinicalData ? '---' : getLabParameterVal('cbc_neut')}</td>
+                      <td className="px-1 py-2">{isLoadingClinicalData ? '---' : getLabParameterVal('cbc_plt')}</td>
+                      <td className="px-1 py-2 text-amber-800 bg-amber-50/5">{isLoadingClinicalData ? '---' : getLabParameterVal('ue_creatinine')}</td>
+                      <td className="px-1 py-2">{isLoadingClinicalData ? '---' : getLabParameterVal('ue_na')}</td>
+                      <td className="px-1 py-2">{isLoadingClinicalData ? '---' : getLabParameterVal('ue_urea')}</td>
+                      <td className="px-1 py-2">{isLoadingClinicalData ? '---' : getLabParameterVal('ue_k')}</td>
+                      <td className="px-1 py-2 text-emerald-800 bg-emerald-50/5">{isLoadingClinicalData ? '---' : getLabParameterVal('lft_ast')}</td>
+                      <td className="px-1 py-2">{isLoadingClinicalData ? '---' : getLabParameterVal('lft_alt')}</td>
+                      <td className="px-1 py-2">{isLoadingClinicalData ? '---' : getLabParameterVal('lft_tbil')}</td>
+                      <td className="px-1 py-2">{isLoadingClinicalData ? '---' : getLabParameterVal('lft_albumin')}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <hr className="border-slate-200" />
+
+            {/* DIAGNOSIS SNAPSHOTS & PROTOCOL ASSIGNMENT MANAGEMENT */}
+            <div className="bg-slate-50 border border-slate-200 p-5 rounded-xl space-y-5 no-print">
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block">Confirmed Patient Diagnosis Snapshot</label>
+                <div className="flex flex-wrap gap-2">
+                  {patientDiagnoses.length === 0 ? (
+                    <div className="text-xs text-slate-400 italic bg-white border border-dashed rounded-lg p-3 w-full">
+                      No active ICD10 diagnoses snapshots mapped on this encounter queue item.
+                    </div>
+                  ) : (
+                    patientDiagnoses.map((dx, index) => (
+                      <div key={index} className="bg-white border border-slate-200 rounded-lg p-3 flex flex-col gap-1 shadow-sm w-full">
+                        <div className="flex items-center gap-2">
+                          <span className="bg-blue-600 text-white font-mono font-bold text-xs px-2 py-0.5 rounded uppercase">
+                            {dx.icd10_code}
+                          </span>
+                          <span className="font-bold text-slate-800 text-sm">{dx.description}</span>
+                        </div>
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mt-1">
+                          Anatomical Site Code: <span className="text-slate-600">{dx.primary_site || 'Unassigned'}</span>
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* UNIFIED SCHEMA PROTOCOL MANAGEMENT FIELD */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-blue-600 block">Select Protocol</label>
                 <div className="relative">
                   <select
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800 outline-none appearance-none cursor-pointer"
-                    value={manualDrug.drug_id}
-                    onChange={(e) => handleSelectDrugItem(e.target.value)}
+                    className="w-full bg-white border border-slate-300 text-slate-800 rounded-lg p-2.5 font-bold text-xs uppercase tracking-wider outline-none appearance-none cursor-pointer shadow-sm focus:ring-2 focus:ring-blue-500"
+                    value={selectedProtocolId}
+                    onChange={(e) => handleProtocolTemplateSelected(e.target.value)}
                   >
-                    <option value="">-- Choose matching item registry entry --</option>
-                    {drugsMasterList.map(drug => {
-                      const stock = drug.stock_quantity ?? drug.quantity_in_stock ?? 0;
-                      return (
-                        <option key={drug.id} value={drug.id} disabled={stock <= 0}>
-                          {drug.name} (Qty Available: {stock} | Form: {drug.dosage_form})
-                        </option>
-                      );
-                    })}
+                    <option value=""></option>
+                    {protocolsList.map(proto => (
+                      <option key={proto.id} value={proto.id}>{proto.name} ({proto.cycle_duration_days} Days Cycle)</option>
+                    ))}
                   </select>
-                  <ChevronDown className="absolute right-3 top-3.5 text-slate-500 pointer-events-none" size={14} />
+                  <ChevronDown className="absolute right-3 top-3.5 text-slate-500 pointer-events-none" size={13} />
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Medication Formulation Name</label>
-                <input 
-                  type="text"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium outline-none focus:bg-white" 
-                  placeholder="e.g., Cisplatin Infusion"
-                  value={manualDrug.medication_name}
-                  onChange={(e) => setManualDrug({...manualDrug, medication_name: e.target.value})}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Amount / Quantity Issued</label>
-                  <input 
-                    type="text" 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium outline-none" 
-                    placeholder="e.g., 50 mg or 2 Tablets"
-                    value={manualDrug.dosage}
-                    onChange={(e) => setManualDrug({...manualDrug, dosage: e.target.value})}
-                  />
+              {/* CYCLE TRACKING META INPUTFIELDS */}
+              {selectedProtocolId && (
+                <div className="grid grid-cols-4 gap-4 p-3 bg-white border border-slate-100 rounded-xl shadow-inner animate-fade-in text-xs font-semibold">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 uppercase">Assigned:</span>
+                    <span className="font-bold text-blue-700 uppercase">{patientMeta.protocol}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 uppercase">Cycle No:</span>
+                    <input type="number" className="w-16 border rounded p-1 font-bold text-center outline-none bg-slate-50" value={patientMeta.cycleNo} onChange={(e) => setPatientMeta({...patientMeta, cycleNo: e.target.value})} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 uppercase">Total Cycles:</span>
+                    <input type="number" className="w-16 border rounded p-1 font-bold text-center outline-none bg-slate-50" value={patientMeta.totalCycles} onChange={(e) => setPatientMeta({...patientMeta, totalCycles: e.target.value})} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 uppercase">Allergies:</span>
+                    <input type="text" className="w-full border rounded p-1 text-slate-800 outline-none placeholder:font-normal bg-slate-50" value={patientMeta.allergies} onChange={(e) => setPatientMeta({...patientMeta, allergies: e.target.value})} placeholder="None noted" />
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Intake Mode (Route)</label>
-                  <select 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-700 outline-none"
-                    value={manualDrug.route}
-                    onChange={(e) => setManualDrug({...manualDrug, route: e.target.value})}
-                  >
-                    {routes.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Frequency</label>
-                  <select 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-700 outline-none"
-                    value={manualDrug.frequency}
-                    onChange={(e) => setManualDrug({...manualDrug, frequency: e.target.value})}
-                  >
-                    {frequencies.map(f => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Duration</label>
-                  <select 
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-700 outline-none"
-                    value={manualDrug.duration}
-                    onChange={(e) => setManualDrug({...manualDrug, duration: e.target.value})}
-                  >
-                    {durations.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <button 
-                type="button"
-                onClick={addManualDrug}
-                className="w-full bg-slate-900 text-white py-3 rounded-xl font-black uppercase tracking-wider text-[10px] hover:bg-blue-600 transition-all flex items-center justify-center gap-2"
-              >
-                <Plus size={14}/> Inject Medication Into Queue
-              </button>
+              )}
             </div>
 
-            {/* CLINICAL REMARKS */}
-            <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm space-y-2">
-              <div className="flex items-center gap-2">
-                <FileText size={16} className="text-slate-700" />
-                <label className="text-xs font-black text-slate-900 uppercase tracking-wider">Step 3: Protocol Remarks</label>
+            {/* SECTION 1: PRE-CHEMO MEDICATIONS */}
+            <div className="space-y-3">
+              <h2 className="text-sm font-black uppercase tracking-tight text-slate-700 border-b border-slate-200 pb-1 flex items-center gap-2">
+                <span>1. Pre-Chemotherapy Medications & Hydration Orders</span>
+              </h2>
+              <div className="grid grid-cols-4 gap-4 py-1">
+                {preChemoOrders.map(item => (
+                  <label key={item.id} className="flex items-center gap-3 py-1 select-none cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 no-print"
+                      checked={item.checked}
+                      onChange={(e) => setPreChemoOrders(prev => prev.map(o => o.id === item.id ? { ...o, checked: e.target.checked } : o))}
+                    />
+                    <span className="font-medium text-slate-700">{item.name}</span>
+                  </label>
+                ))}
               </div>
+            </div>
+
+            {/* SECTION 2: CHEMOTHERAPY REGIMEN FORM */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center border-b border-slate-200 pb-1">
+                <h2 className="text-sm font-black uppercase tracking-tight text-slate-700">
+                  2. Chemotherapy Orders
+                </h2>
+                <button 
+                  onClick={addChemoRow}
+                  className="no-print bg-slate-900 text-white font-bold text-[11px] uppercase tracking-wider px-3 py-1 rounded hover:bg-slate-800 transition-all flex items-center gap-1.5"
+                >
+                  <Plus size={12} /> Add Agent Row
+                </button>
+              </div>
+
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <table className="w-full text-left text-xs divide-y divide-slate-200">
+                  <thead className="bg-slate-50 font-bold uppercase text-slate-500 text-[10px]">
+                    <tr className="divide-x divide-slate-200 text-center">
+                      <th className="px-3 py-2 text-left w-[240px]">Medication</th>
+                      <th className="px-2 py-2 w-[120px]">Calculation Factor</th>
+                      <th className="px-2 py-2 w-[100px]">Base Dosage Value</th>
+                      <th className="px-3 py-2 bg-blue-50 text-blue-800 w-[140px]">Total Dose</th>
+                      <th className="px-2 py-2 w-[110px]">Route</th>
+                      <th className="px-2 py-2 w-[100px]">Diluent</th>
+                      <th className="px-2 py-2 w-[100px]">Volume (ml)</th>
+                      <th className="px-2 py-2 w-[100px]">Duration</th>
+                      <th className="px-1 py-2 no-print w-[40px]"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-slate-200">
+                    {chemoRows.map(row => (
+                      <tr key={row.id} className="divide-x divide-slate-200">
+                        <td className="p-1">
+                          <select
+                            className="w-full bg-slate-50 p-1.5 font-semibold text-slate-800 outline-none rounded"
+                            value={row.drug_id}
+                            onChange={(e) => handleChemoRowChange(row.id, 'drug_id', e.target.value)}
+                          >
+                            <option value="">-- Select Active Drug --</option>
+                            {drugsMasterList.map(d => (
+                              <option key={d.id} value={d.id}>{d.name} ({d.available_stock ?? 0} In Stock)</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="p-1">
+                          <select
+                            className="w-full bg-white p-1.5 font-medium text-slate-700 outline-none rounded border border-slate-100"
+                            value={row.calc_factor}
+                            onChange={(e) => handleChemoRowChange(row.id, 'calc_factor', e.target.value)}
+                          >
+                            {calculationFactors.map(f => <option key={f} value={f}>{f}</option>)}
+                          </select>
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            className="w-full p-1.5 font-mono text-center font-bold text-slate-800 outline-none border border-slate-100 rounded bg-slate-50/40"
+                            value={row.factor_value}
+                            onChange={(e) => handleChemoRowChange(row.id, 'factor_value', e.target.value)}
+                            placeholder="0.0"
+                          />
+                        </td>
+                        <td className="p-1.5 bg-blue-50/40 text-center font-black text-blue-900 text-sm">
+                          {row.calculated_dose || '---'}
+                        </td>
+                        <td className="p-1">
+                          <select
+                            className="w-full bg-white p-1.5 font-medium outline-none rounded border border-slate-100"
+                            value={row.route}
+                            onChange={(e) => handleChemoRowChange(row.id, 'route', e.target.value)}
+                          >
+                            {commonRoutes.map(r => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </td>
+                        <td className="p-1">
+                          <select
+                            className="w-full bg-white p-1.5 font-medium outline-none rounded border border-slate-100"
+                            value={row.diluent}
+                            onChange={(e) => handleChemoRowChange(row.id, 'diluent', e.target.value)}
+                          >
+                            {diluents.map(d => <option key={d} value={d}>{d}</option>)}
+                          </select>
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            className="w-full p-1.5 text-center outline-none border border-slate-100 rounded"
+                            value={row.volume}
+                            onChange={(e) => handleChemoRowChange(row.id, 'volume', e.target.value)}
+                          />
+                        </td>
+                        <td className="p-1">
+                          <input
+                            type="text"
+                            className="w-full p-1.5 text-center outline-none border border-slate-100 rounded"
+                            value={row.duration}
+                            onChange={(e) => handleChemoRowChange(row.id, 'duration', e.target.value)}
+                          />
+                        </td>
+                        <td className="p-1 text-center no-print">
+                          <button 
+                            onClick={() => removeChemoRow(row.id)}
+                            disabled={chemoRows.length === 1}
+                            className="text-slate-300 hover:text-rose-600 transition-colors disabled:opacity-30"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* DOSE ADJUSTMENT CLINICAL NOTES */}
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Dose Adjustments / Clinical Toxicity Modification Justifications</span>
               <textarea
-                className="w-full border border-slate-200 rounded-2xl p-4 bg-slate-50 font-medium text-xs text-slate-800 outline-none focus:bg-white focus:border-blue-500 transition-all resize-none"
-                rows="3"
-                placeholder="Document clinical reasons for special modifications or instructions..."
-                value={clinicalNotes}
-                onChange={(e) => setClinicalNotes(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg p-3 outline-none font-medium text-slate-800 placeholder:font-normal placeholder:text-slate-300 text-xs min-h-[70px] bg-slate-50/30"
+                value={doseAdjustmentNotes}
+                onChange={(e) => setDoseAdjustmentNotes(e.target.value)}
+                placeholder="Specify rationale metrics if dose holds, modifications, or calculations deviate from standardized templates..."
               />
             </div>
 
-          </div>
-
-          {/* RIGHT LIVE COMPILING VIEW */}
-          <div className="xl:col-span-7 space-y-6">
-            <div className="bg-[#020617] rounded-[2.5rem] p-8 shadow-2xl min-h-[500px] border border-white/5 flex flex-col justify-between">
-              
-              <div>
-                <div className="flex justify-between items-start border-b border-white/10 pb-6 mb-6">
-                  <div>
-                    <span className="text-xs font-black text-blue-400 uppercase tracking-[0.2em] block mb-1">Prescription Items Summary</span>
-                    <h4 className="text-white font-bold text-sm">Patient Context: {selectedPatient.patient_name}</h4>
-                  </div>
-                  <span className="text-[10px] font-mono font-bold bg-slate-900 border border-white/10 text-amber-400 px-3 py-1 rounded-lg uppercase">
-                    {selectedProtocolId ? protocols.find(p => p.id === parseInt(selectedProtocolId))?.name : "MANUAL BUILD"}
-                  </span>
-                </div>
-
-                {prescriptions.length === 0 ? (
-                  <div className="text-center py-24 opacity-25 border border-dashed border-white/20 rounded-2xl my-4">
-                    <Pill size={48} className="mx-auto text-white mb-3" />
-                    <p className="text-white text-xs font-black uppercase tracking-widest">No Active Medications Added</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4 max-h-[400px] overflow-y-auto pr-1">
-                    {prescriptions.map((drug) => (
-                      <div key={drug.id} className={`border p-5 rounded-2xl flex flex-col gap-3 bg-white/5 ${!drug.drug_id ? 'border-amber-500/40 bg-amber-500/5' : 'border-white/10'}`}>
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center gap-4 flex-1">
-                            <div className={`p-3 rounded-xl ${!drug.drug_id ? 'bg-amber-500/10 text-amber-400' : 'bg-blue-500/10 text-blue-400'}`}>
-                              <Pill size={18}/>
-                            </div>
-                            <div className="flex-1">
-                              <p className="text-white font-black text-base tracking-tight uppercase">{drug.medication_name}</p>
-                              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] font-medium text-slate-400 mt-0.5">
-                                <span className="text-white bg-slate-900 px-1.5 py-0.5 rounded font-mono font-bold text-amber-400">{drug.dosage}</span>
-                                <span>• Route: {drug.route}</span>
-                                <span>• {drug.frequency}</span>
-                                <span>• {drug.duration}</span>
-                              </div>
-                            </div>
-                          </div>
-                          <button type="button" onClick={() => removeDrug(drug.id)} className="p-2 text-slate-500 hover:text-rose-400 transition-colors">
-                            <Trash2 size={16}/>
-                          </button>
-                        </div>
-
-                        {/* INLINE LINK FALLBACK PANEL */}
-                        {!drug.drug_id && (
-                          <div className="bg-slate-900/80 border border-amber-500/20 p-3 rounded-xl flex flex-col gap-1.5">
-                            <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-400">
-                              <AlertTriangle size={13} /> Unbound blueprint medication. Link item to inventory:
-                            </div>
-                            <div className="relative">
-                              <select 
-                                className="w-full bg-slate-950 border border-white/10 rounded-lg p-2 text-[11px] font-bold text-slate-300 outline-none appearance-none"
-                                onChange={(e) => handleInlineItemLink(drug.id, e.target.value)}
-                                defaultValue=""
-                              >
-                                <option value="" disabled>-- Select dynamic stock link item --</option>
-                                {drugsMasterList.map(dm => (
-                                  <option key={dm.id} value={dm.id}>{dm.name} (Available: {dm.stock_quantity ?? dm.quantity_in_stock ?? 0})</option>
-                                ))}
-                              </select>
-                              <ChevronDown className="absolute right-2.5 top-2.5 text-slate-400 pointer-events-none" size={12} />
-                            </div>
-                          </div>
-                        )}
-
-                        {drug.instructions && (
-                          <p className="text-[11px] text-slate-400 bg-black/25 p-2 rounded-xl italic">
-                            {drug.instructions}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
+            {/* SECTION 3: POST-CHEMO TAKE HOME ORDERS */}
+            <div className="space-y-3">
+              <h2 className="text-sm font-black uppercase tracking-tight text-slate-700 border-b border-slate-200 pb-1 flex items-center gap-2">
+                <span>3. Post-Chemotherapy Medications</span>
+              </h2>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2 py-1">
+                {postChemoOrders.map(item => (
+                  <label key={item.id} className="flex items-center gap-3 py-1 select-none cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 no-print"
+                      checked={item.checked}
+                      onChange={(e) => setPostChemoOrders(prev => prev.map(o => o.id === item.id ? { ...o, checked: e.target.checked } : o))}
+                    />
+                    <span className="font-medium text-slate-700">{item.name}</span>
+                  </label>
+                ))}
               </div>
-
-              {prescriptions.length > 0 && (
-                <div className="grid grid-cols-2 gap-4 mt-8 pt-4 border-t border-white/10">
-                  <button type="button" className="bg-white/5 text-white py-4 rounded-xl font-black uppercase tracking-widest text-[10px] border border-white/10 hover:bg-white/10 transition-all">
-                    Hold Draft Payload
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={handleSendToPharmacy}
-                    disabled={isSubmitting}
-                    className="bg-blue-600 text-white py-4 rounded-xl font-black uppercase tracking-widest text-[10px] hover:bg-blue-500 transition-all flex items-center justify-center gap-2 shadow-xl disabled:opacity-50"
-                  >
-                    {isSubmitting ? <Loader2 className="animate-spin" size={14}/> : <Send size={14}/>}
-                    Transmit Order Package
-                  </button>
-                </div>
-              )}
-
             </div>
-          </div>
 
-        </div>
-      ) : (
-        <div className="bg-white border border-dashed border-slate-200 rounded-[2.5rem] p-24 text-center shadow-sm">
-          <Pill size={48} className="mx-auto text-slate-200 mb-4 animate-pulse" />
-          <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] italic">Please select a patient profile from the drop-down menu above to start crafting the prescription package.</p>
-        </div>
-      )}
-    </div>
+            {/* SIGNATURE SECTION LOGS FOOTER */}
+            <div className="grid grid-cols-2 gap-12 pt-16 text-xs text-slate-400 font-medium">
+              <div className="space-y-4">
+                <div className="border-b border-slate-300 h-6 w-full"></div>
+                <span>Prescribing Consultant Oncologist Signature / Timestamp</span>
+              </div>
+              <div className="space-y-4">
+                <div className="border-b border-slate-300 h-6 w-full"></div>
+                <span>Oncology Nurse Reviewer Verification Signature</span>
+              </div>
+            </div>
+
+          </div>
+        )}
+      </div>
+    </>
   );
 };
 

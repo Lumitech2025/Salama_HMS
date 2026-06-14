@@ -213,13 +213,13 @@ const PharmacyInventory = ({ setActiveTab }) => {
             <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic flex items-center gap-3">
                 <Store className="text-teal-600" size={32} /> Pharmacy Shop Floor
             </h2>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">Dispensing Point Ledger Matrix</p>
+            
         </div>
         <button 
           onClick={() => { resetAddForm(); setShowAddModal(true); }}
           className="bg-[#020617] text-white px-8 py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest flex items-center gap-3 hover:bg-teal-600 transition-all shadow-xl"
         >
-          <PlusCircle size={18} /> Add Shop Stock
+          <PlusCircle size={18} /> Add Drug
         </button>
       </div>
 
@@ -229,14 +229,14 @@ const PharmacyInventory = ({ setActiveTab }) => {
           <div className="p-4 rounded-xl bg-red-50 text-red-600 border border-red-100"><TrendingDown size={24}/></div>
           <div>
             <h4 className="text-2xl font-black text-slate-900 font-mono">{String(lowStockCount).padStart(2, '0')}</h4>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Threshold Breach Alerts</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Quantity Alerts</p>
           </div>
         </div>
         <div className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-sm flex items-center gap-5">
           <div className="p-4 rounded-xl bg-teal-50 text-teal-600 border border-teal-100"><Package size={24}/></div>
           <div>
             <h4 className="text-2xl font-black text-slate-900 font-mono">Ksh {(filteredInventory.reduce((acc, curr) => acc + (parseFloat(curr.selling_price_kes || 0) * parseInt(curr.stock_quantity || 0)), 0)).toLocaleString()}</h4>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Shop Floor Value (Retail)</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Shop Value</p>
           </div>
         </div>
       </div>

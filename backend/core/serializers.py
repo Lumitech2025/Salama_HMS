@@ -51,24 +51,7 @@ class SalamaTokenObtainPairSerializer(TokenObtainPairSerializer):
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. WORKFLOW & QUEUE SERIALIZERS
 # ─────────────────────────────────────────────────────────────────────────────
-class QueueSerializer(serializers.ModelSerializer):
-    patient_name = serializers.CharField(source='patient.name', read_only=True)
-    patient_id_no = serializers.ReadOnlyField(source='patient.registry_no')
-    visit_id = serializers.PrimaryKeyRelatedField(source='visit', read_only=True)
-    station_display = serializers.CharField(source='get_current_station_display', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    wait_time = serializers.ReadOnlyField()
 
-    health_record_number = serializers.ReadOnlyField(source='visit.health_record_number')
-    is_urgent = serializers.BooleanField(source='visit.is_urgent', read_only=True, default=False)
-    
-    class Meta:
-        model = Queue
-        fields = [
-            'id', 'token_id', 'patient', 'patient_name', 'health_record_number','patient_id_no', 
-            'current_station', 'status', 'priority', 'entered_at', 'wait_time',
-            'is_urgent', 'visit_id','status_display', 'station_display'
-        ]
 
 class AppointmentSerializer(serializers.ModelSerializer):
     patient_name = serializers.SerializerMethodField()
@@ -221,6 +204,7 @@ class RegistrationRecordSerializer(serializers.ModelSerializer):
             registration.refresh_from_db()
             return registration
 
+
 class RegistrationAnalyticsSerializer(serializers.Serializer):
     total_patients = serializers.IntegerField()
     todays_registrations = serializers.IntegerField()
@@ -230,24 +214,45 @@ class RegistrationAnalyticsSerializer(serializers.Serializer):
     age_groups = serializers.DictField()
     insurance_distribution = serializers.DictField()
 
+class QueueSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(source='patient.name', read_only=True)
+    patient_id_no = serializers.ReadOnlyField(source='patient.registry_no')
+    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
+    patient_age = serializers.IntegerField(source='visit.age', read_only=True)
+    visit_id = serializers.PrimaryKeyRelatedField(source='visit', read_only=True)
+    station_display = serializers.CharField(source='get_current_station_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    wait_time = serializers.ReadOnlyField()
+
+    health_record_number = serializers.ReadOnlyField(source='visit.health_record_number')
+    is_urgent = serializers.BooleanField(source='visit.is_urgent', read_only=True, default=False)
+    
+    class Meta:
+        model = Queue
+        fields = [
+            'id', 'token_id', 'patient', 'patient_name', 'patient_age', 'patient_gender','health_record_number','patient_id_no', 
+            'current_station', 'status', 'priority', 'entered_at', 'wait_time',
+            'is_urgent', 'visit_id','status_display', 'station_display'
+        ]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. CLINICAL EMR
 # ─────────────────────────────────────────────────────────────────────────────
 class VitalSignSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.name', read_only=True)
     patient_gender = serializers.CharField(source='patient.gender', read_only=True)
-    
-    # Grab Age & HRN safely via the active RegistrationRecord instance linked to 'visit'
     patient_age = serializers.IntegerField(source='visit.age', read_only=True)
     health_record_number = serializers.CharField(source='visit.health_record_number', read_only=True)
+
+    # Explicitly declare the model properties as read-only fields
     bmi = serializers.ReadOnlyField()
     bsa = serializers.ReadOnlyField()
 
     class Meta:
         model = VitalSign
         fields = [
-            'id', 'patient', 'visit', 'queue_entry', 'patient_name', 'patient_gender', 'patient_age', 
-            'health_record_number',
+            'id', 'patient', 'patient_name', 'patient_gender', 'patient_age', 
+            'health_record_number', 'visit', 'queue_entry', 
             'temperature', 'systolic_bp', 'diastolic_bp', 
             'heart_rate', 'respiratory_rate', 'weight', 'height', 'spo2',
             'bmi', 'bsa', 'created_at'
@@ -278,7 +283,6 @@ class PatientSerializer(serializers.ModelSerializer):
     class Meta:
         model = Patient
         fields = '__all__'
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. PHARMACY, LAB & BILLING
 # ─────────────────────────────────────────────────────────────────────────────
@@ -292,92 +296,145 @@ class DrugSerializer(serializers.ModelSerializer):
         return f"Ksh {obj.selling_price_kes:,.2f}"
 
 class PrescriptionItemSerializer(serializers.ModelSerializer):
+    selling_price_kes = serializers.DecimalField(source='drug.selling_price_kes', max_digits=10, decimal_places=2, read_only=True)
+    available_stock = serializers.IntegerField(source='drug.stock_quantity', read_only=True)
+    dosage_form = serializers.CharField(source='drug.get_dosage_form_display', read_only=True)
+
     class Meta:
         model = PrescriptionItem
         fields = [
-            'id', 'drug_id', 'medication_name', 'dosage', 
-            'frequency', 'duration', 'route', 'instructions'
+            'id', 'stage', 'drug', 'medication_name', 'dosage', 
+            'calc_factor', 'factor_value', 'route', 'diluent', 
+            'volume', 'duration', 'selling_price_kes', 'available_stock', 'dosage_form'
         ]
+
 
 class PrescriptionSerializer(serializers.ModelSerializer):
-    # ⚡ Defined right above, so it resolves perfectly now!
-    items = PrescriptionItemSerializer(many=True)
-    
-    visit = serializers.PrimaryKeyRelatedField(
-        queryset=RegistrationRecord.objects.all(),
-        required=False,
-        allow_null=True
-    )
-    patient = serializers.PrimaryKeyRelatedField(queryset=Patient.objects.all())
+    items = PrescriptionItemSerializer(many=True, read_only=True)
 
-    class Meta:
-        model = Prescription
-        # ⚡ Standardized strictly to 'notes' to match your models.py attributes
-        fields = [
-            'id', 'patient', 'visit', 'protocol', 'prescribed_by', 
-            'status', 'notes', 'items', 'created_at', 'updated_at'
-        ]
-
-    def create(self, validated_data):
-        items_data = validated_data.pop('items', [])
-        request = self.context.get('request')
-        
-        # Auto-assign the active doctor session if not passed explicitly by the payload
-        if request and request.user and request.user.is_authenticated and not validated_data.get('prescribed_by'):
-            validated_data['prescribed_by'] = request.user
-
-        with transaction.atomic():
-            prescription = Prescription.objects.create(**validated_data)
-            
-            for item in items_data:
-                drug_id_val = item.get('drug_id')
-                dosage_str = item.get('dosage', '')
-                
-                if drug_id_val:
-                    # Parse out deduction quantities (e.g., "50 mg" -> 50)
-                    match = re.search(r'\d+', dosage_str)
-                    deduction_qty = int(match.group()) if match else 1
-                    
-                    # Row-locking query block to guarantee thread safety
-                    try:
-                        locked_drug = Drug.objects.select_for_update().get(id=drug_id_val)
-                    except Drug.DoesNotExist:
-                        raise serializers.ValidationError({
-                            "items": f"The drug record with ID {drug_id_val} no longer exists in inventory."
-                        })
-                    
-                    available_stock = getattr(locked_drug, 'stock_quantity', getattr(locked_drug, 'quantity_in_stock', 0))
-                    stock_field_name = 'stock_quantity' if hasattr(locked_drug, 'stock_quantity') else 'quantity_in_stock'
-                    
-                    if available_stock >= deduction_qty:
-                        setattr(locked_drug, stock_field_name, available_stock - deduction_qty)
-                        locked_drug.save()
-                    else:
-                        raise serializers.ValidationError({
-                            "items": f"Insufficient stock for {locked_drug.name}. Available: {available_stock}."
-                        })
-                
-                # Creates the child PrescriptionItem instance safely bound to its parent container
-                PrescriptionItem.objects.create(prescription=prescription, **item)
-                
-        return prescription
-
-class LabResultSerializer(serializers.ModelSerializer):
-    test_name_display = serializers.CharField(source='get_test_name_display', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    # Patient Profile / Demographics mappings
     patient_name = serializers.CharField(source='patient.name', read_only=True)
     patient_gender = serializers.CharField(source='patient.gender', read_only=True)
     patient_age = serializers.IntegerField(source='visit.age', read_only=True)
     health_record_number = serializers.CharField(source='visit.health_record_number', read_only=True)
+    queue_token = serializers.CharField(source='visit.token_id', read_only=True)
+
+    # Dynamic system clinical state snapshots
+    vitals_snapshot = serializers.SerializerMethodField()
+    diagnosis_snapshot = serializers.SerializerMethodField()
+    lab_results_snapshot = serializers.SerializerMethodField()
 
     class Meta:
+        model = Prescription
+        fields = [
+            'id', 'patient', 'patient_name', 'patient_gender', 'patient_age', 
+            'health_record_number', 'queue_token', 'visit', 'protocol', 
+            'cycle_no', 'total_cycles', 'diagnosis', 'allergies', 
+            'dose_adjustment_notes', 'prescribed_by', 'pharmacy_status', 
+            'vitals_snapshot', 'diagnosis_snapshot', 'lab_results_snapshot', 
+            'items', 'treatment_date'
+        ]
+
+    def _get_clinical_encounter(self, obj):
+        """Helper to resolve the underlying clinical encounter object."""
+        return obj.visit.visit if (obj.visit and hasattr(obj.visit, 'visit')) else None
+
+    def get_vitals_snapshot(self, obj):
+        encounter = self._get_clinical_encounter(obj)
+        if encounter:
+            latest_vital = encounter.vitals.all()[0] if encounter.vitals.exists() else None
+            if latest_vital:
+                return {
+                    "temperature": latest_vital.temperature,
+                    "blood_pressure": f"{latest_vital.systolic_bp}/{latest_vital.diastolic_bp}",
+                    "heart_rate": latest_vital.heart_rate,
+                    "weight_kg": latest_vital.weight,
+                    "height_cm": latest_vital.height,
+                    "bmi": latest_vital.bmi,
+                    "bsa": latest_vital.bsa,
+                    "spo2": latest_vital.spo2
+                }
+        return None
+
+    def get_diagnosis_snapshot(self, obj):
+        """
+        Exposes both raw values and display labels so your UI code
+        can instantly run site-based protocol logic.
+        """
+        encounter = self._get_clinical_encounter(obj)
+        if encounter:
+            diagnoses = getattr(encounter, 'diagnoses_cache', None)
+            if diagnoses is None:
+                diagnoses = encounter.diagnoses.all()
+            
+            return [
+                {
+                    # 💡 'BREAST' - matches the exact string required by your protocol models
+                    "primary_site": d.primary_site,
+                    # 💡 'Breast' - readable text for the UI components
+                    "primary_site_display": d.get_primary_site_display(),
+                    "icd10_code": d.icd10_code,
+                    "description": d.icd10_description,
+                    "recorded_at": d.created_at.strftime('%Y-%m-%d %H:%M')
+                } for d in diagnoses
+            ]
+        return []
+
+    def get_lab_results_snapshot(self, obj):
+        encounter = self._get_clinical_encounter(obj)
+        if not encounter:
+            return {}
+
+        completed_results = [
+            res for res in encounter.lab_orders.all() 
+            if getattr(res, 'status', None) == 'COMPLETED'
+        ]
+        
+        PANEL_MAPPINGS = {
+            'CBC': {"Hb": "cbc_hb", "WBC": "cbc_wbc", "ANC (Neut)": "cbc_neut", "Plt": "cbc_plt", "MCV": "cbc_mcv"},
+            'UE': {"Sodium": "ue_na", "Potassium": "ue_k", "Urea": "ue_urea", "Creatinine": "ue_creatinine"},
+            'LFT': {"ALT": "lft_alt", "AST": "lft_ast", "Total Bilirubin": "lft_tbil", "Albumin": "lft_albumin", "ALP": "lft_alp"},
+            'PSA': {"Total PSA": "psa_total"}
+        }
+
+        labs_dict = {}
+        for res in completed_results:
+            panel_key = res.test_name
+            if panel_key in PANEL_MAPPINGS:
+                metrics = {
+                    label: getattr(res, field_attr, None)
+                    for label, field_attr in PANEL_MAPPINGS[panel_key].items()
+                }
+                
+                labs_dict[res.get_test_name_display()] = {
+                    "panel_code": panel_key,
+                    "is_critical": res.is_critical,
+                    "parameters": metrics,
+                    "technician_notes": res.technician_notes,
+                    "verified_at": res.updated_at.strftime('%Y-%m-%d')
+                }
+        return labs_dict
+    
+class LabResultSerializer(serializers.ModelSerializer):
+    test_name_display = serializers.CharField(source='get_test_name_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    
+    patient_name = serializers.CharField(source='patient.name', read_only=True)
+    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
+    patient_age = serializers.IntegerField(source='visit.age', read_only=True)
+    health_record_number = serializers.CharField(source='visit.health_record_number', read_only=True)
+    class Meta:
         model = LabResult
-        fields = '__all__'
+        fields = '__all__' 
 
 class LabOrderSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.name', read_only=True)
     requested_tests = serializers.SerializerMethodField()
     token_id = serializers.SerializerMethodField()
+
+    patient_gender = serializers.CharField(source='patient.gender', read_only=True)
+    patient_age = serializers.IntegerField(source='visit.age', read_only=True)
+    health_record_number = serializers.CharField(source='visit.health_record_number', read_only=True)
 
     # Explicitly catch frontend tracking metrics safely
     test_skus = serializers.ListField(
@@ -393,10 +450,10 @@ class LabOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = LabOrder
         fields = [
-            'id', 'patient', 'patient_name', 'visit', 'status', 'doctor_notes',
+            'id', 'patient', 'patient_name', 'patient_gender', 'health_record_number','visit', 'status', 'doctor_notes',
             'has_cbc', 'has_ue', 'has_lft', 'has_psa', 'has_urine', 
             'has_bg_cross', 'has_bs_mp', 'created_at',
-            'requested_tests', 'token_id',  # Included custom evaluation hooks
+            'requested_tests', 'token_id',  'patient_age',
             'test_skus', 'total_estimated_charge'
         ]
         extra_kwargs = {
@@ -846,34 +903,61 @@ class StockAdjustmentSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ProtocolIngredientSerializer(serializers.ModelSerializer):
+    pharmacy_drug_id = serializers.SerializerMethodField()
+    in_stock = serializers.SerializerMethodField()
+
     class Meta:
         model = ProtocolIngredient
-        exclude = ['protocol']
+        fields = [
+            'id', 'medication_name', 'base_dosage', 
+            'dosage_unit', 'route_of_administration', 
+            'pharmacy_drug_id', 'in_stock'
+        ]
+
+        extra_kwargs = {
+            'protocol': {'required': False, 'allow_null': True}
+        }
+
+    def _get_cached_drug(self, obj):
+        """Optimizes runtime operations by keeping data execution down to 1 hit per row"""
+        if not hasattr(obj, '_cached_drug'):
+            obj._cached_drug = Drug.objects.filter(name__icontains=obj.medication_name).first()
+        return obj._cached_drug
+
+    def get_pharmacy_drug_id(self, obj):
+        drug = self._get_cached_drug(obj)
+        return drug.id if drug else None
+
+    def get_in_stock(self, obj):
+        drug = self._get_cached_drug(obj)
+        return drug.stock_quantity if drug else 0
+
+
+class ProtocolDetailSerializer(serializers.ModelSerializer):
+    """Used specifically for read-only detail viewports"""
+    components = ProtocolIngredientSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Protocol
+        fields = [
+            'id', 'name', 'description', 'total_cycles', 
+            'cycle_duration_days', 'components'
+        ]
 
 
 class ProtocolSerializer(serializers.ModelSerializer):
-    # Bind the nested array directly to the model relationship
-    components = ProtocolIngredientSerializer(many=True, required=False, default=list)
-    
-    # Declare JSON field defaults explicitly so DRF doesn't treat them as blank text
+    """The master configuration engine processing complete write procedures"""
+    components = ProtocolIngredientSerializer(many=True, required=False)
     applicable_stages = serializers.JSONField(required=False, default=list)
     total_cost_per_cycle = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0.00)
     regimen_template_id = serializers.IntegerField(required=False, allow_null=True)
 
     class Meta:
         model = Protocol
-        # Match your model fields and frontend payload keys 1:1
         fields = [
-            'id', 
-            'name', 
-            'description', 
-            'total_cycles', 
-            'cycle_duration_days', 
-            'primary_site_id', 
-            'cancer_type_id', 
-            'regimen_template_id', 
-            'applicable_stages', 
-            'total_cost_per_cycle', 
+            'id', 'name', 'description', 'total_cycles', 
+            'cycle_duration_days', 'primary_site_id', 'cancer_type_id', 
+            'regimen_template_id', 'applicable_stages', 'total_cost_per_cycle', 
             'components'
         ]
 
@@ -901,7 +985,7 @@ class ProtocolSerializer(serializers.ModelSerializer):
                     ProtocolIngredient.objects.create(protocol=instance, **component)
                 
         return instance
-
+    
 class TreatmentSerializer(serializers.ModelSerializer):
      oncologist_name = serializers.CharField(source='oncologist.get_full_name', read_only=True)
      protocol_name = serializers.ReadOnlyField(source='protocol.name')
@@ -1672,8 +1756,11 @@ class PatientDiagnosisSerializer(serializers.ModelSerializer):
 
 
 class SupplierSerializer(serializers.ModelSerializer):
+    # Read-only field for rendering pretty labels on the React directory cards
     category_display = serializers.CharField(source='get_category_display', read_only=True)
     
+    # We can explicitly mark compliance files as optional at serializer layer, 
+    # but handle multi-part file payloads safely.
     kra_pin_doc = serializers.FileField(required=False, allow_null=True)
     incorporation_doc = serializers.FileField(required=False, allow_null=True)
     regulatory_license_doc = serializers.FileField(required=False, allow_null=True)
@@ -1692,54 +1779,20 @@ class SupplierSerializer(serializers.ModelSerializer):
             'tax_compliance_doc', 'tax_compliance_expiry', 'notes', 'is_active'
         ]
 
-    def to_internal_value(self, data):
-        """
-        Intercepts incoming data and sanitizes frontend string errors without
-        triggering a deep copy on active file streams.
-        """
-        # Determine if we are dealing with a Django QueryDict
-        is_querydict = hasattr(data, '_mutable')
-        
-        if is_querydict:
-            # Bypass the deepcopy error by temporarily unlocking the existing QueryDict object directly
-            old_mutable = data._mutable
-            data._mutable = True
-            mutable_data = data
-        else:
-            # If it's already a standard python dictionary, a shallow copy is completely safe
-            mutable_data = data.copy() if hasattr(data, 'copy') else data
-        
-        file_fields = [
-            'contract_document', 'kra_pin_doc', 'incorporation_doc', 
-            'regulatory_license_doc', 'bank_confirmation_doc', 'tax_compliance_doc'
-        ]
-        
-        try:
-            for field in file_fields:
-                if field in mutable_data:
-                    val = mutable_data[field]
-                    # Clean up instances where frontend passes text representation strings of null values
-                    if val == "" or val in ["null", "undefined"]:
-                        mutable_data[field] = None
-                        
-            # Pass the modified object into DRF validation pipeline
-            return super().to_internal_value(mutable_data)
-            
-        finally:
-            # Always restore the original QueryDict state to prevent leaking mutability
-            if is_querydict:
-                data._mutable = old_mutable
-
     def validate(self, data):
+        """
+        Object-level validation to safeguard our compliance workflows.
+        """
         tax_doc = data.get('tax_compliance_doc')
         expiry_date = data.get('tax_compliance_expiry')
 
-        # If tax_doc has been scrubbed to None, skip checking this validation requirement
+        # Rule 1: If TCC is uploaded, the expiration date must be supplied for Dorcas' system to track it
         if tax_doc and not expiry_date:
             raise serializers.ValidationError({
                 "tax_compliance_expiry": "You must provide an expiration date when uploading a Tax Compliance Certificate."
             })
             
+        # Rule 2: Warning validation flag if they try to onboard an already expired document
         if expiry_date and expiry_date < timezone.now().date():
             raise serializers.ValidationError({
                 "tax_compliance_expiry": "The provided Tax Compliance Certificate has already expired."
@@ -2079,41 +2132,39 @@ class FixedAssetSerializer(serializers.ModelSerializer):
         return float(max(0, (cost - salvage) * rate * quantity))
     
 class ExpenseSerializer(serializers.ModelSerializer):
+    # Display plain text labels for choices instead of raw keys in GET requests
     category_display = serializers.CharField(source='get_category_display', read_only=True)
     behavior_display = serializers.CharField(source='get_behavior_display', read_only=True)
+    
+    # Read-only field to cleanly show only the file name to the frontend
     document_name = serializers.SerializerMethodField()
-    
-    amount_paid = serializers.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    
-    status = serializers.SerializerMethodField()
 
     class Meta:
         model = Expense
         fields = [
-            'id', 'description', 'category', 'category_display', 
-            'behavior', 'behavior_display', 'date', 'amount', 
-            'amount_paid', 'status', 'reference', 'document', 
-            'document_name', 'created_at', 'updated_at'
+            'id', 
+            'description', 
+            'category', 
+            'category_display', 
+            'behavior', 
+            'behavior_display', 
+            'date', 
+            'amount', 
+            'reference', 
+            'document', 
+            'document_name',
+            'created_at', 
+            'updated_at'
         ]
-        read_only_fields = ['id', 'status', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_document_name(self, obj):
         if obj.document:
             return os.path.basename(obj.document.name)
         return None
 
-    def get_status(self, obj):
-        # Access properties using native object formats safely
-        amount = float(obj.amount or 0)
-        paid = float(obj.amount_paid or 0)
-
-        if paid >= amount and amount > 0:
-            return "PAID"
-        elif 0 < paid < amount:
-            return "PARTIAL"
-        return "UNPAID"
-
     def validate_reference(self, value):
+        # Convert empty strings or spaces from frontend inputs into the clean pending flag
         if not value or str(value).strip() == "":
             return "PENDING_SORT"
         return value

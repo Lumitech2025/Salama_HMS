@@ -19,9 +19,7 @@ const PharmacistSidebar = ({ activeTab, setActiveTab, onLogout }) => {
         { id: 'prescriptions', label: 'Prescriptions', icon: <ClipboardList size={18} /> },
         { id: 'dispensing', label: 'Patient History', icon: <Pill size={18} /> },
         { id: 'inventory', label: 'Inventory', icon: <Package size={18} /> },
-        { id: 'patients', label: 'References', icon: <Users size={18} /> },
-        { id: 'billing', label: 'Billing', icon: <Receipt size={18} /> },
-        { id: 'requisitions', label: 'Requisitions', icon: <FileSpreadsheet size={18} /> }, // Fixed ID to lowercase & unique icon
+        { id: 'requisitions', label: 'Requisitions', icon: <FileSpreadsheet size={18} /> }, 
     ];
 
     // Defensive handle logout controller fallback layer

@@ -181,16 +181,28 @@ class RegistrationRecordAdmin(admin.ModelAdmin):
 
 class PrescriptionItemInline(admin.TabularInline):
     model = PrescriptionItem
+    # Links our updated fields to the inline view matrix seamlessly
+    fields = [
+        'stage', 'drug', 'medication_name', 'dosage', 
+        'calc_factor', 'factor_value', 'route', 'diluent', 
+        'volume', 'duration'
+    ]
     extra = 0
+
 
 @admin.register(Prescription)
 class PrescriptionAdmin(admin.ModelAdmin):
-    list_display = ('id', 'patient', 'prescribed_by', 'status', 'created_at')
-    list_filter = ('status', 'created_at')
-    search_fields = ('patient__name', 'patient__registrations__health_record_number')
+    # Standardized to our explicit field schemas
+    list_display = ['id', 'patient', 'protocol', 'pharmacy_status', 'treatment_date']
+    list_filter = ['pharmacy_status', 'treatment_date']
+    
+    search_fields = [
+        'patient__name', 
+        'protocol__name',              
+        'visit__diagnosis_description'  
+    ]
+    
     inlines = [PrescriptionItemInline]
-    actions = [export_as_csv]
-
 # --- 3. DRUG INVENTORY (THE SHOP & MAIN STORE) ---
 
 @admin.register(Drug)
@@ -373,6 +385,7 @@ class PatientAdmin(admin.ModelAdmin):
             return format_html('<span style="font-family: monospace; font-weight: bold; background: #e2e8f0; padding: 2px 6px; border-radius: 4px; color: #1e293b;">{}</span>', latest_reg.health_record_number)
         return mark_safe('<span style="color: #94a3b8; font-style: italic;">No Active Record</span>')
     latest_health_record_number.short_description = "Health Record No"
+
 
 # --- 6. SCHEDULING & REVENUE ---
 

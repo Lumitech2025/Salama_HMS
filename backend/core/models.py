@@ -28,12 +28,7 @@ class Patient(models.Model):
     ]
     
     name = models.CharField(max_length=255, db_index=True) 
-    registry_no = models.CharField(
-        max_length=50, 
-        unique=True, 
-        verbose_name="ID Number",
-        help_text="National ID or Passport Number"
-    ) 
+    registry_no = models.CharField(max_length=100, blank=True, null=True)
     dob = models.DateField(verbose_name="Date of Birth", null=True, blank=True)
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
     blood_group = models.CharField(max_length=3, choices=BLOOD_GROUPS, blank=True)
@@ -56,15 +51,9 @@ class Patient(models.Model):
     emergency_contact = models.CharField(max_length=255, blank=True) 
     created_at = models.DateTimeField(auto_now_add=True)
 
-    @property
-    def current_age(self):
-        if self.dob:
-            today = date.today()
-            return today.year - self.dob.year - ((today.month, today.day) < (self.dob.month, self.dob.day))
-        return None
+    
 
-    def __str__(self):
-        return f"{self.name} - ID: {self.registry_no}"
+    
 
 class RegistrationRecord(models.Model):
     GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
@@ -80,7 +69,6 @@ class RegistrationRecord(models.Model):
         ('OTHER', 'Other Relative'),
     ]
     
-    # Core Identification Components
     first_name = models.CharField(max_length=100)
     middle_name = models.CharField(max_length=100, blank=True, null=True)
     last_name = models.CharField(max_length=100)
@@ -91,7 +79,6 @@ class RegistrationRecord(models.Model):
     age = models.PositiveIntegerField()
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
     
-    # Coverage Allocation
     payment_mode = models.CharField(max_length=15, choices=PAYMENT_MODE_CHOICES, default="CASH")
     insurance_company = models.ForeignKey(
         'InsuranceCompany', 
@@ -122,17 +109,14 @@ class RegistrationRecord(models.Model):
 
     @property
     def full_name(self):
-        """Helper property to cleanly return full designation in serialisers"""
         if self.middle_name:
             return f"{self.first_name} {self.middle_name} {self.last_name}"
-        return f"{first_name} {self.last_name}"
+        return f"{self.first_name} {self.last_name}"
 
     def save(self, *args, **kwargs):
-        # Cache current timestamp via timezone utility to guarantee uniformity across fields
         now_dt = timezone.now()
         short_year = str(now_dt.year)[-2:] 
 
-        # 1. Fallback sync calculations from patient master metadata
         if self.patient:
             if not self.first_name:
                 
@@ -146,9 +130,7 @@ class RegistrationRecord(models.Model):
 
         
         if not self.queue_id or not self.health_record_number:
-            # Using transaction.atomic to prevent dirty reads across connections
             with transaction.atomic():
-                # Fetching the trailing instance using select_for_update to lock concurrent evaluation
                 last_record = RegistrationRecord.objects.select_for_update().order_by('id').last()
                 
                 # Assign Queue ID
@@ -182,7 +164,6 @@ class RegistrationRecord(models.Model):
         return f"{self.queue_id} - {self.health_record_number} - {self.first_name} {self.last_name}"
     
 
-# --- Appointment & Triage Workflow ---
 class Appointment(models.Model):
     VISIT_TYPE_CHOICES = [('NEW', 'New Visit'), ('SUBSEQUENT', 'Subsequent Visit')]
     STATUS_CHOICES = [
@@ -198,9 +179,9 @@ class Appointment(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, null=True, blank=True, related_name='appointments')
     
     # New Entrant Preliminary Fallback Fields
-    manual_patient_name = models.CharField(max_length=255, blank=True, help_text="For preliminary registration")
-    manual_patient_phone = models.CharField(max_length=20, blank=True, help_text="For preliminary notification updates")
-    manual_patient_email = models.EmailField(blank=True, null=True, help_text="For preliminary notification updates")
+    manual_patient_name = models.CharField(max_length=255, blank=True)
+    manual_patient_phone = models.CharField(max_length=20, blank=True)
+    manual_patient_email = models.EmailField(blank=True, null=True)
     
     practitioner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -437,113 +418,217 @@ class Bill(models.Model):
     def __str__(self):
         return f"{self.bill_no} - {self.patient.name}"
     
+class InventoryItem(models.Model):
+    DEPARTMENT_CHOICES = [
+        ('PHARMACY', 'Pharmacy'),
+        ('LAB', 'Laboratory'),
+        ('NURSING', 'Nursing'),
+        ('RADIOLOGY', 'Radiology'),
+        ('ADMIN', 'General Admin'),
+    ]
 
-class Drug(models.Model):
-    STORE_CHOICES = [('main', 'Main Bulk Store'), ('pharmacy', 'Pharmacy Shop')]
-    
+    DOSAGE_CHOICES = [
+        ('TABLET', 'Tablet'),
+        ('CAPSULE', 'Capsule'),
+        ('SYRUP', 'Syrup'),
+        ('SUSPENSION', 'Oral Suspension'),
+        ('VIAL', 'Vial (Liquid/Powder for Injection)'),
+        ('AMP_INJ', 'Ampoule (Injection)'),
+        ('INF_BAG', 'Infusion Bag (Premixed Cytotoxic/Hydration)'),
+        ('OINTMENT', 'Ointment / Cream'),
+        ('PATCH', 'Transdermal Patch (e.g., Fentanyl Palliative Care)'),
+        ('PESSARY', 'Pessary (e.g., localized hormonal therapies)'),
+        ('SUPPOSITORY', 'Suppository (e.g., antiemetics / palliative comfort care)'),
+    ]
+
     name = models.CharField(max_length=255)
-    generic_name = models.CharField(max_length=255, blank=True)
-    manufacturer = models.CharField(max_length=255, blank=True)
-    batch_number = models.CharField(max_length=255)
+    sku = models.CharField(max_length=100, blank=True, null=True)
+    dosage_form = models.CharField(max_length=20, choices=DOSAGE_CHOICES, default='TABLET')
+    strength = models.CharField(max_length=50, blank=True, null=True)
+    quantity_available = models.IntegerField(default=0)
+    cost_per_unit = models.DecimalField(max_digits=12, decimal_places=2)
+    department = models.CharField(max_length=50, choices=DEPARTMENT_CHOICES)
+    batch_number = models.CharField(max_length=100, blank=True)
+    expiry_date = models.DateField(null=True, blank=True)
+    reorder_level = models.PositiveIntegerField(default=50)
+    added_at = models.DateTimeField(auto_now_add=True)
+
+    def save(self, *args, **kwargs):
+        # 1. Generate Sequential Base SKU automatically if missing
+        if not self.sku and self.name:
+            clean_base_name = self.name.strip().lower()
+            # Clean strength to match safely
+            clean_strength = self.strength.strip().lower() if self.strength else ""
+
+            with transaction.atomic():
+                # FIX: Match on BOTH name and strength to differentiate versions
+                existing_item = InventoryItem.objects.filter(
+                    name__iexact=clean_base_name,
+                    strength__iexact=clean_strength if clean_strength else None
+                ).exclude(sku__isnull=True).exclude(sku="").first()
+
+                if existing_item:
+                    # Same drug with same strength -> shares the base SKU code
+                    self.sku = existing_item.sku
+                else:
+                    # New drug OR existing drug with a brand new strength variant -> generate new SKU
+                    last_item = InventoryItem.objects.filter(sku__startswith="SCC").order_by("-id").first()
+                    if last_item and last_item.sku:
+                        try:
+                            last_number_str = last_item.sku.replace("SCC", "")
+                            last_number = int(last_number_str)
+                            next_number = last_number + 1
+                        except ValueError:
+                            next_number = InventoryItem.objects.filter(sku__startswith="SCC").count() + 1
+                    else:
+                        next_number = 1
+
+                    self.sku = f"SCC{next_number:04d}"
+
+        # 2. Refined Batch Generation: Matches layout schema "SCC-B001/090626"
+        if not self.batch_number:
+            generation_date = self.added_at if self.id else timezone.now()
+            date_str = generation_date.strftime("%d%m%y")
+            
+            day_start = generation_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = generation_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+            
+            with transaction.atomic():
+                last_daily_batch = InventoryItem.objects.filter(
+                    added_at__range=(day_start, day_end),
+                    batch_number__startswith="SCC-B"
+                ).order_by("-id").first()
+
+                next_batch_num = 1
+                if last_daily_batch and last_daily_batch.batch_number:
+                    try:
+                        raw_batch_part = last_daily_batch.batch_number.split('/')[0]
+                        counter_str = raw_batch_part.replace("SCC-B", "")
+                        next_batch_num = int(counter_str) + 1
+                    except (ValueError, IndexError):
+                        next_batch_num = InventoryItem.objects.filter(added_at__range=(day_start, day_end)).count() + 1
+
+                self.batch_number = f"SCC-B{next_batch_num:03d}/{date_str}"
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} ({self.strength}) - {self.sku} [{self.batch_number}]"
     
-    strength = models.CharField(max_length=255, help_text="e.g., 500mg, 10mg/ml")
-    unit_type = models.CharField(max_length=255, default="vial", help_text="e.g., vial, tablet, bottle")
+class Drug(models.Model):
+    DOSAGE_CHOICES = [
+        ('TABLET', 'Tablet'),
+        ('CAPSULE', 'Capsule'),
+        ('SYRUP', 'Syrup'),
+        ('SUSPENSION', 'Oral Suspension'),
+        ('VIAL', 'Vial (Liquid/Powder for Injection)'),
+        ('AMP_INJ', 'Ampoule (Injection)'),
+        ('INF_BAG', 'Infusion Bag (Premixed Cytotoxic/Hydration)'),
+        ('OINTMENT', 'Ointment / Cream'),
+        ('PATCH', 'Transdermal Patch (e.g., Fentanyl)'),
+        ('SUPPOSITORY', 'Suppository (e.g., antiemetics)'),
+    ]
+
+    name = models.CharField(max_length=255)
+    sku = models.CharField(max_length=100, unique=True, blank=True, null=True)
+    batch_no = models.CharField(max_length=100)
+    dosage_form = models.CharField(max_length=20, choices=DOSAGE_CHOICES, blank=True, null=True)
+# Formulation power
+    strength = models.CharField(max_length=50, blank=True, null=True)
+    stock_quantity = models.PositiveIntegerField(default=0) # Shop floor quantity available
+    reorder_level = models.PositiveIntegerField(default=50) # Threshold indicator
     
-    quantity_in_stock = models.PositiveIntegerField(default=25)
-    reorder_level = models.PositiveIntegerField(default=10, help_text="Minimum threshold before requisition")
+    # Pricing fields
+    cost_price_unit = models.DecimalField(max_digits=10, decimal_places=2, default=0.00) # Base cost from store
+    selling_price_kes = models.DecimalField(max_digits=10, decimal_places=2, default=0.00) # Patient retail cost
     
-    expiry_date = models.DateField(null=True) 
-    selling_price_kes = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    
-    store_location = models.CharField(max_length=20, choices=STORE_CHOICES, default='pharmacy')
-    storage_requirements = models.TextField(blank=True, help_text="e.g., Refrigerate 2-8°C")
-    is_hazardous = models.BooleanField(default=False, verbose_name="Cytotoxic/Hazardous")
-    
+    expiry_date = models.DateField(null=True, blank=True) 
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.name} ({self.batch_number}) - {self.store_location.upper()}"
+        return f"{self.name} ({self.batch_no})"
 
     @property
     def is_expired(self):
         return date.today() >= self.expiry_date if self.expiry_date else False
+    
+    
 
 
 class Prescription(models.Model):
-    STATUS_CHOICES = [
-        ('PENDING', 'Pending Approval'),
-        ('DISPENSED', 'Dispensed'),
-        ('CANCELLED', 'Cancelled')
-    ]
-    
-    # Core Relations
-    patient = models.ForeignKey('Patient', on_delete=models.CASCADE)
-    
-    # Binding the prescription explicitly to the clinical visit encounter 
-    visit = models.ForeignKey('RegistrationRecord', on_delete=models.SET_NULL, null=True, blank=True)
-    
-    # Optional blueprint link (Null means a manual ad-hoc prescription)
-    protocol = models.ForeignKey(
-        'Protocol', 
+    # Core Context Links
+    patient = models.ForeignKey(
+        'Patient', 
+        on_delete=models.CASCADE, 
+        related_name='prescriptions'
+    )
+    visit = models.ForeignKey(
+        'Queue',  # Or your historical visit tracker model
         on_delete=models.SET_NULL, 
         null=True, 
-        blank=True, 
-        related_name='issued_prescriptions'
+        blank=True
     )
     
-    prescribed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, 
-        on_delete=models.SET_NULL, 
-        null=True,
-        blank=True,
-        related_name='oncology_prescriptions'
-    )
+    # Clinical Metadata Fields (Tier 1)
+    diagnosis = models.CharField(max_length=255, blank=True, default='')
+    protocol = models.CharField(max_length=255, blank=True, default='')
+    cycle_no = models.CharField(max_length=50, default='1')
+    total_cycles = models.CharField(max_length=50, blank=True, default='')
+    allergies = models.TextField(blank=True, default='')
+    treatment_date = models.DateField(auto_now_add=True)
     
-    # Structural Attributes
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    # Dose Adjustment Notes (Tier 5)
+    dose_adjustment_notes = models.TextField(blank=True, default='')
     
-    # MATCHES FRONTEND PAYLOAD: React sends this key as 'notes'
-    notes = models.TextField(
-        blank=True,
-        null=True, 
-        help_text="Protocol remarks, titration exceptions, or toxicity justifications."
-    )
-
-    clinical_notes = models.TextField(
-        blank=True, 
-        null=True, 
-        default=''
-    )
+    # Signatures & Verification (Tier 7)
+    prescribed_by = models.CharField(max_length=255, blank=True, default='')
+    prescribe_date = models.DateField(null=True, blank=True)
+    pharmacy_status = models.CharField(max_length=50, default='Pending Dispense')
+    
+    # Extensible Metadata Storage for structural configurations
+    meta_extensions = models.JSONField(default=dict, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True, null=True, blank=True)
-
-    class Meta:
-        ordering = ['-created_at']
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Rx #{self.id} - Patient: {self.patient}"
+        return f"Rx #{self.id} - {self.patient.name} ({self.protocol or 'No Protocol'})"
 
 
 class PrescriptionItem(models.Model):
-    prescription = models.ForeignKey(Prescription, related_name='items', on_delete=models.CASCADE)
+    STAGE_CHOICES = [
+        ('PRE_CHEMO', 'Pre-Chemotherapy'),
+        ('CHEMO', 'Chemotherapy Core Orders'),
+        ('POST_CHEMO', 'Post-Chemotherapy Take Home'),
+    ]
+
+    prescription = models.ForeignKey(
+        Prescription, 
+        on_delete=models.CASCADE, 
+        related_name='items'
+    )
+    stage = models.CharField(max_length=20, choices=STAGE_CHOICES)
+    medication_name = models.CharField(max_length=255)
     
-    # WORKAROUND: Bypasses the broken foreign key string evaluation engine entirely
-    drug_id = models.PositiveIntegerField(
+    # Optional Link to an actual inventory system or stock table row
+    drug = models.ForeignKey(
+        Drug, 
+        on_delete=models.SET_NULL, 
         null=True, 
-        blank=True,
-        help_text="Direct integer reference tracking to core.Drug inventory row"
+        blank=True
     )
     
-    medication_name = models.CharField(max_length=255)
-    dosage = models.CharField(max_length=100)
-    route = models.CharField(max_length=100)     
-    frequency = models.CharField(max_length=100) 
-    duration = models.CharField(max_length=100)  
-    instructions = models.TextField(blank=True)
+    # Chemo-matrix explicit variables (Tier 4 metrics)
+    dosage = models.CharField(max_length=100, blank=True, default='')
+    calc_factor = models.CharField(max_length=50, blank=True, default='')
+    factor_value = models.CharField(max_length=50, blank=True, default='')
+    route = models.CharField(max_length=50, blank=True, default='')
+    diluent = models.CharField(max_length=50, blank=True, default='')
+    volume = models.CharField(max_length=50, blank=True, default='')
+    duration = models.CharField(max_length=50, blank=True, default='')
 
     def __str__(self):
-        return f"{self.medication_name} - {self.dosage}"
+        return f"{self.stage} | {self.medication_name} ({self.dosage or 'STAT'})"
     
 class ClinicalNote(models.Model):
     NOTE_TYPES = [
@@ -1618,132 +1703,9 @@ class RemittanceBatch(models.Model):
 from django.db import models, transaction
 from django.utils import timezone
 
-class InventoryItem(models.Model):
-    DEPARTMENT_CHOICES = [
-        ('PHARMACY', 'Pharmacy'),
-        ('LAB', 'Laboratory'),
-        ('NURSING', 'Nursing'),
-        ('RADIOLOGY', 'Radiology'),
-        ('ADMIN', 'General Admin'),
-    ]
 
-    DOSAGE_CHOICES = [
-        ('TABLET', 'Tablet'),
-        ('CAPSULE', 'Capsule'),
-        ('SYRUP', 'Syrup'),
-        ('SUSPENSION', 'Oral Suspension'),
-        ('VIAL', 'Vial (Liquid/Powder for Injection)'),
-        ('AMP_INJ', 'Ampoule (Injection)'),
-        ('INF_BAG', 'Infusion Bag (Premixed Cytotoxic/Hydration)'),
-        ('OINTMENT', 'Ointment / Cream'),
-        ('PATCH', 'Transdermal Patch (e.g., Fentanyl Palliative Care)'),
-        ('PESSARY', 'Pessary (e.g., localized hormonal therapies)'),
-        ('SUPPOSITORY', 'Suppository (e.g., antiemetics / palliative comfort care)'),
-    ]
-
-    name = models.CharField(max_length=255)
-    sku = models.CharField(max_length=100, blank=True, null=True)
-    dosage_form = models.CharField(max_length=20, choices=DOSAGE_CHOICES, default='TABLET')
-    strength = models.CharField(max_length=50, blank=True, null=True)
-    quantity_available = models.IntegerField(default=0)
-    cost_per_unit = models.DecimalField(max_digits=12, decimal_places=2)
-    department = models.CharField(max_length=50, choices=DEPARTMENT_CHOICES)
-    batch_number = models.CharField(max_length=100, blank=True)
-    expiry_date = models.DateField(null=True, blank=True)
-    reorder_level = models.PositiveIntegerField(default=50)
-    added_at = models.DateTimeField(auto_now_add=True)
-
-    def save(self, *args, **kwargs):
-        # 1. Generate Sequential Base SKU automatically if missing
-        if not self.sku and self.name:
-            clean_base_name = self.name.strip().lower()
-
-            with transaction.atomic():
-                existing_item = InventoryItem.objects.filter(
-                    name__iexact=clean_base_name
-                ).exclude(sku__isnull=True).exclude(sku="").first()
-
-                if existing_item:
-                    self.sku = existing_item.sku
-                else:
-                    last_item = InventoryItem.objects.filter(sku__startswith="SCC").order_by("-id").first()
-                    if last_item and last_item.sku:
-                        try:
-                            last_number_str = last_item.sku.replace("SCC", "")
-                            last_number = int(last_number_str)
-                            next_number = last_number + 1
-                        except ValueError:
-                            next_number = InventoryItem.objects.filter(sku__startswith="SCC").count() + 1
-                    else:
-                        next_number = 1
-
-                    self.sku = f"SCC{next_number:04d}"
-
-        # 2. Refined Batch Generation: Matches layout schema "SCC-B001/090626"
-        if not self.batch_number:
-            # Fall back to active context window date values if entity entry isn't saved yet
-            generation_date = self.added_at if self.id else timezone.now()
-            date_str = generation_date.strftime("%d%m%y")  # Generates ddmmyy format (e.g., 090626)
-            
-            # Target range boundaries using your exact field name: added_at
-            day_start = generation_date.replace(hour=0, minute=0, second=0, microsecond=0)
-            day_end = generation_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-            
-            with transaction.atomic():
-                # Locate the latest entry assigned on the current calendar date to calculate indices reliably
-                last_daily_batch = InventoryItem.objects.filter(
-                    added_at__range=(day_start, day_end),
-                    batch_number__startswith="SCC-B"
-                ).order_by("-id").first()
-
-                next_batch_num = 1
-                if last_daily_batch and last_daily_batch.batch_number:
-                    try:
-                        # Extract the inner 3 digit count integer from 'SCC-B001/090626'
-                        raw_batch_part = last_daily_batch.batch_number.split('/')[0]  # Result: "SCC-B001"
-                        counter_str = raw_batch_part.replace("SCC-B", "")             # Result: "001"
-                        next_batch_num = int(counter_str) + 1
-                    except (ValueError, IndexError):
-                        # Fallback count lookup if string parses incorrectly
-                        next_batch_num = InventoryItem.objects.filter(added_at__range=(day_start, day_end)).count() + 1
-
-                # Formats precisely to: SCC-B001/090626
-                self.batch_number = f"SCC-B{next_batch_num:03d}/{date_str}"
-
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.name} ({self.strength}) - {self.sku} [{self.batch_number}]"
     
-class Drug(models.Model):
-    DOSAGE_CHOICES = [
-        ('TABLET', 'Tablet'),
-        ('VIAL', 'Vial'),
-        ('SYRUP', 'Syrup'),
-    ]
 
-    name = models.CharField(max_length=255)
-    sku = models.CharField(max_length=100, unique=True, blank=True, null=True)
-    batch_no = models.CharField(max_length=100)
-    dosage_form = models.CharField(max_length=20, choices=DOSAGE_CHOICES, blank=True, null=True)
-# Formulation power
-    strength = models.CharField(max_length=50, blank=True, null=True)
-    stock_quantity = models.PositiveIntegerField(default=0) # Shop floor quantity available
-    reorder_level = models.PositiveIntegerField(default=50) # Threshold indicator
-    
-    # Pricing fields
-    cost_price_unit = models.DecimalField(max_digits=10, decimal_places=2, default=0.00) # Base cost from store
-    selling_price_kes = models.DecimalField(max_digits=10, decimal_places=2, default=0.00) # Patient retail cost
-    
-    expiry_date = models.DateField(null=True, blank=True) 
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.name} ({self.batch_no})"
-
-    @property
-    def is_expired(self):
-        return date.today() >= self.expiry_date if self.expiry_date else False
     
 class StockTake(models.Model):
     # Links directly to the inventory instance item being audited
@@ -2201,7 +2163,7 @@ class PatientBillableItem(models.Model):
         related_name='billable_items'
     )
     drug = models.ForeignKey(
-        'Drug', 
+        Drug, 
         on_delete=models.SET_NULL, 
         blank=True, 
         null=True, 
