@@ -269,93 +269,144 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """
-        Optimized queryset targeting the clinical network. Prefetches 
-        diagnoses and vitals to support the protocol-matching snapshot engines.
+        Optimized database pipeline targeting the clinical network layout.
+        Prefetches diagnoses snapshots and vital indexes to eliminate N+1 query traps.
         """
-        # 1. Base query with pre-fetch optimization strategies 
         queryset = Prescription.objects.select_related(
             'patient',
             'visit', 
-            'visit__visit' # Links: Prescription -> Queue -> RegistrationRecord
+            'visit__visit'
         ).prefetch_related(
             'items__drug',
             'visit__visit__vitals',      
-            'visit__visit__diagnoses',   # Mapped directly to avoid N+1 traps during serialization
-            'visit__visit__lab_orders'   # ✅ Fixed: Terminated lookup paths at the real model relationship boundary
+            'visit__visit__diagnoses',   
+            'visit__visit__lab_orders'   
         )
 
-        # 2. Clinical Guardrails Strategy:
-        # Instead of completely blocking non-lab records from loading (which breaks pharmacy/billing visibility),
-        # we only filter active dashboard queues if requested, ensuring historical data remains safe.
-        station_filter = self.request.query_params.get('current_station')
-        if station_filter == 'DOCTOR':
-            queryset = queryset.filter(
-                visit__visit__lab_orders__status='COMPLETED'
-            ).distinct()
+        if self.action == 'list':
+            station_filter = self.request.query_params.get('current_station')
+            if station_filter == 'DOCTOR':
+                queryset = queryset.filter(
+                    visit__visit__lab_orders__status='COMPLETED'
+                ).distinct()
+        else:
+            self.filter_backends = []
 
         return queryset
+    
+    def _get_deduction_qty(self, item):
+        """Standardized logic for oncology inventory depletion."""
+        if item.stage == 'PRE_CHEMO': return 1
+        if item.stage == 'POST_CHEMO': return 10
+        match = re.search(r'\d+', item.dosage or '')
+        return int(match.group()) if match else 1
 
+    @transaction.atomic
     def perform_create(self, serializer):
-        # Fallback security injection: ensure current session practitioner claims ownership
-        serializer.save(prescribed_by=self.request.user.get_full_name() or self.request.user.username)
+        
+        practitioner = self.request.user.get_full_name() or self.request.user.username
+        prescription = serializer.save(prescribed_by=practitioner)
+        
+        pre_chemo_constants = [
+            {"name": "Metoclopramide", "dosage": "10mg STAT", "route": "I.V", "duration": "STAT"},
+            {"name": "Chlorpheniramine", "dosage": "10mg STAT", "route": "I.V", "duration": "STAT"},
+            {"name": "Ondansetron", "dosage": "8mg STAT", "route": "I.V", "duration": "STAT"},
+            {"name": "Dexamethasone", "dosage": "8mg STAT", "route": "I.V", "duration": "STAT"},
+        ]
+        
+        for pc in pre_chemo_constants:
+            # Match directly against the system pharmacy drug profile using clean text criteria
+            drug_ref = Drug.objects.filter(name__icontains=pc["name"]).first()
+            PrescriptionItem.objects.create(
+                prescription=prescription,
+                stage='PRE_CHEMO',
+                medication_name=pc["name"],
+                drug=drug_ref,
+                dosage=pc["dosage"],
+                calc_factor='Flat Rate',
+                factor_value='0',
+                route=pc["route"],
+                diluent='None',
+                volume='0',
+                duration=pc["duration"]
+            )
+
+        post_chemo_constants = [
+            {"name": "FeSO4/FA", "dosage": "200mg/1 tab", "route": "P.O", "duration": "OD × 5/7"},
+            {"name": "Ondansetron", "dosage": "8mg 1 tab", "route": "P.O", "duration": "BD × 5/7"},
+            {"name": "Metoclopramide", "dosage": "10mg 1 tab", "route": "P.O", "duration": "TDS × 5/7"},
+            {"name": "Dexamethasone", "dosage": "4mg 1 tab", "route": "P.O", "duration": "BD × 5/7"},
+        ]
+        
+        for po in post_chemo_constants:
+            drug_ref = Drug.objects.filter(name__icontains=po["name"]).first()
+            PrescriptionItem.objects.create(
+                prescription=prescription,
+                stage='POST_CHEMO',
+                medication_name=po["name"],
+                drug=drug_ref,
+                dosage=po["dosage"],
+                calc_factor='Flat Rate',
+                factor_value='0',
+                route=po["route"],
+                diluent='None',
+                volume='0',
+                duration=po["duration"]
+            )
+
+        # 3. Synchronize Location State: Push Patient to the Pharmacy Dashboard Grid
+        if prescription.visit:
+            queue_ticket = prescription.visit
+            queue_ticket.current_station = 'PHARMACY'
+            queue_ticket.status = 'AWAITING_MEDICATION'
+            queue_ticket.save()
 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
         target_status = request.data.get('pharmacy_status') or request.data.get('status')
         
-        # If transitioning to DISPENSED and it wasn't dispensed already, execute routine
         if target_status == 'DISPENSED' and instance.pharmacy_status != 'DISPENSED':
             return self._dispense_prescription(request, instance)
             
         return super().partial_update(request, *args, **kwargs)
 
     def _dispense_prescription(self, request, prescription):
-        """
-        Processes transactional inventory depletion across the floor stock system
-        and automatically handles queue tracking forward logic.
-        """
-        with transaction.atomic():
-            for item in prescription.items.all():
-                if item.drug:
-                    try:
-                        # Row-locking query isolates concurrent pharmacy dispatchers
-                        locked_drug = Drug.objects.select_for_update().get(id=item.drug.id)
+        try:
+            with transaction.atomic():
+                for item in prescription.items.all():
+                    if not item.drug:
+                        continue
                         
-                        # Parse numeric quantities out of dosage expressions (e.g. "250 mg" -> 250)
-                        match = re.search(r'\d+', item.dosage or '')
-                        deduction_qty = int(match.group()) if match else 1
-                        
-                        if locked_drug.stock_quantity >= deduction_qty:
-                            locked_drug.stock_quantity -= deduction_qty
-                            locked_drug.save()
-                        else:
-                            return Response(
-                                {
-                                    "error": f"Insufficient stock for {locked_drug.name}. "
-                                             f"Requested: {deduction_qty}, Available: {locked_drug.stock_quantity}"
-                                },
-                                status=status.HTTP_400_BAD_REQUEST
-                            )
-                    except Drug.DoesNotExist:
-                        return Response(
-                            {"error": f"Inventory reference broken for {item.medication_name} (ID: {item.drug_id})"},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
-            
-            # Apply state change safely within atomic bounds
-            prescription.pharmacy_status = 'DISPENSED'
-            prescription.save()
+                    # 1. Lock and fetch
+                    locked_drug = Drug.objects.select_for_update().get(id=item.drug.id)
+                    
+                    # 2. Calculate
+                    deduction_qty = self._get_deduction_qty(item)
+                    
+                    # 3. Validate
+                    if locked_drug.stock_quantity < deduction_qty:
+                        raise ValueError(f"Insufficient stock for {locked_drug.name}")
+                    
+                    # 4. Deduct
+                    locked_drug.stock_quantity -= deduction_qty
+                    locked_drug.save()
 
-            # --- AUTOMATION BONUS: Advance the Patient Queue Ticket ---
-            # Now that medication is dispensed, update their location in the building
-            if prescription.visit:  # prescription.visit refers to the Queue row
-                queue_ticket = prescription.visit
-                queue_ticket.current_station = 'BILLING'
-                queue_ticket.status = 'COMPLETED'
-                queue_ticket.save()
+                # 5. Update Status only if ALL items succeeded
+                prescription.pharmacy_status = 'DISPENSED'
+                prescription.save()
+                
+                if prescription.visit:
+                    prescription.visit.current_station = 'BILLING'
+                    prescription.visit.status = 'COMPLETED'
+                    prescription.visit.save()
             
-        serializer = self.get_serializer(prescription)
-        return Response(serializer.data)
+            return Response(self.get_serializer(prescription).data)
+            
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": "An unexpected error occurred"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
     
 # --- 6. APPOINTMENTS & BILLING ---
 

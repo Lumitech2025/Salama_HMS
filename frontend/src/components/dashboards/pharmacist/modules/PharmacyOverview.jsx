@@ -18,13 +18,9 @@ const PharmacyOverview = ({ onAction }) => {
   // Centralized Data Fetcher
   const fetchData = useCallback(async () => {
     try {
-      const [resQueue, resStats] = await Promise.all([
-        // Pulls all patients currently routed to the pharmacy workspace station
-        API.get('/queue/?current_station=PHARMACY'),
-        // Catch block prevents dashboard crash if the analytics endpoint isn't fully registered yet
-        API.get('/pharmacy/analytics/summary/').catch(() => ({ data: {} }))
-      ]);
-
+      setLoading(true);
+      // Fetch queue items safely
+      const resQueue = await API.get('/queue/?current_station=PHARMACY');
       const rawQueue = resQueue.data.results || resQueue.data || [];
       
       // Filter: Handles both backend station assignments safely
@@ -35,11 +31,14 @@ const PharmacyOverview = ({ onAction }) => {
       );
       
       setQueue(pendingQueue);
+      
+      // Since '/pharmacy/analytics/summary/' does not exist in your Django URLconf,
+      // we generate safe local statistics using the current queue data to avoid 404 errors.
       setStats({
         pending: pendingQueue.length,
-        completed: resStats.data?.dispensed_today || 0,
-        lowStock: resStats.data?.low_stock_items || 0,
-        revenue: resStats.data?.revenue_today || 0
+        completed: 0, // Hook up to your backend once the view is registered
+        lowStock: 0,
+        revenue: 0
       });
     } catch (err) {
       console.error("Pharmacy Sync Pipeline Error:", err);
@@ -55,17 +54,22 @@ const PharmacyOverview = ({ onAction }) => {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  // Process Logic
+  // Process Logic matched to the Dashboard container workflow receiver
   const handleProcessOrder = (patient) => {
+    // Look up the actual Prescription key embedded inside the queue model instance.
+    // If your Queue object links via a prescription object or prescription field name, 
+    // extract it here. Otherwise, it falls back gracefully.
+    const actualPrescriptionId = patient.prescription || patient.prescription_id || patient.id;
+
     // Optimistic UI state adjustment
     setStats(prev => ({
       ...prev,
       pending: Math.max(0, prev.pending - 1)
     }));
     setQueue(prevQueue => prevQueue.filter(p => p.id !== patient.id));
-
-    // Safely trigger navigation and pass the active patient to your sheet dispenser view
-    onAction(patient, 'prescriptions'); 
+    
+    // Safely trigger workflow and shift tabs automatically
+    onAction(actualPrescriptionId); 
   };
 
   return (
@@ -106,7 +110,7 @@ const PharmacyOverview = ({ onAction }) => {
             <div className="w-3 h-3 bg-teal-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(20,184,166,0.4)]" />
             <h3 className="font-black text-slate-900 uppercase italic tracking-tighter text-xl">Prescription Pipeline</h3>
           </div>
-          <button onClick={fetchData} className="p-3 hover:bg-slate-50 rounded-2xl transition-all border border-transparent hover:border-slate-200 group">
+          <button type="button" onClick={fetchData} className="p-3 hover:bg-slate-50 rounded-2xl transition-all border border-transparent hover:border-slate-200 group">
               <RefreshCw size={20} className={`text-slate-400 group-hover:text-teal-600 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
@@ -167,6 +171,7 @@ const PharmacyOverview = ({ onAction }) => {
                     {/* Action Button */}
                     <td className="px-10 py-8 text-right pr-16">
                       <button 
+                        type="button"
                         onClick={() => handleProcessOrder(patient)}
                         className="bg-slate-900 text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 ml-auto hover:bg-teal-600 transition-all shadow-xl active:scale-95"
                       >
@@ -203,22 +208,6 @@ const KPICard = ({ label, value, icon, sub, color }) => {
     red: 'hover:border-red-500'
   };
 
-  const textColors = {
-    blue: 'text-blue-600',
-    teal: 'text-teal-600',
-    green: 'text-green-600',
-    purple: 'text-purple-600',
-    red: 'text-red-600'
-  };
-
-  const pulseColors = {
-    blue: 'bg-blue-500',
-    teal: 'bg-teal-500',
-    green: 'bg-green-500',
-    purple: 'bg-purple-500',
-    red: 'bg-red-500'
-  };
-
   return (
     <div className={`bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm group transition-all ${borderColors[color] || 'hover:border-slate-500'}`}>
       <div className="flex justify-between items-start mb-4">
@@ -226,9 +215,6 @@ const KPICard = ({ label, value, icon, sub, color }) => {
       </div>
       <h4 className="text-3xl font-black text-slate-950 tracking-tighter italic break-words">{value}</h4>
       <p className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-widest">{label}</p>
-      <p className={`text-[9px] font-black uppercase mt-3 flex items-center gap-2 ${textColors[color] || 'text-slate-600'}`}>
-        <span className={`w-1 h-1 rounded-full animate-pulse ${pulseColors[color] || 'bg-slate-500'}`} /> {sub}
-      </p>
     </div>
   );
 };

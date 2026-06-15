@@ -109,21 +109,21 @@ router.register(r'fixed-assets', FixedAssetViewSet, basename='fixed-asset')
 router.register(r'expenses', ExpenseViewSet, basename='expense')
 
 urlpatterns = [
+    # Auth Endpoints
+    path('token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
     # Financial Integrations (Explicit Clean Namespacing)
     path('mpesa/trigger-push/', MpesaPaymentTriggerView.as_view(), name='mpesa_trigger_push'),
     path('mpesa/callback/', mpesa_callback_webhook, name='mpesa_callback_webhook'),
     path('mpesa/check-status/<int:invoice_id>/', check_invoice_status, name='check_invoice_status'),
-    # Auth Endpoints
-    path('token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     
     # Core Lookups and Proxy Routes
     path('patients/lookup/', patient_lookup, name='patient-lookup'),
+    path('api/patients/lookup/', patient_lookup, name='api-patient-lookup'), # Fallback catch for API matching prefix paths
     path('icd11/token/', ICD11TokenProxyView.as_view(), name='icd11-token'),
-    
 
-    # Viewset Namespace Bindings - Resolves the frontend /api prefix breakdown
+    # Viewset Namespace Bindings - Resolves the frontend /api prefix breakdown safely
     path('api/', include(router.urls)), 
     path('', include(router.urls)), 
 ]

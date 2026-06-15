@@ -336,7 +336,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         ]
 
     def _get_clinical_encounter(self, obj):
-        """Helper to resolve the underlying clinical encounter object."""
+        """Helper to resolve the underlying clinical encounter (RegistrationRecord)."""
         return obj.visit.visit if (obj.visit and hasattr(obj.visit, 'visit')) else None
 
     def get_vitals_snapshot(self, obj):
@@ -358,23 +358,25 @@ class PrescriptionSerializer(serializers.ModelSerializer):
 
     def get_diagnosis_snapshot(self, obj):
         """
-        Exposes both raw values and display labels so your UI code
-        can instantly run site-based protocol logic.
+        Queries explicitly against your PatientDiagnosis tracking matrix linked 
+        to the active RegistrationRecord to serve the pharmacy UI with absolute clarity.
         """
         encounter = self._get_clinical_encounter(obj)
         if encounter:
-            diagnoses = getattr(encounter, 'diagnoses_cache', None)
-            if diagnoses is None:
-                diagnoses = encounter.diagnoses.all()
+            # Safely fetch all saved diagnosis instances for this specific encounter/visit
+            diagnoses = encounter.diagnoses.all()
             
             return [
                 {
-                    # 💡 'BREAST' - matches the exact string required by your protocol models
+                    # e.g., 'BREAST' (Raw key code for standard operational matches)
                     "primary_site": d.primary_site,
-                    # 💡 'Breast' - readable text for the UI components
+                    # e.g., 'Breast' (Human-friendly readable display text resolved via choices map)
                     "primary_site_display": d.get_primary_site_display(),
+                    # e.g., 'C50.9'
                     "icd10_code": d.icd10_code,
+                    # e.g., 'Malignant neoplasm of breast, unspecified'
                     "description": d.icd10_description,
+                    "long_description": d.long_description,
                     "recorded_at": d.created_at.strftime('%Y-%m-%d %H:%M')
                 } for d in diagnoses
             ]

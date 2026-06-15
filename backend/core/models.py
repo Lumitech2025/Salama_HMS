@@ -552,6 +552,63 @@ class Drug(models.Model):
     def is_expired(self):
         return date.today() >= self.expiry_date if self.expiry_date else False
     
+class ICD10Diagnosis(models.Model):
+    # Pure anatomical primary sites matching your exact UI layout
+    PRIMARY_SITE_CHOICES = [
+        ('BREAST', 'Breast'),
+        ('HEAD & NECK', 'Head & Neck'),
+        ('BONE & NECK', 'Bone & Neck'),
+        ('BRAIN TUMOURS', 'Brain Tumours'),
+        ('GASTROINTESTINAL', 'Gastrointestinal'),
+        ('LUNG', 'Lung'),
+        ('UROLOGICAL', 'Urological'),
+        ('KAPOSI SARCOMA', 'Kaposi Sarcoma'),
+        ('GYNAECOLOGICAL', 'Gynaecological'),
+        ('LEUKEMIA', 'Leukemia'),
+    ]
+    
+    primary_site = models.CharField(max_length=50, choices=PRIMARY_SITE_CHOICES, db_index=True)
+    code = models.CharField(max_length=15, unique=True, db_index=True)
+    short_description = models.CharField(max_length=255)
+    long_description = models.TextField()
+
+    class Meta:
+        verbose_name = "Anatomical Diagnosis Mapping"
+        verbose_name_plural = "Anatomical Diagnosis Mappings"
+
+    def __str__(self):
+        return f"[{self.code}] {self.short_description}"
+    
+
+class PatientDiagnosis(models.Model):
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='diagnoses')
+    
+    # 🔗 Point explicitly to RegistrationRecord while keeping the field name 'visit' 
+    # to maintain compatibility with the frontend API payloads
+    visit = models.ForeignKey(RegistrationRecord, on_delete=models.CASCADE, related_name='diagnoses')
+    
+    primary_site = models.CharField(
+        max_length=50, 
+        choices=ICD10Diagnosis.PRIMARY_SITE_CHOICES, 
+        db_index=True
+    )
+    
+    # Snapshot details of the selected diagnosis code
+    icd10_code = models.CharField(max_length=15, db_index=True)
+    icd10_description = models.CharField(max_length=255)
+    long_description = models.TextField(blank=True, null=True)
+    
+    # Automatically tracks date and time of the entry
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = "Patient Diagnosis Record"
+        verbose_name_plural = "Patient Diagnosis Records"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        # Displays the assigned health record number cleanly in the Django Admin portal
+        return f"[{self.icd10_code}] - {self.visit.health_record_number} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
     
 
 
@@ -570,7 +627,13 @@ class Prescription(models.Model):
     )
     
     # Clinical Metadata Fields (Tier 1)
-    diagnosis = models.CharField(max_length=255, blank=True, default='')
+    diagnosis = models.ForeignKey(
+        'PatientDiagnosis', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='prescriptions'
+    )
     protocol = models.CharField(max_length=255, blank=True, default='')
     cycle_no = models.CharField(max_length=50, default='1')
     total_cycles = models.CharField(max_length=50, blank=True, default='')
@@ -2221,64 +2284,7 @@ class PatientBillableItem(models.Model):
 
 
 
-class ICD10Diagnosis(models.Model):
-    # Pure anatomical primary sites matching your exact UI layout
-    PRIMARY_SITE_CHOICES = [
-        ('BREAST', 'Breast'),
-        ('HEAD & NECK', 'Head & Neck'),
-        ('BONE & NECK', 'Bone & Neck'),
-        ('BRAIN TUMOURS', 'Brain Tumours'),
-        ('GASTROINTESTINAL', 'Gastrointestinal'),
-        ('LUNG', 'Lung'),
-        ('UROLOGICAL', 'Urological'),
-        ('KAPOSI SARCOMA', 'Kaposi Sarcoma'),
-        ('GYNAECOLOGICAL', 'Gynaecological'),
-        ('LEUKEMIA', 'Leukemia'),
-    ]
-    
-    primary_site = models.CharField(max_length=50, choices=PRIMARY_SITE_CHOICES, db_index=True)
-    code = models.CharField(max_length=15, unique=True, db_index=True)
-    short_description = models.CharField(max_length=255)
-    long_description = models.TextField()
 
-    class Meta:
-        verbose_name = "Anatomical Diagnosis Mapping"
-        verbose_name_plural = "Anatomical Diagnosis Mappings"
-
-    def __str__(self):
-        return f"[{self.code}] {self.short_description}"
-    
-
-class PatientDiagnosis(models.Model):
-    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='diagnoses')
-    
-    # 🔗 Point explicitly to RegistrationRecord while keeping the field name 'visit' 
-    # to maintain compatibility with the frontend API payloads
-    visit = models.ForeignKey(RegistrationRecord, on_delete=models.CASCADE, related_name='diagnoses')
-    
-    primary_site = models.CharField(
-        max_length=50, 
-        choices=ICD10Diagnosis.PRIMARY_SITE_CHOICES, 
-        db_index=True
-    )
-    
-    # Snapshot details of the selected diagnosis code
-    icd10_code = models.CharField(max_length=15, db_index=True)
-    icd10_description = models.CharField(max_length=255)
-    long_description = models.TextField(blank=True, null=True)
-    
-    # Automatically tracks date and time of the entry
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-
-    class Meta:
-        verbose_name = "Patient Diagnosis Record"
-        verbose_name_plural = "Patient Diagnosis Records"
-        ordering = ['-created_at']
-
-    def __str__(self):
-        # Displays the assigned health record number cleanly in the Django Admin portal
-        return f"[{self.icd10_code}] - {self.visit.health_record_number} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
-    
 
 class FixedAsset(models.Model):
     DEPARTMENT_CHOICES = [

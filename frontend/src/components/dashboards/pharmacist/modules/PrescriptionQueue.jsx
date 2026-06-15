@@ -1,388 +1,516 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import API from '@/api/api';
 import { 
-  User, Pill, ChevronDown, CheckCircle2, 
-  Loader2, Send, Clock, ShieldAlert, 
-  Activity, Receipt, Printer, PackageCheck, AlertTriangle
+  Send, Download, FileText, Loader2, ChevronDown 
 } from 'lucide-react';
+import SalamaLogo from "@/assets/Salama Cancer Centre logo.png";
 
-const PrescriptionQueue = ({ onTabSwitch }) => {
-  const [completedOrders, setCompletedOrders] = useState([]);
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const [prescriptionData, setPrescriptionData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [loadingOrders, setLoadingOrders] = useState(true);
-  const [isDispensing, setIsDispensing] = useState(false);
-  const [dispenseQuantities, setDispenseQuantities] = useState({});
-
-  // 1. Fetch completed lab orders pipeline
-  const fetchCompletedLabOrders = useCallback(async () => {
-    try {
-      const res = await API.get('/lab-orders?status=COMPLETED');
-      const orders = res.data.results || res.data || [];
-      setCompletedOrders(orders);
-    } catch (err) {
-      console.error("Error pulling clinical lab pipeline:", err);
-    } finally {
-      setLoadingOrders(false);
+const getCookie = (name) => {
+  let cookieValue = null;
+  if (document.cookie && document.cookie !== '') {
+    const cookies = document.cookie.split(';');
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i].trim();
+      if (cookie.substring(0, name.length + 1) === (name + '=')) {
+        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+        break;
+      }
     }
-  }, []);
+  }
+  return cookieValue;
+};
 
-  useEffect(() => {
-    fetchCompletedLabOrders();
-    const interval = setInterval(fetchCompletedLabOrders, 15000); 
-    return () => clearInterval(interval);
-  }, [fetchCompletedLabOrders]);
+const PrescriptionQueue = ({ onDispensingComplete }) => {
+  // ─── STATE MANAGEMENT ─────────────────────────────────────────────
+  const [queuePatients, setQueuePatients] = useState([]);
+  const [selectedQueueId, setSelectedQueueId] = useState('');
+  const [loadingQueue, setLoadingQueue] = useState(true);
+  const [selectedPrescription, setSelectedPrescription] = useState(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // 2. Hydrate prescription details
-  const handleSelectOrder = useCallback(async (orderItem) => {
-    setLoading(true);
-    setSelectedOrder(orderItem);
+  // Fetch active station queue items 
+  const loadPharmacyQueue = useCallback(async () => {
+    setLoadingQueue(true);
     try {
-      const patientId = orderItem.patient; 
-      const res = await API.get(`/prescriptions?patient=${patientId}&pharmacy_status=PENDING`);
-      const results = res.data.results || res.data;
+      const token = localStorage.getItem('access_token');
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const response = await API.get('queue/?current_station=PHARMACY', { headers });
+      const rawData = response.data.results || response.data || [];
+      setQueuePatients(rawData);
       
-      if (results.length > 0) {
-        const primaryPrescription = results[0];
-        setPrescriptionData(primaryPrescription);
-        
-        const defaultQtys = {};
-        primaryPrescription.items?.forEach(item => {
-          defaultQtys[item.id] = parseInt(item.quantity_requested || item.quantity || 1);
-        });
-        setDispenseQuantities(defaultQtys);
-      } else {
-        setPrescriptionData(null);
-        setDispenseQuantities({});
+      if (rawData.length > 0 && !selectedQueueId) {
+        setSelectedQueueId(rawData[0].id.toString());
       }
     } catch (err) {
-      console.error("Prescription hydration error:", err);
-      setPrescriptionData(null);
+      console.error("[Salama Pharma Hub] Failed fetching operational queue:", err);
     } finally {
-      setLoading(false);
+      setLoadingQueue(false);
     }
-  }, []);
+  }, [selectedQueueId]);
 
   useEffect(() => {
-    if (completedOrders.length > 0 && !selectedOrder && !loadingOrders) {
-      handleSelectOrder(completedOrders[0]);
+    loadPharmacyQueue();
+  }, [loadPharmacyQueue]);
+
+  const activeQueueItem = useMemo(() => {
+    return queuePatients.find(p => p.id.toString() === selectedQueueId);
+  }, [queuePatients, selectedQueueId]);
+
+  // Hydrate full treatment details from database mapping layout
+  useEffect(() => {
+    if (!activeQueueItem) {
+      setSelectedPrescription(null);
+      return;
     }
-  }, [completedOrders, selectedOrder, loadingOrders, handleSelectOrder]);
 
-  const handleQuantityChange = (itemId, val) => {
-    const cleanVal = Math.max(0, parseInt(val) || 0);
-    setDispenseQuantities(prev => ({ ...prev, [itemId]: cleanVal }));
-  };
+    const rxId = activeQueueItem.prescription?.id || activeQueueItem.prescription || activeQueueItem.prescription_id;
+    const fallbackTargetId = rxId || activeQueueItem.patient?.id || activeQueueItem.id;
 
-  // --- Sorting & Calculations Phase Arrays ---
-  const items = useMemo(() => prescriptionData?.items || [], [prescriptionData]);
+    if (!fallbackTargetId) {
+      setSelectedPrescription(null);
+      return;
+    }
+
+    const loadActivePrescription = async () => {
+      setLoadingDetails(true);
+      try {
+        const token = localStorage.getItem('access_token');
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const response = await API.get(`prescriptions/${fallbackTargetId}/`, { headers });
+        setSelectedPrescription(response.data);
+      } catch (err) {
+        console.error(`[Salama Exception] Using structured telemetry fallback for ID #${fallbackTargetId}`);
+        setSelectedPrescription({
+          id: activeQueueItem.id,
+          patient_name: activeQueueItem.patient_name || activeQueueItem.patient?.name || "Unknown Patient",
+          patient_hn: activeQueueItem.patient_hn || activeQueueItem.patient?.hn || "—",
+          age: activeQueueItem.age || activeQueueItem.patient?.age || "—",
+          gender: activeQueueItem.gender || activeQueueItem.patient?.gender || "—",
+          diagnosis: activeQueueItem.diagnosis || "—",
+          protocol: activeQueueItem.protocol || "TC",
+          cycle_number: activeQueueItem.cycle_number || 1,
+          total_cycles: activeQueueItem.total_cycles || 6,
+          treatment_date: activeQueueItem.treatment_date || new Date().toISOString().split('T')[0],
+          items: activeQueueItem.items || [],
+          vitals_snapshot: activeQueueItem.vitals_snapshot || {}
+        });
+      } finally {
+        setLoadingDetails(false);
+      }
+    };
+
+    loadActivePrescription();
+  }, [activeQueueItem]);
+
+  // Process dynamic operational math
+  const items = useMemo(() => selectedPrescription?.items || [], [selectedPrescription]);
 
   const { preMeds, chemoDrugs, postMeds } = useMemo(() => {
     return {
-      preMeds: items.filter(i => i.category?.toUpperCase() === 'PRE_MEDICATION' || i.is_pre_med),
-      chemoDrugs: items.filter(i => i.category?.toUpperCase() === 'CHEMOTHERAPY' || (!i.category && !i.is_pre_med && !i.is_post_med)),
-      postMeds: items.filter(i => i.category?.toUpperCase() === 'POST_MEDICATION' || i.is_post_med)
+      preMeds: items.filter(i => i.stage === 'PRE_CHEMO'),
+      chemoDrugs: items.filter(i => i.stage === 'CHEMO'),
+      postMeds: items.filter(i => i.stage === 'POST_CHEMO')
     };
   }, [items]);
 
-  const calculateSectionCost = useCallback((medGroup) => {
-    return medGroup.reduce((sum, item) => {
-      const unitPrice = parseFloat(item.drug?.price || item.unit_price || 0);
-      const actualQty = dispenseQuantities[item.id] ?? parseInt(item.quantity_requested || item.quantity || 1);
-      return sum + (unitPrice * actualQty);
-    }, 0);
-  }, [dispenseQuantities]);
+  const calculatedDispensation = useMemo(() => {
+    let total = 0;
+    const processItem = (item) => {
+      const dosageMatch = item.dosage ? item.dosage.match(/\d+/) : null;
+      const qty = dosageMatch ? parseInt(dosageMatch[0], 10) : 1;
+      const price = parseFloat(item.selling_price_kes || item.price || 0);
+      const cost = qty * price;
+      total += cost;
+      return { ...item, qtyDispensed: qty, cost };
+    };
 
-  const preMedsCost = useMemo(() => calculateSectionCost(preMeds), [preMeds, calculateSectionCost]);
-  const chemoCost = useMemo(() => calculateSectionCost(chemoDrugs), [chemoDrugs, calculateSectionCost]);
-  const postMedsCost = useMemo(() => calculateSectionCost(postMeds), [postMeds, calculateSectionCost]);
-  const grandTotalCost = preMedsCost + chemoCost + postMedsCost;
+    return {
+      preMeds: preMeds.map(processItem),
+      chemoDrugs: chemoDrugs.map(item => {
+        const targetMg = parseFloat(item.dosage || 0);
+        const strengthMg = item.available_stock ? parseFloat(item.available_stock) : 1;
+        const qty = Math.ceil(targetMg / (strengthMg || 1)) || 1;
+        const price = parseFloat(item.selling_price_kes || item.price || 0);
+        const cost = qty * price;
+        total += cost;
+        return { ...item, qtyDispensed: qty, cost };
+      }),
+      postMeds: postMeds.map(processItem),
+      grandTotal: total
+    };
+  }, [preMeds, chemoDrugs, postMeds]);
 
-  const handleCompleteDispense = async () => {
-    if (!prescriptionData || !selectedOrder) return;
-    setIsDispensing(true);
+  const handleSaveAndSubmit = async () => {
+    if (!selectedPrescription) return;
+    setIsProcessing(true);
     try {
-      const finalItemsPayload = items.map(item => ({
+      const dispatchPayload = [
+        ...calculatedDispensation.preMeds,
+        ...calculatedDispensation.chemoDrugs,
+        ...calculatedDispensation.postMeds
+      ].map(item => ({
         id: item.id,
-        quantity_dispensed: dispenseQuantities[item.id] || 0,
-        unit_price: parseFloat(item.drug?.price || item.unit_price || 0),
-        total_price: (dispenseQuantities[item.id] || 0) * parseFloat(item.drug?.price || item.unit_price || 0)
+        quantity_dispensed: item.qtyDispensed,
+        cost: item.cost
       }));
 
-      await API.patch(`/prescriptions/${prescriptionData.id}/`, { 
+      const jwtToken = localStorage.getItem('access_token');
+      const csrfToken = getCookie('csrftoken');
+
+      await API.patch(`prescriptions/${selectedPrescription.id}/`, {
         pharmacy_status: 'DISPENSED',
-        dispensed_items_override: finalItemsPayload,
-        actual_total_cost: grandTotalCost
+        meta_extensions: { dispensation_summary: dispatchPayload, final_cost: calculatedDispensation.grandTotal }
+      }, {
+        headers: {
+          ...(jwtToken && { Authorization: `Bearer ${jwtToken}` }),
+          ...(csrfToken && { 'X-CSRFToken': csrfToken })
+        }
       });
-      
-      if (selectedOrder.visit) {
-        try {
-          await API.patch(`/queue/update-by-visit/${selectedOrder.visit}/`, { 
-            status: 'WAITING',
-            current_station: 'BILLING' 
-          });
-        } catch (e) { console.warn("Queue track change skipped."); }
-      }
 
-      if (onTabSwitch) {
-        onTabSwitch('billing', {
-          patientId: selectedOrder.patient,
-          invoiceNo: `INV-ONC-${prescriptionData.id}`,
-          grandTotalCost
-        });
-      }
-
-      setSelectedOrder(null);
-      setPrescriptionData(null);
-      fetchCompletedLabOrders();
+      alert("Dispensation records processed successfully.");
+      setSelectedQueueId('');
+      await loadPharmacyQueue();
+      if (onDispensingComplete) onDispensingComplete();
     } catch (err) {
       console.error(err);
+      alert("Error committing transactional adjustments.");
     } finally {
-      setIsDispensing(false);
+      setIsProcessing(false);
     }
   };
 
+  const vitals = selectedPrescription?.vitals_snapshot || {};
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6 px-2 pb-16 text-slate-700 font-sans antialiased">
+    <div className="max-w-7xl mx-auto p-2 sm:p-4 text-slate-800 font-sans antialiased space-y-5">
       
-      {/* CLEAN USER SELECTOR BLOCK */}
-      <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-teal-50 rounded-xl flex items-center justify-center text-teal-600">
-            <User size={20} />
-          </div>
-          <div>
-            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Awaiting Dispense Pipeline</h4>
-            <p className="text-sm font-bold text-slate-800">Select Lab-Cleared Recipient</p>
-          </div>
+      {/* ─── PRINT MEDIA CSS ENGINE ───────────────────────────── */}
+      <style>{`
+        @media print {
+          html, body, #root, min-h-screen, main, .app-layout-wrapper {
+            background: #ffffff !important;
+            color: #000000 !important;
+            overflow: visible !important;
+            height: auto !important;
+            max-height: none !important;
+            display: block !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+
+          aside, nav, header, sidebar, .print\\:hidden, button, select, icon, .no-print {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
+          }
+
+          .print-target-sheet {
+            display: block !important;
+            border: none !important;
+            padding: 15px !important;
+            margin: 0px !important;
+            box-shadow: none !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            background: #ffffff !important;
+          }
+
+          table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            page-break-inside: auto !important;
+          }
+          tr {
+            page-break-inside: avoid !important;
+            page-break-after: auto !important;
+          }
+          thead {
+            display: table-header-group !important;
+          }
+        }
+      `}</style>
+
+      {/* ACTIVE QUEUE SELECTOR CONTAINER */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs print:hidden flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <label className="text-xs font-bold text-teal-600 uppercase tracking-widest block">
+            <h2>Pharmacy Dispensing Queue</h2>
+          </label>
         </div>
-        <div className="relative min-w-[280px]">
-          <select 
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-4 pr-10 py-2.5 text-sm font-medium text-slate-800 appearance-none outline-none focus:border-teal-500 transition-all cursor-pointer"
-            onChange={(e) => {
-              const order = completedOrders.find(o => o.id === parseInt(e.target.value));
-              if(order) handleSelectOrder(order);
-            }}
-            value={selectedOrder?.id || ''}
-          >
-            <option value="" disabled>
-              {loadingOrders ? "Scanning workflow servers..." : "Choose Patient Chart..."}
-            </option>
-            {completedOrders.map(order => (
-              <option key={order.id} value={order.id}>{order.patient_name}</option>
-            ))}
-          </select>
-          <ChevronDown className="absolute right-3.5 top-3.5 text-slate-400 pointer-events-none" size={16} />
-        </div>
-      </div>
-
-      {selectedOrder ? (
-        <div className="bg-white border border-slate-100 rounded-2xl p-6 md:p-8 shadow-sm space-y-8">
-          
-          {/* PROFILE SUMMARY HERO ROW */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-6">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2.5">
-                <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse" />
-                <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-                  {prescriptionData?.regimen_name || "Custom Therapy Protocol"}
-                </h2>
-                <span className="bg-teal-50 text-teal-700 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-teal-100">
-                  Cycle {prescriptionData?.cycle_number || 1} of {prescriptionData?.total_cycles || 6}
-                </span>
-              </div>
-              <p className="text-sm text-slate-400">
-                Patient: <span className="font-semibold text-slate-700">{selectedOrder.patient_name}</span>
-              </p>
-            </div>
-
-            <div className="flex items-center gap-6 text-sm">
-              <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-2">
-                <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Target BSA</span>
-                <span className="font-mono font-bold text-slate-800">{prescriptionData?.bsa || "1.75"} m²</span>
-              </div>
-              <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl px-4 py-2">
-                <span className="text-[10px] text-emerald-600 uppercase font-bold tracking-wider block">Fulfillment Status</span>
-                <span className="font-bold text-emerald-700 flex items-center gap-1"><PackageCheck size={14}/> Allocations Verified</span>
-              </div>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="py-20 text-center space-y-3">
-              <Loader2 className="animate-spin text-teal-600 mx-auto" size={36} />
-              <p className="text-xs text-slate-400 font-medium">Re-calculating pricing arrays matrix...</p>
+        <div className="relative min-w-[320px]">
+          {loadingQueue ? (
+            <div className="flex items-center gap-2 text-sm text-slate-500 p-2 bg-slate-50 rounded-lg">
+              <Loader2 className="animate-spin text-teal-500" size={14} />
+              <span>Scanning network stations...</span>
             </div>
           ) : (
-            <div className="space-y-8">
-              
-              {/* PHASES LIST GENERATOR */}
-              <MedicationSection 
-                title="Phase 1: Pre-Medication Protocols" 
-                icon={<ShieldAlert size={16} className="text-amber-500" />}
-                items={preMeds}
-                quantities={dispenseQuantities}
-                onQtyChange={handleQuantityChange}
-                accentColor="amber"
-              />
+            <div className="relative">
+              <select
+                value={selectedQueueId}
+                onChange={(e) => setSelectedQueueId(e.target.value)}
+                className="w-full bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 focus:border-teal-500 rounded-lg px-3 py-2 text-sm font-semibold appearance-none outline-none transition-all pr-10 cursor-pointer"
+              >
+                <option value="">-- Select Patient Profile --</option>
+                {queuePatients.map((pt) => (
+                  <option key={pt.id} value={pt.id}>
+                    {pt.patient_name || pt.patient?.name || `Queue Ticket #${pt.id}`}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+            </div>
+          )}
+        </div>
+      </div>
 
-              <MedicationSection 
-                title="Phase 2: Cytotoxic Drug Pipeline" 
-                icon={<Pill size={16} className="text-rose-500" />}
-                items={chemoDrugs}
-                quantities={dispenseQuantities}
-                onQtyChange={handleQuantityChange}
-                accentColor="rose"
-              />
+      {/* MEDICAL DOCUMENT CONTENT BOX */}
+      {loadingDetails ? (
+        <div className="flex flex-col items-center justify-center py-24 space-y-3 bg-white border border-slate-100 rounded-xl">
+          <Loader2 className="animate-spin text-teal-600" size={32} />
+          <p className="text-sm text-slate-500 font-semibold tracking-wide">Assembling patient medication cards...</p>
+        </div>
+      ) : selectedPrescription ? (
+        <div className="print-target-sheet bg-white border border-slate-200 rounded-xl p-5 sm:p-6 space-y-6 shadow-xs">
+          
+          {/* DYNAMIC REPORT BANNER HEADER — INSTANTIATES ONLY VIA PRINT ENGINE */}
+          <div className="hidden print:flex justify-between items-center border-b-2 border-slate-400 pb-3 mb-4">
+            <div className="flex items-center gap-4">
+              <img src={SalamaLogo} alt="Salama Cancer Centre" className="h-12 w-auto object-contain" />
+              <div>
+                <h1 className="text-base font-bold text-slate-900 tracking-tight">SALAMA CANCER CENTRE</h1>
+                <p className="text-xs text-slate-600 font-medium tracking-wide">Holistic Cancer and Palliative Care</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 bg-slate-100 px-2.5 py-1 rounded border border-slate-300">
+                CHEMOTHERAPY PRESCRIPTION FORM
+              </h2>
+              <p className="text-xs font-mono text-slate-600 mt-0.5">Rx ID Ref: #{selectedPrescription.id}</p>
+            </div>
+          </div>
 
-              <MedicationSection 
-                title="Phase 3: Post-Chemo Take-Home Elements" 
-                icon={<CheckCircle2 size={16} className="text-indigo-500" />}
-                items={postMeds}
-                quantities={dispenseQuantities}
-                onQtyChange={handleQuantityChange}
-                accentColor="indigo"
-              />
-
-              {/* STATS AND SUMMARY INVOICE FOOTER */}
-              <div className="bg-slate-50/80 border border-slate-100 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-white rounded-xl shadow-sm border border-slate-100 flex items-center justify-center text-slate-500">
-                    <Receipt size={22} />
+          {/* TWO SEPARATE TILES FOR DEMOGRAPHICS & CLINICAL DATA */}
+          <div className="space-y-4">
+            
+            {/* TILE 1: PATIENT BASE DEMOGRAPHICS */}
+            <div className="border border-slate-200 rounded-xl p-4 bg-white text-sm shadow-2xs">
+              <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5">Patient Demographics</div>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-2.5">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-medium shrink-0">Name:</span>
+                    <span className="font-bold text-slate-900 text-base">{selectedPrescription.patient_name || "—"}</span>
                   </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-800">Pharmacy Claims Breakdown</h4>
-                    <p className="text-xs text-slate-400">Values update in real-time based on active inventory dispense overrides.</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-medium shrink-0">Age:</span>
+                    <span className="font-semibold text-slate-900">{selectedPrescription.age || "—"} Yrs</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-medium shrink-0">Sex:</span>
+                    <span className="font-semibold text-slate-900">{selectedPrescription.gender || "—"}</span>
                   </div>
                 </div>
-                
-                <div className="text-right">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Payable Valuation</span>
-                  <div className="text-2xl font-black font-mono text-slate-900">
-                    <span className="text-xs font-bold text-slate-400 mr-1 font-sans text-teal-600">KES</span>
-                    {grandTotalCost.toLocaleString()}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-medium shrink-0">Health Rec No:</span>
+                    <span className="font-mono font-bold text-slate-900 text-sm">{selectedPrescription.patient_hn || "—"}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-medium shrink-0">Date:</span>
+                    <span className="font-semibold text-slate-900">{selectedPrescription.treatment_date || "—"}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* TILE 2: CLINICAL CONTEXT, DIAGNOSIS & VITALS BAND */}
+            <div className="border border-slate-200 rounded-xl p-4 bg-white text-sm shadow-2xs space-y-4">
+              <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Clinical Staging & Diagnostics</div>
+              <div className="grid grid-cols-2 gap-x-8 gap-y-2.5">
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2">
+                    <span className="text-slate-500 font-medium shrink-0">Diagnosis:</span>
+                    <span className="font-semibold text-slate-900 leading-tight">{selectedPrescription.diagnosis || "—"}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-medium shrink-0">Protocol:</span>
+                    <span className="font-bold text-teal-800">{selectedPrescription.protocol || "—"}</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-medium shrink-0">Cycle No:</span>
+                    <span className="font-mono font-semibold text-slate-900">{selectedPrescription.cycle_number || 1}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-500 font-medium shrink-0">Total Cycles:</span>
+                    <span className="font-mono font-semibold text-slate-900">{selectedPrescription.total_cycles || 6}</span>
                   </div>
                 </div>
               </div>
 
+              {/* VITALS BAND ATTACHED TO BOTTOM OF CLINICAL TILE */}
+              <div className="grid grid-cols-3 gap-4 pt-3 border-t border-slate-150 bg-slate-50/70 p-3 rounded-lg text-sm">
+                <div className="flex justify-between items-center px-2">
+                  <span className="text-slate-600 font-medium">Height:</span>
+                  <span className="font-mono font-semibold text-slate-900">{vitals.height_cm || "—"} cm</span>
+                </div>
+                <div className="flex justify-between items-center px-2 border-x border-slate-200">
+                  <span className="text-slate-600 font-medium">Weight:</span>
+                  <span className="font-mono font-semibold text-slate-900">{vitals.weight_kg || "—"} kg</span>
+                </div>
+                <div className="flex justify-between items-center px-2">
+                  <span className="text-teal-800 font-bold">Calculated BSA:</span>
+                  <span className="font-mono font-bold text-teal-800">{vitals.bsa || "—"} m²</span>
+                </div>
+              </div>
             </div>
-          )}
 
-          {/* DISPENSING ACTION ROW */}
-          <div className="border-t border-slate-100 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-4 text-xs font-medium text-slate-400">
-              <span className="flex items-center gap-1 text-emerald-600 font-semibold"><Clock size={14}/> Live Syncing Active</span>
-              <span>•</span>
-              <button onClick={() => window.print()} type="button" className="hover:text-slate-800 inline-flex items-center gap-1.5 transition-colors">
-                <Printer size={14}/> Print Manifest
-              </button>
+          </div>
+
+          {/* PRE-CHEMOTHERAPY STAGE */}
+          <div className="space-y-2">
+            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-1">Pre-Chemotherapy Stage</h4>
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                    <th className="py-2.5 px-3">Medication Name</th>
+                    <th className="py-2.5 px-3 text-center">Dosage Formula</th>
+                    <th className="py-2.5 px-3 text-center">Route</th>
+                    <th className="py-2.5 px-3 text-center">Duration</th>
+                    <th className="py-2.5 px-3 text-right">Cost (KES)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {calculatedDispensation.preMeds.length > 0 ? (
+                    calculatedDispensation.preMeds.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-50/40">
+                        <td className="py-2.5 px-3 font-bold text-slate-900">{item.medication_name || item.name}</td>
+                        <td className="py-2.5 px-3 text-center font-mono">{item.dosage || "STAT"}</td>
+                        <td className="py-2.5 px-3 text-center">{item.route || "IV"}</td>
+                        <td className="py-2.5 px-3 text-center">{item.duration || "—"}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-medium">{(item.cost || 0).toLocaleString()}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr><td colSpan="5" className="py-4 text-center text-slate-400 italic font-medium">No pre-chemotherapy items listed.</td></tr>
+                  )}
+                </tbody>
+              </table>
             </div>
+          </div>
 
-            <button 
-              onClick={handleCompleteDispense}
-              disabled={isDispensing || !prescriptionData || grandTotalCost === 0}
-              className="w-full sm:w-auto bg-teal-600 text-white hover:bg-teal-700 disabled:opacity-40 px-8 py-3.5 rounded-xl text-xs font-bold uppercase tracking-wider shadow-sm shadow-teal-600/10 transition-all flex items-center justify-center gap-2"
+          {/* CYTOTOXIC CHEMOTHERAPY ORDERS */}
+          <div className="space-y-2">
+            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-1">Chemotherapy Orders</h4>
+            <div className="border border-slate-200 rounded-xl overflow-hidden overflow-x-auto">
+              <table className="w-full text-left text-sm min-w-[800px]">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                    <th className="py-2.5 px-3">Medication Name</th>
+                    <th className="py-2.5 px-3">Formulation</th>
+                    <th className="py-2.5 px-3 text-center">Route</th>
+                    <th className="py-2.5 px-3">Diluent Carrier</th>
+                    <th className="py-2.5 px-3 text-center">Volume</th>
+                    <th className="py-2.5 px-3 text-center bg-slate-100/60">Dose Prescribed</th>
+                    <th className="py-2.5 px-3 text-center bg-teal-50/60 text-teal-900">Unit Stock Qty</th>
+                    <th className="py-2.5 px-3 text-right">Cost (KES)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {calculatedDispensation.chemoDrugs.length > 0 ? (
+                    calculatedDispensation.chemoDrugs.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-50/40">
+                        <td className="py-2.5 px-3 font-bold text-slate-900">{item.medication_name || item.name}</td>
+                        <td className="py-2.5 px-3">{item.dosage_form || "Vial"}</td>
+                        <td className="py-2.5 px-3 text-center">{item.route || "IV Infusion"}</td>
+                        <td className="py-2.5 px-3">{item.diluent || "—"}</td>
+                        <td className="py-2.5 px-3 text-center font-mono">{item.volume || "—"}</td>
+                        <td className="py-2.5 px-3 text-center font-mono font-medium bg-slate-50/50">{item.dosage || "0"} mg</td>
+                        <td className="py-2.5 px-3 text-center font-mono font-bold bg-teal-50/10 text-teal-800">{item.qtyDispensed}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-medium text-slate-900">{(item.cost || 0).toLocaleString()}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr><td colSpan="8" className="py-4 text-center text-slate-400 italic font-medium">No active cytotoxic items recorded.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* POST-CHEMO TAKE HOME ORDERS */}
+          <div className="space-y-2">
+            <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider border-b border-slate-200 pb-1">Post-Chemotherapy Take Home Orders</h4>
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                    <th className="py-2.5 px-3">Medication Name</th>
+                    <th className="py-2.5 px-3 text-center">Dose / Strength</th>
+                    <th className="py-2.5 px-3 text-center">Calculated Units</th>
+                    <th className="py-2.5 px-4 text-right">Cost (KES)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {calculatedDispensation.postMeds.length > 0 ? (
+                    calculatedDispensation.postMeds.map((item) => (
+                      <tr key={item.id} className="hover:bg-slate-50/40">
+                        <td className="py-2.5 px-3 font-bold text-slate-900">{item.medication_name || item.name}</td>
+                        <td className="py-2.5 px-3 text-center font-mono">{item.dosage || "—"}</td>
+                        <td className="py-2.5 px-3 text-center font-mono font-semibold text-slate-900">{item.qtyDispensed}</td>
+                        <td className="py-2.5 px-4 text-right font-mono font-medium text-slate-900">{(item.cost || 0).toLocaleString()}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr><td colSpan="4" className="py-4 text-center text-slate-400 italic font-medium">No take-home medications assigned.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* TOTALS SEPARATOR FOOTER BLOCK */}
+          <div className="bg-slate-900 border border-slate-950 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-white shadow-xs">
+            <div className="space-y-1">
+              <span className="text-xs font-bold text-teal-400 uppercase tracking-widest block">Total Cost</span>
+            </div>
+            <div className="text-right">
+              <span className="text-2xl font-bold font-mono tracking-tight text-teal-400">
+                <span className="text-sm font-normal text-slate-400 mr-1.5">KES</span>
+                {calculatedDispensation.grandTotal.toLocaleString()}
+              </span>
+            </div>
+          </div>
+
+          {/* CONTAINER ACTIONS PANEL */}
+          <div className="border-t pt-4 flex justify-end gap-3 print:hidden">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-2 border border-slate-300 bg-white hover:bg-slate-50 px-4 py-2 rounded-lg text-sm font-bold text-slate-600 transition-colors cursor-pointer"
             >
-              {isDispensing ? <Loader2 className="animate-spin" size={16}/> : <Send size={14} />}
-              Finalize Dispense & Send To Invoice
+              <Download size={14} /> Print Prescription Form
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveAndSubmit}
+              disabled={isProcessing || calculatedDispensation.grandTotal === 0}
+              className="bg-teal-600 hover:bg-teal-700 text-white disabled:opacity-50 px-5 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <Send size={14} /> Commit Dispensation
             </button>
           </div>
-
         </div>
       ) : (
-        /* LIGHTWEIGHT STANDARD EMPTY STATE */
-        <div className="bg-white border border-slate-100 rounded-2xl py-24 text-center shadow-sm max-w-xl mx-auto space-y-4">
-          <div className="w-14 h-14 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-300">
-            <Pill size={24} />
-          </div>
-          <div className="space-y-1">
-            <h3 className="text-base font-bold text-slate-800">Pharmacy Pipe Awaiting Selection</h3>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
-              Please choose a patient from the top laboratory clearance pipeline to pull records, quantify medications, and generate billable items.
-            </p>
-          </div>
+        <div className="bg-white border border-slate-200 rounded-xl py-24 text-center max-w-sm mx-auto space-y-2 shadow-xs">
+          <FileText className="text-slate-300 mx-auto" size={36} />
+          <p className="text-sm text-slate-800 font-semibold tracking-tight">No active clinical row targeted.</p>
+          <p className="text-xs text-slate-400 max-w-[260px] mx-auto leading-relaxed">Please choose an arrived patient candidate from the pharmacy queue dropdown above to populate medication metrics.</p>
         </div>
       )}
-    </div>
-  );
-};
-
-// --- LIGHTWEIGHT SUB-SECTION TABLE GENERATOR ---
-const MedicationSection = ({ title, icon, items, quantities, onQtyChange, accentColor }) => {
-  if (items.length === 0) return null;
-
-  const themes = {
-    amber: 'border-amber-100 text-amber-700 bg-amber-50/50',
-    rose: 'border-rose-100 text-rose-700 bg-rose-50/50',
-    indigo: 'border-indigo-100 text-indigo-700 bg-indigo-50/50'
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2 pb-1 border-b border-slate-100">
-        {icon}
-        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">{title}</h4>
-      </div>
-      
-      <div className="border border-slate-100 rounded-xl overflow-hidden bg-white">
-        <table className="w-full text-left text-sm border-collapse">
-          <thead>
-            <tr className="bg-slate-50 text-slate-400 text-[11px] font-bold uppercase tracking-wider border-b border-slate-100">
-              <th className="py-3 px-4 font-semibold">Medication Compound Name</th>
-              <th className="py-3 px-4 font-semibold">Administration Order</th>
-              <th className="py-3 px-4 font-semibold text-center w-36">Dispense Qty</th>
-              <th className="py-3 px-4 font-semibold text-right w-44">Itemized Valuation</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {items.map((item) => {
-              const basePrice = parseFloat(item.drug?.price || item.unit_price || 0);
-              const activeQty = quantities[item.id] ?? 0;
-              const lineCost = basePrice * activeQty;
-              const isModified = parseInt(item.quantity_requested || item.quantity) !== activeQty;
-
-              return (
-                <tr key={item.id} className="hover:bg-slate-50/40 transition-colors">
-                  <td className="py-4 px-4">
-                    <p className="font-bold text-slate-800 text-sm">
-                      {item.medication_name || item.drug?.name || "Therapeutic Compound"}
-                    </p>
-                    {isModified && (
-                      <span className="inline-flex items-center gap-1 text-[9px] font-bold text-amber-600 mt-1">
-                        <AlertTriangle size={10} /> Ordered: {item.quantity_requested || item.quantity}
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-4 px-4">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 border rounded ${themes[accentColor]}`}>
-                        {item.dosage || "Standard Dose"}
-                      </span>
-                      <span className="text-xs text-slate-400 font-medium">
-                        {item.route || "IV"} • {item.frequency || "STAT"}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="py-4 px-4 text-center">
-                    <input 
-                      type="number" 
-                      min="0"
-                      value={activeQty} 
-                      onChange={(e) => onQtyChange(item.id, e.target.value)}
-                      className="w-20 bg-slate-50 border border-slate-200 focus:border-teal-500 focus:bg-white rounded-lg px-2 py-1 text-center font-mono font-bold text-slate-800 text-xs outline-none transition-all"
-                    />
-                  </td>
-                  <td className="py-4 px-4 text-right font-mono">
-                    <span className="text-xs text-slate-800 font-bold">KES {lineCost.toLocaleString()}</span>
-                    <span className="text-[10px] text-slate-400 block font-normal">({activeQty} × {basePrice})</span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
 };

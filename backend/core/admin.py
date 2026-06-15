@@ -181,28 +181,78 @@ class RegistrationRecordAdmin(admin.ModelAdmin):
 
 class PrescriptionItemInline(admin.TabularInline):
     model = PrescriptionItem
-    # Links our updated fields to the inline view matrix seamlessly
     fields = [
         'stage', 'drug', 'medication_name', 'dosage', 
         'calc_factor', 'factor_value', 'route', 'diluent', 
         'volume', 'duration'
     ]
+    autocomplete_fields = ['drug'] 
     extra = 0
 
 
 @admin.register(Prescription)
 class PrescriptionAdmin(admin.ModelAdmin):
-    # Standardized to our explicit field schemas
-    list_display = ['id', 'patient', 'protocol', 'pharmacy_status', 'treatment_date']
-    list_filter = ['pharmacy_status', 'treatment_date']
+    # 🌟 Custom display method name listed in grid columns
+    list_display = [
+        'id', 
+        'patient', 
+        'get_clinical_diagnosis', 
+        'protocol', 
+        'cycle_no', 
+        'total_cycles', 
+        'pharmacy_status', 
+        'treatment_date'
+    ]
     
+    list_filter = ['pharmacy_status', 'treatment_date', 'protocol']
+    
+    # 🔍 Clean search bindings looking at string paths on the relationship targets
     search_fields = [
+        'id',
         'patient__name', 
-        'protocol__name',              
-        'visit__diagnosis_description'  
+        'protocol',              
+        'diagnosis__primary_site',
+        'diagnosis__long_description',
+        'diagnosis__icd10_description'
     ]
     
     inlines = [PrescriptionItemInline]
+    autocomplete_fields = ['patient', 'visit']
+    readonly_fields = ['treatment_date', 'created_at', 'updated_at']
+
+    # Organizes the admin detail block fields 
+    fieldsets = (
+        ('Patient & Encounter Info', {
+            'fields': ('patient', 'visit', 'treatment_date'),
+        }),
+        ('Clinical Staging & Diagnostics', {
+            'fields': ('diagnosis', 'protocol', 'cycle_no', 'total_cycles', 'allergies'),
+        }),
+        ('Clinical Metadata & Calculations', {
+            'fields': ('dose_adjustment_notes',),
+        }),
+        ('Signatures & Status', {
+            'fields': ('prescribed_by', 'prescribe_date', 'pharmacy_status'),
+        }),
+        ('System Meta', {
+            'fields': ('meta_extensions', 'created_at', 'updated_at'),
+            'classes': ('collapse',),
+        }),
+    )
+
+    # 🛠️ FIXED METHOD: Safely outputs the dynamic formatting string layout
+    @admin.display(ordering='diagnosis__primary_site', description='Diagnosis Plan')
+    def get_clinical_diagnosis(self, obj):
+        if obj.diagnosis:
+            site = obj.diagnosis.primary_site or "Unknown Site"
+            desc = obj.diagnosis.long_description or obj.diagnosis.icd10_description or "No Description Provided"
+            
+            # Formats beautifully as "Primary Site — Long Description"
+            return f"{site.upper()} — {desc}"
+            
+        # Using mark_safe avoids format_html keyword argument restriction issues entirely
+        return mark_safe('<span style="color: #caa232; font-weight: bold;">⚠️ No Diagnosis Attached</span>')
+
 # --- 3. DRUG INVENTORY (THE SHOP & MAIN STORE) ---
 
 @admin.register(Drug)

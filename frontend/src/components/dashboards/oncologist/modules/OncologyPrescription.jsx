@@ -59,7 +59,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     return '---';
   }, [activeLabs]);
 
-  // CRITICAL FIX: Re-added the missing definition to resolve the app crash runtime error!
   const calculatedBMI = isLoadingClinicalData ? '---' : (getVitalVal('bmi') || '---');
 
   const calculateRowDose = useCallback((factor, value) => {
@@ -71,6 +70,8 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     let bsa = parseFloat(getVitalVal('bsa'));
     const weight = parseFloat(getVitalVal('weight'));
     const height = parseFloat(getVitalVal('height'));
+    const age = parseFloat(patientMeta.age);
+    const isFemale = /female/i.test(patientMeta.sex || '');
 
     if ((isNaN(bsa) || bsa <= 0) && !isNaN(weight) && !isNaN(height)) {
       bsa = Math.sqrt((height * weight) / 3600);
@@ -84,9 +85,17 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
         if (isNaN(weight) || weight <= 0) return 'Err: Missing Weight';
         return `${Math.round(val * weight)} mg`;
       case 'AUC':
-        let gfr = parseFloat(getLabParameterVal('ue_gfr')) || 100; 
-        if (isNaN(gfr) || gfr <= 0) return 'Err: Missing GFR';
-        return `${Math.round(val * (gfr + 25))} mg`;
+        let scr = parseFloat(getLabParameterVal('ue_creatinine'));
+        if (isNaN(scr) || scr <= 0) return 'Err: Missing Serum Cr';
+        if (isNaN(weight) || weight <= 0) return 'Err: Missing Weight';
+        if (isNaN(age) || age <= 0) return 'Err: Missing Age';
+
+        let clcr = ((140 - age) * weight) / (72 * scr);
+        if (isFemale) clcr *= 0.85;
+
+        const adjustedGfr = Math.min(clcr, 125);
+        return `${Math.round(val * (adjustedGfr + 25))} mg`;
+        
       case 'IU/KG':
         if (isNaN(weight) || weight <= 0) return 'Err: Missing Weight';
         return `${Math.round(val * weight)} IU`;
@@ -96,7 +105,7 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
       default:
         return `${val} mg`;
     }
-  }, [getVitalVal, getLabParameterVal]); 
+  }, [getVitalVal, getLabParameterVal, patientMeta]); 
 
   const handleProtocolTemplateSelected = useCallback((protocolId) => {
     if (!protocolId) return;
@@ -159,7 +168,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     try {
       const visitId = queueNode.visit_id || queueNode.visit?.id || queueNode.visit || queueNode.id;
       
-
       const [vitalsRes, labsRes, rxSnapshotRes] = await Promise.all([
         API.get(`/vital-signs/?visit=${visitId}`).catch(() => null),
         API.get(`/lab-results/?visit=${visitId}`).catch(() => null),
@@ -279,40 +287,80 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
   const handleSubmitPrescription = async () => {
     if (!selectedPatient) return alert("Select patient workspace first.");
     setIsSubmitting(true);
+    
     try {
+      // 1. Rigorous payload construction for items across treatment stages
       const itemsPayload = [
         ...preChemoOrders.filter(o => o.checked).map(o => ({
-          stage: 'PRE_CHEMO', drug: null, medication_name: o.name, dosage: 'STAT',
-          calc_factor: 'Flat Rate', factor_value: '0', route: 'I.V', diluent: 'None', volume: '0', duration: 'STAT'
+          stage: 'PRE_CHEMO', 
+          drug: null, 
+          medication_name: o.name, 
+          dosage: 'STAT',
+          calc_factor: 'Flat Rate', 
+          factor_value: '0', 
+          route: 'I.V', 
+          diluent: 'None', 
+          volume: '0', 
+          duration: 'STAT'
         })),
         ...chemoRows.filter(r => r.drug_id).map(r => ({
-          stage: 'CHEMO', drug: parseInt(r.drug_id), medication_name: r.name, dosage: r.calculated_dose,
-          calc_factor: r.calc_factor, factor_value: r.factor_value, route: r.route, diluent: r.diluent, volume: r.volume, duration: r.duration
+          stage: 'CHEMO', 
+          drug: parseInt(r.drug_id), 
+          medication_name: r.name || r.drugName, 
+          dosage: String(r.calculated_dose || r.dosage || 'STAT'),
+          calc_factor: r.calc_factor || r.calcFactor || 'Flat Rate', 
+          factor_value: String(r.factor_value || r.factorValue || '0'), 
+          route: r.route || 'I.V', 
+          diluent: r.diluent || 'Normal Saline', 
+          volume: String(r.volume || '250'), 
+          duration: r.duration || '30 mins'
         })),
         ...postChemoOrders.filter(o => o.checked).map(o => ({
-          stage: 'POST_CHEMO', drug: null, medication_name: o.name, dosage: 'Take Home',
-          calc_factor: 'Flat Rate', factor_value: '0', route: 'P.O', diluent: 'None', volume: '0', duration: 'As Tracked'
+          stage: 'POST_CHEMO', 
+          drug: null, 
+          medication_name: o.name, 
+          dosage: 'Take Home',
+          calc_factor: 'Flat Rate', 
+          factor_value: '0', 
+          route: 'P.O', 
+          diluent: 'None', 
+          volume: '0', 
+          duration: 'As Tracked'
         }))
       ];
 
+      // 2. Safely extract core lookups across heterogeneous queue payload contexts
+      const resolvedPatientId = parseInt(selectedPatient.patient_id || selectedPatient.patient || selectedPatient.id);
+      
+      // Maintain explicit prioritization for historical visits before referencing queue line rows
+      const resolvedVisitId = parseInt(selectedPatient.visit_id || selectedPatient.visit || selectedPatient.queue_id || selectedPatient.id);
+
+      // Pull diagnosis key, ensuring it defaults out safely to satisfy database structure blocks
+      const resolvedDiagnosisId = patientDiagnoses.length > 0 && patientDiagnoses[0].id 
+        ? parseInt(patientDiagnoses[0].id) 
+        : null;
+
       const payload = {
-        patient: parseInt(selectedPatient.patient || selectedPatient.patient_id || selectedPatient.id),
-        visit: parseInt(selectedPatient.visit_id || selectedPatient.visit || selectedPatient.id), 
-        treatment_date: patientMeta.date,
+        patient: resolvedPatientId,
+        visit: resolvedVisitId, 
+        diagnosis: resolvedDiagnosisId,
+        treatment_date: patientMeta.date || new Date().toISOString().split('T')[0],
         pharmacy_status: 'PENDING', 
-        dose_adjustment_notes: doseAdjustmentNotes,
-        protocol: patientMeta.protocol, 
-        cycle_no: parseInt(patientMeta.cycleNo) || 1, 
-        total_cycles: parseInt(patientMeta.totalCycles) || null, 
-        allergies: patientMeta.allergies,
+        dose_adjustment_notes: doseAdjustmentNotes || '',
+        protocol: patientMeta.protocol || '', 
+        cycle_no: String(patientMeta.cycleNo || '1'), // match your backend model's CharField layout
+        total_cycles: patientMeta.totalCycles ? String(patientMeta.totalCycles) : '', // pass empty string instead of null
+        allergies: patientMeta.allergies || '',
         items: itemsPayload
       };
 
-      const visitId = parseInt(selectedPatient.id || selectedPatient.visit_id || selectedPatient.visit);
-
+      // 3. Commit records to systemic state engine
       await API.post('/prescriptions/', payload);
 
-      await API.patch(`/queue/${visitId}/`, {
+      // Update workflow tracking station inside queue manager components
+      // (Uses the target workspace ID corresponding directly to your API endpoint parameter)
+      const queueTrackerId = selectedPatient.id || resolvedVisitId;
+      await API.patch(`/queue/${queueTrackerId}/`, {
         current_station: 'PHARMACY',
         status: 'AWAITING_MEDICATION'
       });
@@ -320,8 +368,11 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
       alert("Chemotherapy regimen sent and tracked patient successfully advanced to Pharmacy Station.");
       if (onTabSwitch) onTabSwitch('home');
     } catch (err) {
-      console.error(err);
-      alert("Error submitting oncology records chart registry.");
+      console.error("Transmission Error Context:", err.response?.data || err);
+      
+      // Surface descriptive validation errors directly from Django REST Framework if present
+      const backendMessage = err.response?.data ? JSON.stringify(err.response.data) : "";
+      alert(`Error submitting oncology records chart registry. ${backendMessage}`);
     } finally { 
       setIsSubmitting(false); 
     }
@@ -329,7 +380,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
       
   return (
     <>
-      {/* INJECTED NATIVE CSS FOR PRINT CLEANUP */}
       <style dangerouslySetInnerHTML={{__html: `
         @media print {
           body, html, #root, .app-layout, main, .oncology-prescription-root {
@@ -340,12 +390,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
           }
           aside, nav, .no-print, header, .bg-white.p-4.flex.justify-between {
             display: none !important;
-            width: 0 !important;
-            height: 0 !important;
-            overflow: hidden !important;
-          }
-          .bg-slate-50\\/50.border.border-slate-200\\/80 {
-            display: none !important;
           }
           .print-container {
             border: none !important;
@@ -353,22 +397,12 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
             padding: 0 !important;
             margin: 0 !important;
             width: 100% !important;
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-          }
-          select, input, textarea {
-            background: transparent !important;
-            border: none !important;
-            appearance: none !important;
-            -webkit-appearance: none !important;
           }
         }
       `}} />
 
-      <div className="space-y-6 max-w-[1650px] mx-auto p-6 font-['Roboto',_sans-serif] pb-24 text-slate-800 text-sm tracking-wide oncology-prescription-root">
+      <div className="space-y-6 max-w-[1650px] mx-auto p-6 text-slate-800 text-sm tracking-wide oncology-prescription-root">
         
-        {/* GLOBAL ACTIONS AND DISPATCH HEADER ROW */}
         <div className="bg-white p-4 flex justify-between items-center gap-4 no-print border border-slate-200 rounded-xl shadow-sm">
           <div className="flex items-center gap-3 flex-1">
             <div className="p-2 bg-slate-100 text-slate-600 rounded-lg">
@@ -401,14 +435,14 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
             <div className="flex gap-2">
               <button 
                 onClick={() => window.print()} 
-                className="bg-slate-100 text-slate-700 font-bold text-xs uppercase tracking-wider px-5 py-2.5 rounded-lg hover:bg-slate-200 transition-all flex items-center gap-2 border border-slate-200 shadow-sm"
+                className="bg-slate-100 text-slate-700 font-semibold text-sm uppercase tracking-wide px-5 py-2.5 rounded-lg hover:bg-slate-200 transition-all flex items-center gap-2 border border-slate-200 shadow-sm"
               >
                 <Printer size={15} /> Download / Print Chart Sheet
               </button>
               <button 
                 onClick={handleSubmitPrescription} 
                 disabled={isSubmitting} 
-                className="bg-blue-600 text-white font-bold text-xs uppercase tracking-wider px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-all flex items-center gap-2 disabled:opacity-50 shadow-md active:scale-95"
+                className="bg-blue-600 text-white font-semibold text-sm uppercase tracking-wide px-6 py-2.5 rounded-lg hover:bg-blue-700 transition-all flex items-center gap-2 disabled:opacity-50 shadow-md active:scale-95"
               >
                 {isSubmitting ? <Loader2 className="animate-spin" size={15}/> : <Send size={15}/>} Transmit to Pharmacy
               </button>
@@ -416,106 +450,101 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
           )}
         </div>
 
-        {/* VITALS BLOCKS */}
         {selectedPatient && (
           <div className="bg-slate-50/50 border border-slate-200/80 rounded-xl p-5 space-y-4 no-print">
             <div className="flex justify-between items-center">
-              <h3 className="text-sm font-bold tracking-wide uppercase text-slate-500 flex items-center gap-2">
+              <h3 className="text-sm font-semibold tracking-wide uppercase text-slate-500 flex items-center gap-2">
                 <Activity size={16} className="text-blue-500" /> Patient Vitals Metrics
               </h3>
-              {calculatedBMI !== '---' && <span className="bg-emerald-50 text-emerald-700 font-bold px-3 py-1 rounded-full text-xs border border-emerald-100">BMI: {calculatedBMI}</span>}
+              {calculatedBMI !== '---' && <span className="bg-emerald-50 text-emerald-700 font-semibold px-3 py-1 rounded-full text-xs border border-emerald-100">BMI: {calculatedBMI}</span>}
             </div>
             <div className="grid grid-cols-5 gap-4">
               <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Blood Pressure</span>
-                <span className="text-lg font-black text-slate-800">{isLoadingClinicalData ? '---' : `${getVitalVal('systolic_bp')}/${getVitalVal('diastolic_bp')}`}</span>
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Blood Pressure</span>
+                <span className="text-xl font-bold text-slate-800">{isLoadingClinicalData ? '---' : `${getVitalVal('systolic_bp')}/${getVitalVal('diastolic_bp')}`}</span>
               </div>
               <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pulse Rate</span>
-                <span className="text-lg font-black text-slate-800">{isLoadingClinicalData ? '---' : getVitalVal('heart_rate')} <span className="text-xs text-slate-400 font-normal">bpm</span></span>
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Pulse Rate</span>
+                <span className="text-xl font-bold text-slate-800">{isLoadingClinicalData ? '---' : getVitalVal('heart_rate')} <span className="text-xs text-slate-400 font-normal">bpm</span></span>
               </div>
               <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">BSA</span>
-                <span className="text-lg font-black text-blue-700">{isLoadingClinicalData ? '---' : getVitalVal('bsa')} <span className="text-xs font-normal text-slate-400">m²</span></span>
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">BSA</span>
+                <span className="text-xl font-bold text-blue-700">{isLoadingClinicalData ? '---' : getVitalVal('bsa')} <span className="text-xs font-normal text-slate-400">m²</span></span>
               </div>
               <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">SpO2</span>
-                <span className="text-lg font-black text-slate-800">{isLoadingClinicalData ? '---' : getVitalVal('spo2')} <span className="text-xs text-slate-400 font-normal">%</span></span>
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">SpO2</span>
+                <span className="text-xl font-bold text-slate-800">{isLoadingClinicalData ? '---' : getVitalVal('spo2')} <span className="text-xs text-slate-400 font-normal">%</span></span>
               </div>
               <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Weight</span>
-                <span className="text-lg font-black text-slate-800">{isLoadingClinicalData ? '---' : getVitalVal('weight')} <span className="text-xs text-slate-400 font-normal">kg</span></span>
+                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Weight</span>
+                <span className="text-xl font-bold text-slate-800">{isLoadingClinicalData ? '---' : getVitalVal('weight')} <span className="text-xs text-slate-400 font-normal">kg</span></span>
               </div>
             </div>
           </div>
         )}
 
-        {/* CORE MEDICAL CLINICAL DIRECTORY RECORD CHART */}
         {selectedPatient && (
-          <div ref={reportPrintRef} className="bg-white p-6 space-y-8 print-container text-slate-950 text-[13px] rounded-xl shadow-sm border border-slate-200">
+          <div ref={reportPrintRef} className="bg-white p-6 space-y-8 print-container text-slate-900 text-sm rounded-xl shadow-sm border border-slate-200">
             
-            {/* DOSIMETRY LETTERHEAD HEADER */}
             <div className="flex justify-between items-center pb-4 border-b border-slate-200">
               <div className="flex items-center gap-4">
                 <img src={SalamaLogo} alt="Salama Cancer Centre" className="h-14 object-contain" />
                 <div>
-                  <h1 className="text-xl font-black text-slate-900 tracking-tight">SALAMA CANCER CENTRE</h1>
+                  <h1 className="text-xl font-bold text-slate-900 tracking-tight">SALAMA CANCER CENTRE</h1>
                 </div>
               </div>
-              <div className="text-right text-xs text-slate-400 font-medium">
+              <div className="text-right text-sm text-slate-400 font-medium">
                 <span>Date: {new Date(patientMeta.date).toLocaleDateString()}</span>
               </div>
             </div>
 
-            {/* BASIC DEMOGRAPHICS ROW FIELDS */}
-            <div className="grid grid-cols-4 gap-x-6 gap-y-4">
+            <div className="grid grid-cols-4 gap-x-6 gap-y-4 text-sm">
               <div className="flex items-center gap-2 col-span-2">
-                <span className="font-semibold text-slate-500 min-w-[60px]">Patient:</span>
-                <div className="w-full border-b border-slate-200 font-bold text-slate-900 pb-0.5 text-sm flex justify-between items-center">
+                <span className="font-semibold text-slate-500 min-w-[70px]">Patient:</span>
+                <div className="w-full border-b border-slate-200 font-semibold text-slate-900 pb-1 flex justify-between items-center">
                   <span>{selectedPatient.patient_name || 'N/A'}</span>
-                  <span className="font-mono bg-slate-100 text-slate-600 font-bold text-xs px-2 py-0.5 rounded border border-slate-200">
+                  <span className="font-mono bg-slate-100 text-slate-600 font-semibold text-xs px-2.5 py-1 rounded border border-slate-200">
                     HRN: {selectedPatient.health_record_number || 'N/A'}
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-slate-500">Age:</span>
-                <span className="w-full border-b border-slate-200 font-bold text-slate-900 pb-0.5">{patientMeta.age}</span>
+                <span className="w-full border-b border-slate-200 font-semibold text-slate-900 pb-1">{patientMeta.age} Yrs</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-slate-500">Sex:</span>
-                <span className="w-full border-b border-slate-200 font-bold text-slate-900 pb-0.5">{patientMeta.sex}</span>
+                <span className="w-full border-b border-slate-200 font-semibold text-slate-900 pb-1">{patientMeta.sex}</span>
               </div>
             </div>
 
-            {/* LAB METRICS BASELINES SNAPSHOT */}
             <div className="space-y-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Lab Parameters Validation Index</span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 block">Lab Parameters Validation Index</span>
               <div className="border border-slate-200 rounded-lg overflow-hidden">
                 <table className="w-full text-center divide-y divide-slate-200">
-                  <thead className="bg-slate-50 text-[11px] uppercase font-bold text-slate-500">
+                  <thead className="bg-slate-50 text-xs uppercase font-semibold text-slate-500">
                     <tr className="divide-x divide-slate-200">
-                      <th className="px-2 py-1.5 bg-slate-100/60" colSpan={4}>Complete Blood Count</th>
-                      <th className="px-2 py-1.5" colSpan={4}>Urea & Electrolytes</th>
-                      <th className="px-2 py-1.5 bg-slate-100/60" colSpan={4}>Liver Function Tests</th>
+                      <th className="px-2 py-2 bg-slate-100/60" colSpan={4}>Complete Blood Count</th>
+                      <th className="px-2 py-2" colSpan={4}>Urea & Electrolytes</th>
+                      <th className="px-2 py-2 bg-slate-100/60" colSpan={4}>Liver Function Tests</th>
                     </tr>
-                    <tr className="divide-x divide-slate-200 border-t border-slate-200 text-[10px]">
-                      <th className="px-1 py-1 text-blue-800 bg-blue-50/20">Hb</th>
-                      <th className="px-1 py-1">WBC</th>
-                      <th className="px-1 py-1">Neut</th>
-                      <th className="px-1 py-1">Plt</th>
-                      <th className="px-1 py-1 text-amber-800">Cr</th>
-                      <th className="px-1 py-1">Na</th>
-                      <th className="px-1 py-1">Urea</th>
-                      <th className="px-1 py-1">K</th>
-                      <th className="px-1 py-1 text-emerald-800 bg-emerald-50/20">AST</th>
-                      <th className="px-1 py-1">ALT</th>
-                      <th className="px-1 py-1">TBil</th>
-                      <th className="px-1 py-1">Alb</th>
+                    <tr className="divide-x divide-slate-200 border-t border-slate-200 text-[11px]">
+                      <th className="px-1 py-1.5 text-blue-800 bg-blue-50/20">Hb</th>
+                      <th className="px-1 py-1.5">WBC</th>
+                      <th className="px-1 py-1.5">Neut</th>
+                      <th className="px-1 py-1.5">Plt</th>
+                      <th className="px-1 py-1.5 text-amber-800">Cr</th>
+                      <th className="px-1 py-1.5">Na</th>
+                      <th className="px-1 py-1.5">Urea</th>
+                      <th className="px-1 py-1.5">K</th>
+                      <th className="px-1 py-1.5 text-emerald-800 bg-emerald-50/20">AST</th>
+                      <th className="px-1 py-1.5">ALT</th>
+                      <th className="px-1 py-1.5">TBil</th>
+                      <th className="px-1 py-1.5">Alb</th>
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-slate-200">
-                    <tr className="divide-x divide-slate-200 font-bold text-slate-900 text-sm">
+                    <tr className="divide-x divide-slate-200 font-semibold text-slate-900 text-sm">
                       <td className="px-1 py-2 text-blue-800 bg-blue-50/5">{isLoadingClinicalData ? '---' : getLabParameterVal('cbc_hb')}</td>
                       <td className="px-1 py-2">{isLoadingClinicalData ? '---' : getLabParameterVal('cbc_wbc')}</td>
                       <td className="px-1 py-2">{isLoadingClinicalData ? '---' : getLabParameterVal('cbc_neut')}</td>
@@ -536,25 +565,24 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
 
             <hr className="border-slate-200" />
 
-            {/* DIAGNOSIS SNAPSHOTS & PROTOCOL ASSIGNMENT MANAGEMENT */}
             <div className="bg-slate-50 border border-slate-200 p-5 rounded-xl space-y-5 no-print">
               <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 block">Confirmed Patient Diagnosis Snapshot</label>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-400 block">Confirmed Patient Diagnosis Snapshot</label>
                 <div className="flex flex-wrap gap-2">
                   {patientDiagnoses.length === 0 ? (
-                    <div className="text-xs text-slate-400 italic bg-white border border-dashed rounded-lg p-3 w-full">
+                    <div className="text-sm text-slate-400 italic bg-white border border-dashed rounded-lg p-4 w-full">
                       No active ICD10 diagnoses snapshots mapped on this encounter queue item.
                     </div>
                   ) : (
                     patientDiagnoses.map((dx, index) => (
                       <div key={index} className="bg-white border border-slate-200 rounded-lg p-3 flex flex-col gap-1 shadow-sm w-full">
                         <div className="flex items-center gap-2">
-                          <span className="bg-blue-600 text-white font-mono font-bold text-xs px-2 py-0.5 rounded uppercase">
+                          <span className="bg-blue-600 text-white font-mono font-semibold text-xs px-2 py-0.5 rounded uppercase">
                             {dx.icd10_code}
                           </span>
-                          <span className="font-bold text-slate-800 text-sm">{dx.description}</span>
+                          <span className="font-semibold text-slate-800 text-sm">{dx.description}</span>
                         </div>
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mt-1">
+                        <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mt-1">
                           Anatomical Site Code: <span className="text-slate-600">{dx.primary_site || 'Unassigned'}</span>
                         </span>
                       </div>
@@ -563,12 +591,11 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                 </div>
               </div>
 
-              {/* UNIFIED SCHEMA PROTOCOL MANAGEMENT FIELD */}
               <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase tracking-wider text-blue-600 block">Select Protocol</label>
+                <label className="text-xs font-semibold uppercase tracking-wide text-blue-600 block">Select Protocol</label>
                 <div className="relative">
                   <select
-                    className="w-full bg-white border border-slate-300 text-slate-800 rounded-lg p-2.5 font-bold text-xs uppercase tracking-wider outline-none appearance-none cursor-pointer shadow-sm focus:ring-2 focus:ring-blue-500"
+                    className="w-full bg-white border border-slate-300 text-slate-800 rounded-lg p-2.5 font-semibold text-sm uppercase tracking-wide outline-none appearance-none cursor-pointer shadow-sm focus:ring-2 focus:ring-blue-500"
                     value={selectedProtocolId}
                     onChange={(e) => handleProtocolTemplateSelected(e.target.value)}
                   >
@@ -581,32 +608,30 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                 </div>
               </div>
 
-              {/* CYCLE TRACKING META INPUTFIELDS */}
               {selectedProtocolId && (
-                <div className="grid grid-cols-4 gap-4 p-3 bg-white border border-slate-100 rounded-xl shadow-inner animate-fade-in text-xs font-semibold">
+                <div className="grid grid-cols-4 gap-4 p-4 bg-white border border-slate-100 rounded-xl shadow-inner animate-fade-in text-sm font-semibold">
                   <div className="flex items-center gap-2">
-                    <span className="text-slate-400 uppercase">Assigned:</span>
-                    <span className="font-bold text-blue-700 uppercase">{patientMeta.protocol}</span>
+                    <span className="text-slate-400 uppercase text-xs">Assigned:</span>
+                    <span className="font-semibold text-blue-700 uppercase">{patientMeta.protocol}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-slate-400 uppercase">Cycle No:</span>
-                    <input type="number" className="w-16 border rounded p-1 font-bold text-center outline-none bg-slate-50" value={patientMeta.cycleNo} onChange={(e) => setPatientMeta({...patientMeta, cycleNo: e.target.value})} />
+                    <span className="text-slate-400 uppercase text-xs">Cycle No:</span>
+                    <input type="number" className="w-16 border rounded p-1 font-semibold text-center outline-none bg-slate-50 text-sm" value={patientMeta.cycleNo} onChange={(e) => setPatientMeta({...patientMeta, cycleNo: e.target.value})} />
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-slate-400 uppercase">Total Cycles:</span>
-                    <input type="number" className="w-16 border rounded p-1 font-bold text-center outline-none bg-slate-50" value={patientMeta.totalCycles} onChange={(e) => setPatientMeta({...patientMeta, totalCycles: e.target.value})} />
+                    <span className="text-slate-400 uppercase text-xs">Total Cycles:</span>
+                    <input type="number" className="w-16 border rounded p-1 font-semibold text-center outline-none bg-slate-50 text-sm" value={patientMeta.totalCycles} onChange={(e) => setPatientMeta({...patientMeta, totalCycles: e.target.value})} />
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-slate-400 uppercase">Allergies:</span>
-                    <input type="text" className="w-full border rounded p-1 text-slate-800 outline-none placeholder:font-normal bg-slate-50" value={patientMeta.allergies} onChange={(e) => setPatientMeta({...patientMeta, allergies: e.target.value})} placeholder="None noted" />
+                    <span className="text-slate-400 uppercase text-xs">Allergies:</span>
+                    <input type="text" className="w-full border rounded p-1 text-slate-800 font-semibold outline-none placeholder:font-normal bg-slate-50 text-sm" value={patientMeta.allergies} onChange={(e) => setPatientMeta({...patientMeta, allergies: e.target.value})} placeholder="None noted" />
                   </div>
                 </div>
               )}
             </div>
 
-            {/* SECTION 1: PRE-CHEMO MEDICATIONS */}
-            <div className="space-y-3">
-              <h2 className="text-sm font-black uppercase tracking-tight text-slate-700 border-b border-slate-200 pb-1 flex items-center gap-2">
+            <div className="space-y-3 text-sm">
+              <h2 className="text-base font-bold uppercase tracking-tight text-slate-700 border-b border-slate-200 pb-1 flex items-center gap-2">
                 <span>1. Pre-Chemotherapy Medications & Hydration Orders</span>
               </h2>
               <div className="grid grid-cols-4 gap-4 py-1">
@@ -618,29 +643,28 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                       checked={item.checked}
                       onChange={(e) => setPreChemoOrders(prev => prev.map(o => o.id === item.id ? { ...o, checked: e.target.checked } : o))}
                     />
-                    <span className="font-medium text-slate-700">{item.name}</span>
+                    <span className="font-semibold text-slate-700">{item.name}</span>
                   </label>
                 ))}
               </div>
             </div>
 
-            {/* SECTION 2: CHEMOTHERAPY REGIMEN FORM */}
-            <div className="space-y-3">
+            <div className="space-y-3 text-sm">
               <div className="flex justify-between items-center border-b border-slate-200 pb-1">
-                <h2 className="text-sm font-black uppercase tracking-tight text-slate-700">
+                <h2 className="text-base font-bold uppercase tracking-tight text-slate-700">
                   2. Chemotherapy Orders
                 </h2>
                 <button 
                   onClick={addChemoRow}
-                  className="no-print bg-slate-900 text-white font-bold text-[11px] uppercase tracking-wider px-3 py-1 rounded hover:bg-slate-800 transition-all flex items-center gap-1.5"
+                  className="no-print bg-slate-900 text-white font-semibold text-xs uppercase tracking-wider px-3.5 py-1.5 rounded hover:bg-slate-800 transition-all flex items-center gap-1.5"
                 >
                   <Plus size={12} /> Add Agent Row
                 </button>
               </div>
 
               <div className="border border-slate-200 rounded-lg overflow-hidden">
-                <table className="w-full text-left text-xs divide-y divide-slate-200">
-                  <thead className="bg-slate-50 font-bold uppercase text-slate-500 text-[10px]">
+                <table className="w-full text-left text-sm divide-y divide-slate-200">
+                  <thead className="bg-slate-50 font-semibold uppercase text-slate-500 text-[11px]">
                     <tr className="divide-x divide-slate-200 text-center">
                       <th className="px-3 py-2 text-left w-[240px]">Medication</th>
                       <th className="px-2 py-2 w-[120px]">Calculation Factor</th>
@@ -653,24 +677,24 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                       <th className="px-1 py-2 no-print w-[40px]"></th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-slate-200">
+                  <tbody className="bg-white divide-y divide-slate-200 font-medium">
                     {chemoRows.map(row => (
                       <tr key={row.id} className="divide-x divide-slate-200">
                         <td className="p-1">
                           <select
-                            className="w-full bg-slate-50 p-1.5 font-semibold text-slate-800 outline-none rounded"
+                            className="w-full bg-slate-50 p-1.5 font-semibold text-slate-800 outline-none rounded text-sm"
                             value={row.drug_id}
                             onChange={(e) => handleChemoRowChange(row.id, 'drug_id', e.target.value)}
                           >
                             <option value="">-- Select Active Drug --</option>
                             {drugsMasterList.map(d => (
-                              <option key={d.id} value={d.id}>{d.name} ({d.available_stock ?? 0} In Stock)</option>
+                              <option key={d.id} value={d.id}>{d.name}</option>
                             ))}
                           </select>
                         </td>
                         <td className="p-1">
                           <select
-                            className="w-full bg-white p-1.5 font-medium text-slate-700 outline-none rounded border border-slate-100"
+                            className="w-full bg-white p-1.5 font-semibold text-slate-700 outline-none rounded border border-slate-100 text-sm"
                             value={row.calc_factor}
                             onChange={(e) => handleChemoRowChange(row.id, 'calc_factor', e.target.value)}
                           >
@@ -680,18 +704,18 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                         <td className="p-1">
                           <input
                             type="text"
-                            className="w-full p-1.5 font-mono text-center font-bold text-slate-800 outline-none border border-slate-100 rounded bg-slate-50/40"
+                            className="w-full p-1.5 font-mono text-center font-semibold text-slate-800 outline-none border border-slate-100 rounded bg-slate-50/40 text-sm"
                             value={row.factor_value}
                             onChange={(e) => handleChemoRowChange(row.id, 'factor_value', e.target.value)}
                             placeholder="0.0"
                           />
                         </td>
-                        <td className="p-1.5 bg-blue-50/40 text-center font-black text-blue-900 text-sm">
+                        <td className="p-1.5 bg-blue-50/40 text-center font-bold text-blue-900 text-sm">
                           {row.calculated_dose || '---'}
                         </td>
                         <td className="p-1">
                           <select
-                            className="w-full bg-white p-1.5 font-medium outline-none rounded border border-slate-100"
+                            className="w-full bg-white p-1.5 font-semibold outline-none rounded border border-slate-100 text-sm"
                             value={row.route}
                             onChange={(e) => handleChemoRowChange(row.id, 'route', e.target.value)}
                           >
@@ -700,7 +724,7 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                         </td>
                         <td className="p-1">
                           <select
-                            className="w-full bg-white p-1.5 font-medium outline-none rounded border border-slate-100"
+                            className="w-full bg-white p-1.5 font-semibold outline-none rounded border border-slate-100 text-sm"
                             value={row.diluent}
                             onChange={(e) => handleChemoRowChange(row.id, 'diluent', e.target.value)}
                           >
@@ -710,7 +734,7 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                         <td className="p-1">
                           <input
                             type="text"
-                            className="w-full p-1.5 text-center outline-none border border-slate-100 rounded"
+                            className="w-full p-1.5 text-center font-semibold outline-none border border-slate-100 rounded text-sm"
                             value={row.volume}
                             onChange={(e) => handleChemoRowChange(row.id, 'volume', e.target.value)}
                           />
@@ -718,7 +742,7 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                         <td className="p-1">
                           <input
                             type="text"
-                            className="w-full p-1.5 text-center outline-none border border-slate-100 rounded"
+                            className="w-full p-1.5 text-center font-semibold outline-none border border-slate-100 rounded text-sm"
                             value={row.duration}
                             onChange={(e) => handleChemoRowChange(row.id, 'duration', e.target.value)}
                           />
@@ -739,20 +763,18 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
               </div>
             </div>
 
-            {/* DOSE ADJUSTMENT CLINICAL NOTES */}
-            <div className="space-y-1.5">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">Dose Adjustments / Clinical Toxicity Modification Justifications</span>
+            <div className="space-y-1.5 text-sm">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 block">Dose Adjustments / Clinical Toxicity Modification Justifications</span>
               <textarea
-                className="w-full border border-slate-200 rounded-lg p-3 outline-none font-medium text-slate-800 placeholder:font-normal placeholder:text-slate-300 text-xs min-h-[70px] bg-slate-50/30"
+                className="w-full border border-slate-200 rounded-lg p-3 outline-none font-semibold text-slate-800 placeholder:font-normal placeholder:text-slate-300 text-sm min-h-[80px] bg-slate-50/30"
                 value={doseAdjustmentNotes}
                 onChange={(e) => setDoseAdjustmentNotes(e.target.value)}
                 placeholder="Specify rationale metrics if dose holds, modifications, or calculations deviate from standardized templates..."
               />
             </div>
 
-            {/* SECTION 3: POST-CHEMO TAKE HOME ORDERS */}
-            <div className="space-y-3">
-              <h2 className="text-sm font-black uppercase tracking-tight text-slate-700 border-b border-slate-200 pb-1 flex items-center gap-2">
+            <div className="space-y-3 text-sm">
+              <h2 className="text-base font-bold uppercase tracking-tight text-slate-700 border-b border-slate-200 pb-1 flex items-center gap-2">
                 <span>3. Post-Chemotherapy Medications</span>
               </h2>
               <div className="grid grid-cols-2 gap-x-6 gap-y-2 py-1">
@@ -764,14 +786,13 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                       checked={item.checked}
                       onChange={(e) => setPostChemoOrders(prev => prev.map(o => o.id === item.id ? { ...o, checked: e.target.checked } : o))}
                     />
-                    <span className="font-medium text-slate-700">{item.name}</span>
+                    <span className="font-semibold text-slate-700">{item.name}</span>
                   </label>
                 ))}
               </div>
             </div>
 
-            {/* SIGNATURE SECTION LOGS FOOTER */}
-            <div className="grid grid-cols-2 gap-12 pt-16 text-xs text-slate-400 font-medium">
+            <div className="grid grid-cols-2 gap-12 pt-16 text-xs text-slate-400 font-semibold">
               <div className="space-y-4">
                 <div className="border-b border-slate-300 h-6 w-full"></div>
                 <span>Prescribing Consultant Oncologist Signature / Timestamp</span>
@@ -781,7 +802,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                 <span>Oncology Nurse Reviewer Verification Signature</span>
               </div>
             </div>
-
           </div>
         )}
       </div>
