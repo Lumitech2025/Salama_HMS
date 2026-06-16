@@ -45,9 +45,25 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
   const diluents = ["NS", "D5W", "RL", "None"];
 
   const getVitalVal = useCallback((key) => {
-    if (!activeVitals) return '---';
-    return activeVitals[key] ?? '---';
-  }, [activeVitals]);
+  // 1. Establish a prioritized lookup object path
+    const snapshot = activeVitals || selectedPatient?.vitals_snapshot || selectedPatient?.vitals;
+    if (!snapshot) return "";
+
+    // 2. Map incoming formula parameter keys to their actual structural snapshot properties
+    let rawValue = "";
+    if (key === 'bsa') {
+      rawValue = snapshot.bsa;
+    } else if (key === 'weight') {
+      rawValue = snapshot.weight_kg || snapshot.weight;
+    } else if (key === 'height') {
+      rawValue = snapshot.height_cm || snapshot.height;
+    } else {
+      rawValue = snapshot[key];
+    }
+
+    // 3. Return an empty string if null/undefined so parseFloat handles it cleanly
+    return rawValue !== undefined && rawValue !== null ? String(rawValue) : "";
+  }, [activeVitals, selectedPatient]);
 
   const getLabParameterVal = useCallback((keyName) => {
     if (!activeLabs || !Array.isArray(activeLabs) || activeLabs.length === 0) return '---';
@@ -70,25 +86,28 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     let bsa = parseFloat(getVitalVal('bsa'));
     const weight = parseFloat(getVitalVal('weight'));
     const height = parseFloat(getVitalVal('height'));
-    const age = parseFloat(patientMeta.age);
-    const isFemale = /female/i.test(patientMeta.sex || '');
+    const age = parseFloat(patientMeta?.age);
+    const isFemale = /female/i.test(patientMeta?.sex || '');
 
+    // Calculate BSA on the fly using Mosteller formula if metrics allow
     if ((isNaN(bsa) || bsa <= 0) && !isNaN(weight) && !isNaN(height)) {
       bsa = Math.sqrt((height * weight) / 3600);
     }
 
     switch (normalizedFactor) {
       case 'MG/M2':
-        if (isNaN(bsa) || bsa <= 0) return 'Err: Missing BSA';
+        if (isNaN(bsa) || bsa <= 0) return '0 mg (Missing BSA)'; // Provide an explicit zero prefix for parsing safety
         return `${Math.round(val * bsa)} mg`;
+
       case 'MG/KG':
-        if (isNaN(weight) || weight <= 0) return 'Err: Missing Weight';
+        if (isNaN(weight) || weight <= 0) return '0 mg (Missing Weight)';
         return `${Math.round(val * weight)} mg`;
+
       case 'AUC':
         let scr = parseFloat(getLabParameterVal('ue_creatinine'));
-        if (isNaN(scr) || scr <= 0) return 'Err: Missing Serum Cr';
-        if (isNaN(weight) || weight <= 0) return 'Err: Missing Weight';
-        if (isNaN(age) || age <= 0) return 'Err: Missing Age';
+        if (isNaN(scr) || scr <= 0) return '0 mg (Missing Serum Cr)';
+        if (isNaN(weight) || weight <= 0) return '0 mg (Missing Weight)';
+        if (isNaN(age) || age <= 0) return '0 mg (Missing Age)';
 
         let clcr = ((140 - age) * weight) / (72 * scr);
         if (isFemale) clcr *= 0.85;
@@ -97,15 +116,17 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
         return `${Math.round(val * (adjustedGfr + 25))} mg`;
         
       case 'IU/KG':
-        if (isNaN(weight) || weight <= 0) return 'Err: Missing Weight';
+        if (isNaN(weight) || weight <= 0) return '0 IU (Missing Weight)';
         return `${Math.round(val * weight)} IU`;
+
       case 'MCG':
         return `${val} mcg`;
+
       case 'FLAT RATE':
       default:
         return `${val} mg`;
     }
-  }, [getVitalVal, getLabParameterVal, patientMeta]); 
+  }, [getVitalVal, getLabParameterVal, patientMeta]);
 
   const handleProtocolTemplateSelected = useCallback((protocolId) => {
     if (!protocolId) return;
@@ -124,7 +145,7 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
         let matchedStockId = comp.pharmacy_drug_id || '';
         if (!matchedStockId && drugsMasterList.length > 0) {
           const match = drugsMasterList.find(d => d.name.toLowerCase().includes(comp.medication_name.toLowerCase()));
-          if (match) matchedStockId = match.id;
+          if (match) matchedStockId = String(match.id);
         }
 
         let parsedFactor = "Mg/m2";
@@ -186,15 +207,25 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
 
       let dxArray = [];
       if (rxSnapshotRes?.data) {
-        const results = rxSnapshotRes.data.results || rxSnapshotRes.data;
-        if (results && results.length > 0 && results[0].diagnosis_snapshot) {
-          dxArray = results[0].diagnosis_snapshot;
-          setPatientDiagnoses(dxArray);
-        }
-      } else if (queueNode.diagnosis_snapshot) {
-        dxArray = queueNode.diagnosis_snapshot;
-        setPatientDiagnoses(dxArray);
+          const results = rxSnapshotRes.data.results || rxSnapshotRes.data;
+          if (results && results.length > 0) {
+            if (results[0].diagnosis_snapshot && results[0].diagnosis_snapshot.length > 0) {
+              dxArray = results[0].diagnosis_snapshot;
+            } else if (results[0].diagnosis_detail) {
+              dxArray = [results[0].diagnosis_detail];
+            }
+          }
+        } 
+    
+
+    if (dxArray.length === 0) {
+      const targetSource = queueNode.diagnosis_snapshot || queueNode.diagnosis_detail;
+      if (targetSource) {
+        dxArray = Array.isArray(targetSource) ? targetSource : [targetSource];
       }
+    }
+
+    setPatientDiagnoses(dxArray);
 
       let resolvedGender = "—";
       const rawGender = queueNode.patient_gender || queueNode.patient?.gender || queueNode.visit?.gender || "—";
@@ -204,9 +235,12 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
       const resolvedAge = queueNode.patient_age || queueNode.patient?.age || queueNode.visit?.age || "—";
       
       let computedDiagnosisStr = '';
-      if (dxArray.length > 0) {
-        computedDiagnosisStr = `${dxArray[0].icd10_code} - ${dxArray[0].description}`;
-      }
+    if (dxArray.length > 0 && dxArray[0]) {
+      // ✨ CHANGE HERE: Safe fallback rendering properties matching your API definition layout
+      const desc = dxArray[0].description || dxArray[0].icd10_description || '';
+      const code = dxArray[0].icd10_code || dxArray[0].code || '';
+      computedDiagnosisStr = `${code} - ${desc}`.trim();
+    }
 
       setPatientMeta(prev => ({
         ...prev,
@@ -225,8 +259,73 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
   }, []);
 
   useEffect(() => {
-    if (selectedPatientFromParent) setSelectedPatient(selectedPatientFromParent);
-  }, [selectedPatientFromParent]);
+  if (selectedPatientFromParent) {
+    setSelectedPatient(selectedPatientFromParent);
+    
+    // Clear old data first to prevent clinical data bleeding between patients
+    setActiveVitals(null);
+    setActiveLabs([]);
+    setPatientDiagnoses([]);
+
+    // 1. Map demographic metadata safely
+    setPatientMeta({
+      age: selectedPatientFromParent.patient_age || selectedPatientFromParent.visit_age || '',
+      sex: selectedPatientFromParent.patient_gender || selectedPatientFromParent.patient_sex || '',
+      date: new Date().toISOString().split('T')[0],
+      diagnosis: selectedPatientFromParent.diagnosis || '',
+      protocol: selectedPatientFromParent.protocol || '',
+      cycleNo: String(selectedPatientFromParent.cycle_no || '1'),
+      totalCycles: String(selectedPatientFromParent.total_cycles || ''),
+      allergies: selectedPatientFromParent.allergies || ''
+    });
+
+    // 2. Fetch clinical snapshot logs (Vitals, Labs, Historical Prescriptions)
+    setIsLoadingClinicalData(true);
+    
+    // Check if we are loading an active queue node item directly
+    const targetPatientId = selectedPatientFromParent.patient;
+    const targetVisitId = selectedPatientFromParent.visit;
+
+    if (targetPatientId) {
+      API.get(`/api/prescriptions/?patient=${targetPatientId}&visit=${targetVisitId || ''}`)
+        .then(res => {
+          const results = res.data?.results || res.data;
+          
+          if (results && results.length > 0) {
+            const activeRx = results[0];
+            
+            // If an existing prescription history profile is found, load snapshots
+            if (activeRx.vitals_snapshot) setActiveVitals(activeRx.vitals_snapshot);
+            if (activeRx.lab_results_snapshot) {
+              const parsedLabs = Object.entries(activeRx.lab_results_snapshot).map(([name, data]) => ({
+                test_name_display: name,
+                ...data
+              }));
+              setActiveLabs(parsedLabs);
+            }
+            
+            // 🌟 STEP A: Fallback chain parsing existing saved diagnoses snapshots
+            if (activeRx.diagnosis_snapshot && activeRx.diagnosis_snapshot.length > 0) {
+              setPatientDiagnoses(activeRx.diagnosis_snapshot);
+            } else if (activeRx.diagnosis_detail) {
+              setPatientDiagnoses([activeRx.diagnosis_detail]);
+            }
+          } else {
+            // 🌟 STEP B: Fallback chain parsing brand new patients coming straight from the Consultation Queue 
+            if (selectedPatientFromParent.diagnosis_snapshot && selectedPatientFromParent.diagnosis_snapshot.length > 0) {
+              setPatientDiagnoses(selectedPatientFromParent.diagnosis_snapshot);
+            } else if (selectedPatientFromParent.diagnosis_detail) {
+              setPatientDiagnoses([selectedPatientFromParent.diagnosis_detail]);
+            }
+          }
+        })
+        .catch(err => console.error("Error running clinical history sync:", err))
+        .finally(() => setIsLoadingClinicalData(false));
+    } else {
+      setIsLoadingClinicalData(false);
+    }
+  }
+}, [selectedPatientFromParent]);
 
   useEffect(() => {
     if (selectedPatient) handlePatientSelectionContext(selectedPatient);
@@ -263,13 +362,28 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     setChemoRows(prev => prev.map(row => {
       if (row.id === id) {
         const updatedRow = { ...row, [field]: value };
+        
         if (field === 'drug_id') {
-          const matchedDrug = drugsMasterList.find(d => d.id === parseInt(value));
-          updatedRow.name = matchedDrug ? matchedDrug.name : '';
+          if (!value || value === "") {
+            updatedRow.name = '';
+            updatedRow.calculated_dose = '';
+          } else {
+            const matchedDrug = drugsMasterList.find(d => d.id === parseInt(value, 10));
+            updatedRow.name = matchedDrug ? matchedDrug.name : '';
+          }
         }
+        
         if (field === 'calc_factor' || field === 'factor_value' || field === 'drug_id') {
-          updatedRow.calculated_dose = calculateRowDose(updatedRow.calc_factor, updatedRow.factor_value);
+          if (!updatedRow.drug_id || updatedRow.drug_id === "") {
+            updatedRow.calculated_dose = '';
+          } else {
+            updatedRow.calculated_dose = calculateRowDose(updatedRow.calc_factor, updatedRow.factor_value);
+          }
         }
+
+        // 🔍 DETAILED STATE LOGGER: Watch the row modify itself live
+        console.log(`[Pharma State Sync] Row #${id} updated field [${field}] to:`, value, "Resulting Row Object:", updatedRow);
+
         return updatedRow;
       }
       return row;
@@ -286,7 +400,13 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
 
   const handleSubmitPrescription = async () => {
     if (!selectedPatient) return alert("Select patient workspace first.");
+
+    console.log("DEBUG - raw chemoRows array:", chemoRows);
+    console.log("DEBUG - single item sample structure:", chemoRows[0]);
+
     setIsSubmitting(true);
+
+    
     
     try {
       // 1. Rigorous payload construction for items across treatment stages
@@ -303,18 +423,44 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
           volume: '0', 
           duration: 'STAT'
         })),
-        ...chemoRows.filter(r => r.drug_id).map(r => ({
-          stage: 'CHEMO', 
-          drug: parseInt(r.drug_id), 
-          medication_name: r.name || r.drugName, 
-          dosage: String(r.calculated_dose || r.dosage || 'STAT'),
-          calc_factor: r.calc_factor || r.calcFactor || 'Flat Rate', 
-          factor_value: String(r.factor_value || r.factorValue || '0'), 
-          route: r.route || 'I.V', 
-          diluent: r.diluent || 'Normal Saline', 
-          volume: String(r.volume || '250'), 
-          duration: r.duration || '30 mins'
-        })),
+        
+        ...chemoRows
+          .filter(r => {
+            // 🌟 Normalize keys so it works whether the property is named drug_id or drug
+            const activeDrugId = r.drug_id || r.drug;
+            const activeName = r.name || r.medication_name;
+            const activeCalculatedDose = r.calculated_dose || '';
+
+            // Check if a drug was actually selected
+            const hasValidDrug = activeDrugId && String(activeDrugId).trim() !== "";
+            
+            // Check if the calculation failed due to missing vitals
+            const calculationFailed = String(activeCalculatedDose).includes('Missing');
+
+            // ⚡ ONLY keep rows that have a selected drug AND didn't fail calculation
+            return hasValidDrug && activeName && !calculationFailed;
+          })
+          .map(r => {
+            const activeDrugId = r.drug_id || r.drug;
+            const activeName = r.name || r.medication_name;
+            const cleanDrugForeignKey = parseInt(activeDrugId, 10);
+            
+            return {
+              stage: 'CHEMO', 
+              drug: isNaN(cleanDrugForeignKey) ? null : cleanDrugForeignKey, 
+              medication_name: activeName, 
+              // Fall back gracefully to factor_value if calculated_dose isn't built yet
+              dosage: r.calculated_dose || `${r.factor_value} mg`,
+              calc_factor: r.calc_factor || 'Flat Rate', 
+              factor_value: String(r.factor_value || '0'), 
+              route: r.route || 'I.V', 
+              diluent: r.diluent || 'Normal Saline', 
+              volume: String(r.volume || '250'), 
+              duration: r.duration || '30 mins'
+            };
+          }),
+        // ----------------------------------------
+
         ...postChemoOrders.filter(o => o.checked).map(o => ({
           stage: 'POST_CHEMO', 
           drug: null, 
@@ -343,7 +489,7 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
       const payload = {
         patient: resolvedPatientId,
         visit: resolvedVisitId, 
-        diagnosis: resolvedDiagnosisId,
+        diagnosis: patientDiagnoses.length > 0 ? (patientDiagnoses[0].id || selectedPatient?.diagnosis) : null,
         treatment_date: patientMeta.date || new Date().toISOString().split('T')[0],
         pharmacy_status: 'PENDING', 
         dose_adjustment_notes: doseAdjustmentNotes || '',
@@ -358,7 +504,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
       await API.post('/prescriptions/', payload);
 
       // Update workflow tracking station inside queue manager components
-      // (Uses the target workspace ID corresponding directly to your API endpoint parameter)
       const queueTrackerId = selectedPatient.id || resolvedVisitId;
       await API.patch(`/queue/${queueTrackerId}/`, {
         current_station: 'PHARMACY',
@@ -376,8 +521,8 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     } finally { 
       setIsSubmitting(false); 
     }
-  };
-      
+};
+
   return (
     <>
       <style dangerouslySetInnerHTML={{__html: `
@@ -477,7 +622,7 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
               </div>
               <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col">
                 <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Weight</span>
-                <span className="text-xl font-bold text-slate-800">{isLoadingClinicalData ? '---' : getVitalVal('weight')} <span className="text-xs text-slate-400 font-normal">kg</span></span>
+                <span className="text-xl font-bold text-slate-800">{isLoadingClinicalData ? '---' : getVitalVal('weight') || '—'} <span className="text-xs text-slate-400 font-normal">kg</span></span>
               </div>
             </div>
           </div>
@@ -567,9 +712,9 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
 
             <div className="bg-slate-50 border border-slate-200 p-5 rounded-xl space-y-5 no-print">
               <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase tracking-wide text-slate-400 block">Confirmed Patient Diagnosis Snapshot</label>
+                <label className="text-xs font-semibold uppercase tracking-wide text-slate-400 block">Patient Diagnosis</label>
                 <div className="flex flex-wrap gap-2">
-                  {patientDiagnoses.length === 0 ? (
+                  {!patientDiagnoses || patientDiagnoses.length === 0 ? (
                     <div className="text-sm text-slate-400 italic bg-white border border-dashed rounded-lg p-4 w-full">
                       No active ICD10 diagnoses snapshots mapped on this encounter queue item.
                     </div>
@@ -577,14 +722,11 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                     patientDiagnoses.map((dx, index) => (
                       <div key={index} className="bg-white border border-slate-200 rounded-lg p-3 flex flex-col gap-1 shadow-sm w-full">
                         <div className="flex items-center gap-2">
-                          <span className="bg-blue-600 text-white font-mono font-semibold text-xs px-2 py-0.5 rounded uppercase">
-                            {dx.icd10_code}
-                          </span>
-                          <span className="font-semibold text-slate-800 text-sm">{dx.description}</span>
+                          
+                          
+                          <span className="font-semibold text-slate-800 text-sm">{dx?.description || dx?.icd10_description || 'No Description Provided'}</span>
                         </div>
-                        <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mt-1">
-                          Anatomical Site Code: <span className="text-slate-600">{dx.primary_site || 'Unassigned'}</span>
-                        </span>
+                        
                       </div>
                     ))
                   )}
@@ -658,7 +800,7 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
                   onClick={addChemoRow}
                   className="no-print bg-slate-900 text-white font-semibold text-xs uppercase tracking-wider px-3.5 py-1.5 rounded hover:bg-slate-800 transition-all flex items-center gap-1.5"
                 >
-                  <Plus size={12} /> Add Agent Row
+                  <Plus size={12} /> Add Medication
                 </button>
               </div>
 

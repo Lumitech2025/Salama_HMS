@@ -30,6 +30,7 @@ from .mpesa import MpesaClient
 import logging
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from django.shortcuts import get_object_or_404
 
 from appointments.utils import dispatch_async_notifications
 
@@ -108,6 +109,8 @@ class QueueViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['current_station', 'status', 'priority']
     search_fields = ['patient__name', 'token_id', 'patient__registry_no']
+
+    
 
     @action(detail=True, methods=['post'])
     def move_next(self, request, pk=None):
@@ -272,28 +275,49 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         Optimized database pipeline targeting the clinical network layout.
         Prefetches diagnoses snapshots and vital indexes to eliminate N+1 query traps.
         """
-        queryset = Prescription.objects.select_related(
+        return Prescription.objects.select_related(
             'patient',
             'visit', 
-            'visit__visit'
+            'visit__visit',
+            'diagnosis'  # 🌟 Added to prefetch full primary site & long description details
         ).prefetch_related(
             'items__drug',
             'visit__visit__vitals',      
             'visit__visit__diagnoses',   
             'visit__visit__lab_orders'   
         )
-
-        if self.action == 'list':
-            station_filter = self.request.query_params.get('current_station')
-            if station_filter == 'DOCTOR':
-                queryset = queryset.filter(
-                    visit__visit__lab_orders__status='COMPLETED'
-                ).distinct()
-        else:
-            self.filter_backends = []
-
-        return queryset
     
+    def get_object(self):
+        """
+        SMART LOOKUP OVERRIDE: 
+        If the primary key sent by the frontend doesn't directly find a prescription,
+        fallback to searching for a prescription associated with that Visit ID / Queue tracking node.
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field or 'pk'
+        lookup_value = self.kwargs[lookup_url_kwarg]
+
+        try:
+            # First, try to match the direct Prescription ID primary key allocation row
+            return super().get_object()
+        except Exception:
+            # Fallback 1: Look up by the underlying Encounter Visit Session ID reference
+            prescription = queryset.filter(visit_id=lookup_value).first()
+            if prescription:
+                return prescription
+                
+            # Fallback 2: Check if the frontend passed a Queue ID instead
+            # This completely patches the 404 mismatch showing in your dev console logs
+            from core.models import Queue
+            queue_item = Queue.objects.filter(id=lookup_value).first()
+            if queue_item and queue_item.visit:
+                prescription = queryset.filter(visit=queue_item.visit).first()
+                if prescription:
+                    return prescription
+            
+            # If everything fails, raise standard 404 message block cleanly
+            raise Http404("No Prescription matches the given query parameters.")
+
     def _get_deduction_qty(self, item):
         """Standardized logic for oncology inventory depletion."""
         if item.stage == 'PRE_CHEMO': return 1
@@ -303,19 +327,32 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_create(self, serializer):
-        
         practitioner = self.request.user.get_full_name() or self.request.user.username
-        prescription = serializer.save(prescribed_by=practitioner)
         
+        # 1. 🔍 RESOLVE DYNAMIC DIAGNOSIS
+        visit_record = serializer.validated_data.get('visit')
+        diagnosis_obj = serializer.validated_data.get('diagnosis')
+        
+        if not diagnosis_obj and visit_record:
+            underlying_clinic_visit = getattr(visit_record, 'visit', None)
+            if underlying_clinic_visit and hasattr(underlying_clinic_visit, 'diagnoses'):
+                diagnosis_obj = underlying_clinic_visit.diagnoses.first()
+
+        # Save the master prescription envelope container
+        prescription = serializer.save(
+            prescribed_by=practitioner,
+            diagnosis=diagnosis_obj,
+            pharmacy_status='PENDING'
+        )
+        
+        # 2. 💊 AUTO-CREATE PRE-CHEMO ITEMS
         pre_chemo_constants = [
             {"name": "Metoclopramide", "dosage": "10mg STAT", "route": "I.V", "duration": "STAT"},
             {"name": "Chlorpheniramine", "dosage": "10mg STAT", "route": "I.V", "duration": "STAT"},
             {"name": "Ondansetron", "dosage": "8mg STAT", "route": "I.V", "duration": "STAT"},
             {"name": "Dexamethasone", "dosage": "8mg STAT", "route": "I.V", "duration": "STAT"},
         ]
-        
         for pc in pre_chemo_constants:
-            # Match directly against the system pharmacy drug profile using clean text criteria
             drug_ref = Drug.objects.filter(name__icontains=pc["name"]).first()
             PrescriptionItem.objects.create(
                 prescription=prescription,
@@ -331,13 +368,42 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 duration=pc["duration"]
             )
 
+        # 3. 🧬 PROCESS DYNAMIC CORE CHEMOTHERAPY ORDERS FROM FRONTEND PAYLOAD
+        # Since items is read_only in the serializer, we extract it directly from request.data
+        raw_items = self.request.data.get('items', [])
+        if isinstance(raw_items, list):
+            for item_data in raw_items:
+                # Target only the CHEMO rows sent by the frontend matrix
+                if item_data.get('stage') == 'CHEMO':
+                    drug_id = item_data.get('drug')
+                    drug_instance = None
+                    if drug_id:
+                        try:
+                            drug_instance = Drug.objects.get(id=int(drug_id))
+                        except (Drug.DoesNotExist, ValueError, TypeError):
+                            pass
+
+                    PrescriptionItem.objects.create(
+                        prescription=prescription,
+                        stage='CHEMO',
+                        medication_name=item_data.get('medication_name', 'Unknown Agent'),
+                        drug=drug_instance,
+                        dosage=item_data.get('dosage', ''),
+                        calc_factor=item_data.get('calc_factor', 'Flat Rate'),
+                        factor_value=str(item_data.get('factor_value', '0')),
+                        route=item_data.get('route', 'I.V'),
+                        diluent=item_data.get('diluent', 'Normal Saline'),
+                        volume=str(item_data.get('volume', '250')),
+                        duration=item_data.get('duration', '30 mins')
+                    )
+
+        # 4. 💊 AUTO-CREATE POST-CHEMO ITEMS
         post_chemo_constants = [
             {"name": "FeSO4/FA", "dosage": "200mg/1 tab", "route": "P.O", "duration": "OD × 5/7"},
             {"name": "Ondansetron", "dosage": "8mg 1 tab", "route": "P.O", "duration": "BD × 5/7"},
             {"name": "Metoclopramide", "dosage": "10mg 1 tab", "route": "P.O", "duration": "TDS × 5/7"},
             {"name": "Dexamethasone", "dosage": "4mg 1 tab", "route": "P.O", "duration": "BD × 5/7"},
         ]
-        
         for po in post_chemo_constants:
             drug_ref = Drug.objects.filter(name__icontains=po["name"]).first()
             PrescriptionItem.objects.create(
@@ -354,7 +420,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 duration=po["duration"]
             )
 
-        # 3. Synchronize Location State: Push Patient to the Pharmacy Dashboard Grid
+        # 5. 🔄 ROUTE VISITATION QUEUE
         if prescription.visit:
             queue_ticket = prescription.visit
             queue_ticket.current_station = 'PHARMACY'
@@ -370,43 +436,92 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             
         return super().partial_update(request, *args, **kwargs)
 
+    @transaction.atomic
     def _dispense_prescription(self, request, prescription):
+        # Inline imports inside the transaction to avoid cyclic imports
+        from core.models import PatientInvoice, PatientBillableItem, Service
+        import re
+
         try:
+            # 1. Fetch or initialize the active open billing invoice ledger
+            if not prescription.visit:
+                return Response({"error": "No active registration record context found for billing."}, status=status.HTTP_400_BAD_REQUEST)
+                
+            invoice, _ = PatientInvoice.objects.get_or_create(
+                visit=prescription.visit,
+                patient=prescription.patient,
+                defaults={'status': 'UNPAID'}
+            )
+
+            # Locate your master pharmacy service folder/SKU for tracking structure integrity
+            fallback_pharmacy_service = Service.objects.filter(dept='PHA', active=True).first()
+
+            # 2. Open an isolated transaction block with explicit row-level locking
             with transaction.atomic():
                 for item in prescription.items.all():
                     if not item.drug:
                         continue
-                        
-                    # 1. Lock and fetch
+                    
+                    # Lock and fetch to prevent race conditions during concurrent checkouts
                     locked_drug = Drug.objects.select_for_update().get(id=item.drug.id)
                     
-                    # 2. Calculate
+                    # Skip if the medication is expired
+                    if getattr(locked_drug, 'is_expired', False):
+                        raise ValueError(f"Cannot dispense {locked_drug.name} - Medication batch is expired.")
+
                     deduction_qty = self._get_deduction_qty(item)
                     
-                    # 3. Validate
                     if locked_drug.stock_quantity < deduction_qty:
-                        raise ValueError(f"Insufficient stock for {locked_drug.name}")
+                        raise ValueError(f"Insufficient stock for {locked_drug.name}. Requested: {deduction_qty}, Available: {locked_drug.stock_quantity}")
                     
-                    # 4. Deduct
+                    # A. Deduct Inventory Stock
                     locked_drug.stock_quantity -= deduction_qty
-                    locked_drug.save()
+                    locked_drug.save(update_fields=['stock_quantity'])
 
-                # 5. Update Status only if ALL items succeeded
+                    # B. Process Real-Time Patient Invoice Itemization
+                    retail_rate = getattr(locked_drug, 'selling_price_kes', 0)
+                    billing_item_name = f"Medication: {locked_drug.name} ({getattr(locked_drug, 'strength', 'N/A')})"
+
+                    # Check if this precise item line has already been posted to prevent duplication
+                    already_billed = PatientBillableItem.objects.filter(
+                        invoice=invoice,
+                        name=billing_item_name
+                    ).exists()
+
+                    if not already_billed:
+                        extra_fields = {}
+                        if hasattr(PatientBillableItem, 'unit_price'):
+                            extra_fields['unit_price'] = retail_rate
+                        if hasattr(PatientBillableItem, 'name'):
+                            extra_fields['name'] = billing_item_name
+                        if hasattr(PatientBillableItem, 'drug'):
+                            extra_fields['drug'] = locked_drug
+
+                        PatientBillableItem.objects.create(
+                            invoice=invoice,
+                            service=fallback_pharmacy_service,  
+                            quantity=deduction_qty,
+                            **extra_fields
+                        )
+
+                # 3. Finalize Master Records Status Parameters
                 prescription.pharmacy_status = 'DISPENSED'
-                prescription.save()
+                # Pass update_fields so that general signals do not get triggered unnecessarily
+                prescription.save(update_fields=['pharmacy_status'])
                 
+                # 4. Route Patient workflow tracking to Billing station
                 if prescription.visit:
                     prescription.visit.current_station = 'BILLING'
                     prescription.visit.status = 'COMPLETED'
-                    prescription.visit.save()
+                    prescription.visit.save(update_fields=['current_station', 'status'])
             
             return Response(self.get_serializer(prescription).data)
             
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({"error": "An unexpected error occurred"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
+            # You can attach a logger here to inspect internal anomalies
+            return Response({"error": f"An unexpected error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
 # --- 6. APPOINTMENTS & BILLING ---
 

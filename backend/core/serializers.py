@@ -226,14 +226,34 @@ class QueueSerializer(serializers.ModelSerializer):
 
     health_record_number = serializers.ReadOnlyField(source='visit.health_record_number')
     is_urgent = serializers.BooleanField(source='visit.is_urgent', read_only=True, default=False)
+
+    diagnosis_snapshot = serializers.SerializerMethodField()
     
     class Meta:
         model = Queue
         fields = [
             'id', 'token_id', 'patient', 'patient_name', 'patient_age', 'patient_gender','health_record_number','patient_id_no', 
             'current_station', 'status', 'priority', 'entered_at', 'wait_time',
-            'is_urgent', 'visit_id','status_display', 'station_display'
+            'is_urgent', 'visit_id','status_display', 'station_display', 'diagnosis_snapshot'
         ]
+
+    def get_diagnosis_snapshot(self, obj):
+        # Resolve tracking against the RegistrationRecord (visit)
+        encounter = obj.visit if obj.visit else None
+        if encounter:
+            diagnoses = encounter.diagnoses.all()
+            return [
+                {
+                    "id": d.id,
+                    "primary_site": d.primary_site,
+                    "primary_site_display": d.get_primary_site_display() if hasattr(d, 'get_primary_site_display') else d.primary_site,
+                    "icd10_code": d.icd10_code,
+                    "description": d.icd10_description,
+                    "long_description": d.long_description,
+                    "recorded_at": d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else None
+                } for d in diagnoses
+            ]
+        return []
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. CLINICAL EMR
@@ -323,13 +343,16 @@ class PrescriptionSerializer(serializers.ModelSerializer):
     vitals_snapshot = serializers.SerializerMethodField()
     diagnosis_snapshot = serializers.SerializerMethodField()
     lab_results_snapshot = serializers.SerializerMethodField()
+    
+    # 🌟 NEW: Exposes rich nested lookup detailing back to the UI layout safely
+    diagnosis_detail = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Prescription
         fields = [
             'id', 'patient', 'patient_name', 'patient_gender', 'patient_age', 
             'health_record_number', 'queue_token', 'visit', 'protocol', 
-            'cycle_no', 'total_cycles', 'diagnosis', 'allergies', 
+            'cycle_no', 'total_cycles', 'diagnosis', 'diagnosis_detail', 'allergies', 
             'dose_adjustment_notes', 'prescribed_by', 'pharmacy_status', 
             'vitals_snapshot', 'diagnosis_snapshot', 'lab_results_snapshot', 
             'items', 'treatment_date'
@@ -363,24 +386,32 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         """
         encounter = self._get_clinical_encounter(obj)
         if encounter:
-            # Safely fetch all saved diagnosis instances for this specific encounter/visit
             diagnoses = encounter.diagnoses.all()
-            
             return [
                 {
-                    # e.g., 'BREAST' (Raw key code for standard operational matches)
+                    "id": d.id,
                     "primary_site": d.primary_site,
-                    # e.g., 'Breast' (Human-friendly readable display text resolved via choices map)
-                    "primary_site_display": d.get_primary_site_display(),
-                    # e.g., 'C50.9'
+                    "primary_site_display": d.get_primary_site_display() if hasattr(d, 'get_primary_site_display') else d.primary_site,
                     "icd10_code": d.icd10_code,
-                    # e.g., 'Malignant neoplasm of breast, unspecified'
                     "description": d.icd10_description,
                     "long_description": d.long_description,
-                    "recorded_at": d.created_at.strftime('%Y-%m-%d %H:%M')
+                    "recorded_at": d.created_at.strftime('%Y-%m-%d %H:%M') if d.created_at else None
                 } for d in diagnoses
             ]
         return []
+
+    # 🌟 NEW: Safety method resolving the specific single target diagnosis set directly on the prescription
+    def get_diagnosis_detail(self, obj):
+        if obj.diagnosis:
+            d = obj.diagnosis
+            return {
+                "id": d.id,
+                "primary_site": getattr(d, 'primary_site', ''),
+                "icd10_code": getattr(d, 'icd10_code', ''),
+                "description": getattr(d, 'icd10_description', ''),
+                "long_description": getattr(d, 'long_description', '')
+            }
+        return None
 
     def get_lab_results_snapshot(self, obj):
         encounter = self._get_clinical_encounter(obj)
@@ -413,7 +444,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
                     "is_critical": res.is_critical,
                     "parameters": metrics,
                     "technician_notes": res.technician_notes,
-                    "verified_at": res.updated_at.strftime('%Y-%m-%d')
+                    "verified_at": res.updated_at.strftime('%Y-%m-%d') if res.updated_at else None
                 }
         return labs_dict
     
