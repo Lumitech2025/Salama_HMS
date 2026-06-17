@@ -86,7 +86,7 @@ class IsReceptionStaff(permissions.BasePermission):
 
 class IsClinicalStaff(permissions.BasePermission):
     def has_permission(self, request, view):
-        clinical_roles = ['ONCOLOGIST', 'NURSE', 'LAB_TECH', 'HEMATOLOGIST', 'SURGEON', 'ADMIN', 'RADIOLOGIST', 'RECEPTIONIST']
+        clinical_roles = ['ONCOLOGIST', 'NURSE', 'LAB_TECH', 'HEMATOLOGIST', 'SURGEON', 'ADMIN', 'RADIOLOGIST', 'RECEPTIONIST','PHARMACIST']
         return request.user.is_authenticated and getattr(request.user, 'role', '') in clinical_roles
 
 class IsFinancialStaff(permissions.BasePermission):

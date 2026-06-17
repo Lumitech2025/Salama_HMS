@@ -1,84 +1,82 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
     LayoutDashboard, 
-    Scan, 
-    History, 
-    LogOut 
+    Pill, 
+    ClipboardList, 
+    Package, 
+    FileSpreadsheet, 
+    LogOut,
+    Beaker 
 } from 'lucide-react';
+import SalamaLogo from "@/assets/Salama Cancer Centre logo.png";
 
-const RadiologistSidebar = ({ activeTab, setActiveTab }) => {
-    
-    // Explicit 3-Menu Matrix mapped directly to Dashboard workflows
+const RadiologistSidebar = ({ activeTab, setActiveTab, onLogout }) => {
+    const navigate = useNavigate();
+
     const menuItems = [
-        { 
-            id: 'overview', 
-            label: 'Overview', 
-            icon: <LayoutDashboard size={18} /> 
-        }, 
-        { 
-            id: 'diagnostics', 
-            label: 'Diagnostics', 
-            icon: <Scan size={18} /> 
-        },
-        { 
-            id: 'history', 
-            label: 'Patient History', 
-            icon: <History size={18} /> 
-        },
+        { id: 'overview', label: 'Home', icon: <LayoutDashboard size={18} /> },
+        { id: 'labs', label: 'Lab Results', icon: <Beaker size={18} /> },
+        { id: 'prescriptions', label: 'Prescriptions', icon: <ClipboardList size={18} /> },
+        { id: 'dispensing', label: 'Patient History', icon: <Pill size={18} /> },
+        { id: 'inventory', label: 'Inventory', icon: <Package size={18} /> },
+        { id: 'requisitions', label: 'Requisitions', icon: <FileSpreadsheet size={18} /> }
     ];
 
-    const handleLogout = () => {
-        localStorage.clear();
-        window.location.href = '/login';
+    const handleLogoutClick = () => {
+        if (typeof onLogout === 'function') {
+            onLogout();
+        } else {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('user_role');
+            sessionStorage.clear();
+            navigate('/login');
+        }
     };
 
     return (
-        <aside className="w-80 bg-[#020617] h-screen flex flex-col p-8 border-r border-white/5 font-['Inter'] antialiased select-none">
-            {/* Branding Section */}
-            <div className="mb-12 px-2">
+        <aside className="w-80 bg-[#020617] h-screen flex flex-col p-8 border-r border-white/5 font-['Inter'] antialiased">
+            {/* Standardized Corporate Identity Branding */}
+            <div className="mb-8 px-2">
                 <h1 className="text-3xl font-black text-white tracking-tighter uppercase italic">
-                    SALAMA <span className="text-blue-500 not-italic font-light">HMS</span>
+                    SALAMA <span className="text-teal-400 not-italic font-light">RADIO</span>
                 </h1>
                 <p className="text-[11px] text-slate-500 font-black uppercase tracking-[0.4em] mt-3">
-                    Radiology Department
+                    Imaging Management
                 </p>
             </div>
 
-            {/* Navigation Menu */}
+            {/* Navigation Menu Links Wrapper */}
             <nav className="flex-1 space-y-2 overflow-y-auto pr-1">
-                {menuItems.map((item) => {
-                    const isActive = activeTab === item.id;
-                    return (
-                        <button
-                            key={item.id}
-                            onClick={() => setActiveTab(item.id)}
-                            className={`w-full flex items-center justify-start px-6 py-4 rounded-2xl transition-all duration-300 group ${
-                                isActive 
-                                    ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20 font-bold' 
-                                    : 'text-slate-400 hover:bg-white/5 hover:text-white'
-                            }`}
-                        >
-                            <div className={`mr-4 transition-transform duration-300 ${
-                                isActive ? 'scale-110 text-white' : 'text-slate-400 group-hover:text-white'
-                            }`}>
-                                {item.icon}
-                            </div>
-                            <span className="text-xs font-black tracking-widest uppercase truncate">
-                                {item.label}
-                            </span>
-                        </button>
-                    );
-                })}
+                {menuItems.map((item) => (
+                    <button
+                        key={item.id}
+                        onClick={() => setActiveTab(item.id)}
+                        className={`w-full flex items-center justify-start px-6 py-4 rounded-2xl transition-all duration-300 ${
+                            activeTab === item.id 
+                            ? 'bg-teal-600 text-white shadow-xl shadow-teal-600/20 font-bold' 
+                            : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                        }`}
+                    >
+                        <div className="mr-4 text-current">{item.icon}</div>
+                        <span className="text-[12px] font-bold tracking-widest uppercase truncate">
+                            {item.label}
+                        </span>
+                    </button>
+                ))}
             </nav>
 
-            {/* Bottom Actions Footer Area */}
-            <div className="pt-8 border-t border-white/5">
+            {/* Footer Control Actions Section */}
+            <div className="pt-8 border-t border-white/5 space-y-4">
+                <div className="px-6 text-left">
+                    <p className="text-[9px] text-slate-600 font-mono">Version 1.0.0 (Salama Radio)</p>
+                </div>
                 <button 
-                    onClick={handleLogout}
-                    className="flex items-center justify-start px-6 py-4 text-rose-500 hover:bg-rose-500/5 rounded-2xl transition-all w-full group"
+                    onClick={handleLogoutClick}
+                    className="flex items-center justify-start space-x-4 px-6 py-4 text-rose-500 hover:bg-rose-500/5 rounded-2xl transition-all w-full cursor-pointer"
                 >
-                    <LogOut size={16} className="mr-4 group-hover:translate-x-0.5 transition-transform" />
-                    <span className="text-xs font-black uppercase tracking-widest">Log Out</span>
+                    <LogOut size={18} />
+                    <span className="text-[11px] font-black uppercase tracking-[0.2em]">Log Out</span>
                 </button>
             </div>
         </aside>

@@ -342,48 +342,49 @@ const PrescriptionQueue = ({ onDispensingComplete }) => {
       {/* INJECTED CSS PRINT OVERRIDES ENGINE */}
       <style dangerouslySetInnerHTML={{__html: `
         @media print {
-          /* Hide external layouts and frameworks safely without sweeping away structural document trees */
-          nav, 
-          aside, 
-          header, 
-          footer,
-          button,
-          .print\\:hidden,
-          div[class*="sidebar"], 
-          div[class*="Sidebar"],
-          div[class*="nav"],
-          div[class*="Navbar"] {
-            display: none !important;
+          /* 1. Hide every single element in the DOM structure */
+          body * {
+            visibility: hidden !important;
           }
           
-          body, html {
-            background: #ffffff !important;
-            color: #000000 !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100% !important;
-            height: auto !important;
+          /* 2. Force ONLY the prescription card sheet and its child items to remain visible */
+          .print-target-sheet, 
+          .print-target-sheet * {
+            visibility: visible !important;
           }
-
-          /* Force prescription layout wrapper to full width printable context */
+          
+          /* 3. Re-anchor the printable canvas layout clean at the top left of the actual paper */
           .print-target-sheet {
-            display: block !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
             width: 100% !important;
             max-width: 100% !important;
-            position: static !important;
             margin: 0 !important;
             padding: 0 !important;
             box-shadow: none !important;
             border: none !important;
-            background: transparent !important;
+            background: #ffffff !important;
           }
-          
+
+          /* 4. ✨ FIX: Force overflow containers to expand completely and strip scrollbars */
+          div[class*="overflow-x-auto"],
+          .overflow-hidden,
+          .overflow-x-auto {
+            overflow: visible !important;
+            overflow-x: visible !important;
+            display: block !important;
+            max-width: 100% !important;
+            width: 100% !important;
+          }
+
           /* Preserve styled medical dynamic data grid rows tables */
           .print-target-sheet table {
             display: table !important;
             width: 100% !important;
             border-collapse: collapse !important;
             margin-bottom: 16px !important;
+            table-layout: auto !important; /* Allows cells to auto-size efficiently to page limits */
           }
           .print-target-sheet thead { display: table-header-group !important; }
           .print-target-sheet tbody { display: table-row-group !important; }
@@ -394,8 +395,9 @@ const PrescriptionQueue = ({ onDispensingComplete }) => {
           .print-target-sheet th, 
           .print-target-sheet td { 
             display: table-cell !important; 
-            padding: 8px 12px !important;
+            padding: 6px 8px !important; /* Adjusted slightly to fit dense 8-column layout */
             border-bottom: 1px solid #cbd5e1 !important;
+            word-break: break-word !important;
           }
           
           /* Re-establish standard demographic grid columns blocks */
@@ -409,6 +411,12 @@ const PrescriptionQueue = ({ onDispensingComplete }) => {
             display: grid !important;
             grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
             gap: 12px !important;
+          }
+
+          /* Clear headers/footers browser margins */
+          @page {
+            size: auto;
+            margin: 15mm 15mm 15mm 15mm;
           }
         }
       `}} />
@@ -456,18 +464,27 @@ const PrescriptionQueue = ({ onDispensingComplete }) => {
         <div className="print-target-sheet bg-white border border-slate-200 rounded-xl p-5 sm:p-6 space-y-6 shadow-xs">
           
           {/* MEDICAL LOGO HEADER BRAND FOR PRINT PREVIEWS */}
-          <div className="hidden print:flex items-center justify-between border-b-2 border-slate-900 pb-4 mb-2">
-            <div className="flex items-center gap-3">
-              <img src={SalamaLogo} alt="Salama Cancer Centre" className="h-14 w-auto object-contain" />
-              <div>
-                <h1 className="text-xl font-black text-slate-900 tracking-tight">SALAMA CANCER CENTRE</h1>
-                <p className="text-xs font-semibold text-slate-500">Comprehensive Oncology & Pharmacy Dispensation Care</p>
+          <div className="hidden print:block text-center border-b-2 border-slate-800 pb-4 mb-6">
+            <div className="flex justify-center items-center gap-3 mb-1">
+              <img 
+                src={SalamaLogo} 
+                alt="Salama Cancer Centre" 
+                className="h-14 w-auto object-contain"
+              />
+              <div className="text-left">
+                <h1 className="text-xl font-bold tracking-tight text-slate-900">SALAMA CANCER CENTRE</h1>
+                <p className="text-xs font-semibold text-teal-600 tracking-wide -mt-0.5">Holistic Cancer and Palliative Care</p>
               </div>
             </div>
-            <div className="text-right text-xs text-slate-500 font-medium">
-              <p>Prescription Order Ref: #{selectedPrescription.id}</p>
-              <p>Generated: {new Date().toLocaleDateString('en-GB')}</p>
-            </div>
+            
+            <h2 className="text-sm font-bold text-slate-800 tracking-wider uppercase mt-2 bg-slate-100 py-1 print:bg-transparent">
+              OFFICIAL PRESCRIPTION DISPENSATION FORM
+            </h2>
+            
+            <p className="text-[11px] text-slate-500 font-medium mt-1.5">
+              PO BOX 19619-40123, Kisumu, Kenya<br />
+              Tel: +254 756 364 419 | Email: scanccentre@gmail.com
+            </p>
           </div>
 
           {/* DEMOGRAPHICS SHEET */}

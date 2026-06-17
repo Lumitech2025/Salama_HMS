@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import RadiologistSidebar from './RadiologistSidebar';
 import RadiologistHome from './modules/RadiologistHome'; 
 import DiagnosticViewer from './modules/DiagnosticViewer';
+import LaboratoryResults from "../oncologist/modules/LaboratoryResults";
 import PatientDiagnosticsArchive from './modules/PatientDiagnosticsArchive';
 import API from '@/api/api';
 import { Bell, Search, Activity, Loader2, FileScan } from 'lucide-react';
@@ -77,6 +78,9 @@ const RadiologistDashboard = () => {
             </button>
           </div>
         );
+
+        case 'labs':
+        return <LaboratoryResults/>;
 
       case 'history':
         return (

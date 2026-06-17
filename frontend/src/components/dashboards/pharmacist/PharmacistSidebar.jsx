@@ -17,7 +17,7 @@ const PharmacistSidebar = ({ activeTab, setActiveTab, onLogout }) => {
 
     const menuItems = [
         { id: 'overview', label: 'Home', icon: <LayoutDashboard size={18} /> },
-        { id: 'labs', name: 'Lab Results', icon: <Beaker size={18} /> },
+        { id: 'labs', label: 'Lab Results', icon: <Beaker size={18} /> },
         { id: 'prescriptions', label: 'Prescriptions', icon: <ClipboardList size={18} /> },
         { id: 'dispensing', label: 'Patient History', icon: <Pill size={18} /> },
         { id: 'inventory', label: 'Inventory', icon: <Package size={18} /> },
