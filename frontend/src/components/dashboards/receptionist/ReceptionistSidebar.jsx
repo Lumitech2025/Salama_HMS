@@ -10,7 +10,8 @@ import {
     LogOut,
     UserCircle,
     Settings,
-    Stethoscope // Added for Triage
+    Stethoscope,
+    FileText
 } from 'lucide-react';
 
 const ReceptionistSidebar = ({ activeTab, setActiveTab }) => {
@@ -24,6 +25,7 @@ const ReceptionistSidebar = ({ activeTab, setActiveTab }) => {
         { id: 'triage', label: 'Triage', icon: <Stethoscope size={20} /> },
         { id: 'billing', label: 'Billing & Payments', icon: <WalletCards size={20} /> },
         { id: 'queue', label: 'Queue Status', icon: <ListOrdered size={20} /> },
+        { id: 'service-catalogue', label: 'Service Catalogue', icon: <FileText size={20} /> },
     ];
 
     const handleLogout = () => {

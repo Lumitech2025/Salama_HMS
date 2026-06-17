@@ -101,7 +101,7 @@ const TriagePortal = () => {
 
             let alertMessage = `Triage for ${selectedPatient.name} finalized. Patient moved to: ${moveResponse.data.next_station}`;
             if (nextStation === 'DOCTOR') {
-                alertMessage += `\n\n[BILLING NOTE]: Consultation charge generated. Patient must clear at Cashier before seeing the Doctor.`;
+                alertMessage += `\n\n Consultation charge generated. Patient must clear at Cashier before seeing the Doctor.`;
             }
 
             alert(alertMessage);

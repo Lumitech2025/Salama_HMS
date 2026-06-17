@@ -1,9 +1,13 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   CreditCard, Smartphone, Receipt, Search, Plus, 
   CheckCircle2, ArrowRight, ShieldCheck, User, 
-  Loader2, X, Mail, MessageSquare, ArrowUpRight, Check, AlertTriangle
+  Loader2, X, Mail, MessageSquare, ArrowUpRight, Check, AlertTriangle,
+  Download, Printer
 } from 'lucide-react';
+
+// Imported Salama Cancer Centre Logo
+import SalamaLogo from "@/assets/Salama Cancer Centre logo.png";
 
 const PaymentPortal = () => {
   const [billingMode, setBillingMode] = useState('self_pay'); 
@@ -24,37 +28,36 @@ const PaymentPortal = () => {
   const [insuranceData, setInsuranceData] = useState({ company: '', policyNumber: '', preAuthCode: '' });
   const [verificationStatus, setVerificationStatus] = useState('unverified');
 
-  // Master Service Price Mapping State to avoid any hardcoded item fallbacks
   const [masterCatalog, setMasterCatalog] = useState({});
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(true);
 
-  // ✨ NEW: Transaction state handlers for polling tracking
   const [errorMessage, setErrorMessage] = useState('');
   const [countdown, setCountdown] = useState(60);
 
+  // ✨ NEW: State to trigger the Invoice Document Modal Preview
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+
   // Helper to retrieve the CSRF token from Django cookies
-const getCookie = (name) => {
-  let cookieValue = null;
-  if (document.cookie && document.cookie !== '') {
-    const cookies = document.cookie.split(';');
-    for (let i = 0; i < cookies.length; i++) {
-      const cookie = cookies[i].trim();
-      if (cookie.substring(0, name.length + 1) === (name + '=')) {
-        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-        break;
+  const getCookie = (name) => {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+      const cookies = document.cookie.split(';');
+      for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].trim();
+        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+          cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+          break;
+        }
       }
     }
-  }
-  return cookieValue;
-};
+    return cookieValue;
+  };
 
-  // Helper function to dynamically retrieve JWT Access Token headers
   const getAuthHeaders = () => {
     const token = localStorage.getItem('access_token');
     return token ? { 'Authorization': `Bearer ${token}` } : {};
   };
 
- 
   useEffect(() => {
     let timer;
     if (paymentStatus === 'prompting' && countdown > 0) {
@@ -67,7 +70,6 @@ const getCookie = (name) => {
     return () => clearTimeout(timer);
   }, [countdown, paymentStatus]);
 
-  // Fetch active Master Service Catalog prices to prevent static price injection leaks
   const fetchMasterCatalogPrices = useCallback(async () => {
     try {
       setIsLoadingCatalog(true);
@@ -82,7 +84,6 @@ const getCookie = (name) => {
         const data = await response.json();
         const results = data.results || data;
         
-        // Map out dynamic pricing configurations using the SKU code as unique hash identifier
         const dynamicPriceMap = {};
         if (Array.isArray(results)) {
           results.forEach(service => {
@@ -153,7 +154,6 @@ const getCookie = (name) => {
         
         return {
           ...item,
-          // If the service registry contains a live value, use it over any pre-cached or stale row values
           price: dynamicMasterPrice !== undefined ? dynamicMasterPrice : fallbackPrice
         };
       });
@@ -176,129 +176,74 @@ const getCookie = (name) => {
     setCart(cart.filter(item => item.id !== id));
   };
 
-  // ✨ NEW: Internal polling status scanner
-  const startMpesaCallbackTracking = (invId) => {
-    const checkInterval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/invoices/${invId}/`, {
-          method: 'GET',
-          headers: getAuthHeaders()
-        });
-        
-        if (res.ok) {
-          const updatedInvoice = await res.json();
-          
-    
-          if (updatedInvoice.status === 'PAID') {
-            clearInterval(checkInterval);
-            setPaymentStatus('success');
-            setIsProcessing(false);
-          } else if (updatedInvoice.status === 'UNPAID' && paymentStatus !== 'prompting') {
-            clearInterval(checkInterval);
-            setPaymentStatus('failed');
-            setIsProcessing(false);
-            setErrorMessage('Transaction declined or aborted on user mobile handset.');
-          }
-        }
-      } catch (err) {
-        console.error("Polled verification link disconnected:", err);
-      }
-    }, 2000); 
-
-    
-    setTimeout(() => clearInterval(checkInterval), 61000);
-  };
-
   const handleProcessPayment = async () => {
-  // 1. Initial Validations
-  if (!phoneNumber || phoneNumber.trim() === '') {
-    alert("Please enter a valid M-Pesa phone number.");
-    return;
-  }
-
-  try {
-    // 2. Set UI to loading state
-    setPaymentStatus('prompting'); // Shows your "AWAITING PATIENT PIN INPUT..." loader
-    setCountdown(60);             
-
-    // 3. Trigger the initial STK Push request to Django
-    const response = await fetch('/api/mpesa/trigger-push/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRFToken': getCookie('csrftoken'),
-        ...getAuthHeaders() // If you use JWT authentication tokens
-      },
-      body: JSON.stringify({
-        invoice_id: invoiceId,
-        phone_number: phoneNumber,
-        validated_items: cart // Sends the items payload to compute total amount
-      })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || "Failed to initiate M-Pesa payment.");
+    if (!phoneNumber || phoneNumber.trim() === '') {
+      alert("Please enter a valid M-Pesa phone number.");
+      return;
     }
 
-    // ✨ 4. STK PUSH TRIGGERED SUCCESSFULLY! NOW START POLLING
-    console.log("STK Push active. CheckoutRequestID:", data.checkout_id);
+    try {
+      setPaymentStatus('prompting'); 
+      setCountdown(60);             
 
-    // Setup the interval to check our new status endpoint every 3 seconds (3000ms)
-    const pollInterval = setInterval(async () => {
-      try {
-        const statusResponse = await fetch(`/api/mpesa/check-status/${invoiceId}/`, {
-          headers: getAuthHeaders()
-        });
-        const statusData = await statusResponse.json();
-
-        console.log("Polling invoice status...", statusData.status);
-
-        // Scenario A: Payment is a complete success!
-        if (statusData.status === 'PAID') {
-          clearInterval(pollInterval); // Stop looping
-          setPaymentStatus('success');  // Changes UI to show completion/green checkmark
-          
-          // Optional: Trigger your receipt printing or local state update here
-          if (onPaymentComplete) {
-            onPaymentComplete(statusData.receipt_number);
-          }
-        } 
-        
-        
-        else if (statusData.status === 'UNPAID') {
-          clearInterval(pollInterval); // Stop looping
-          setPaymentStatus('failed');   // Switch UI to a failure/retry view
-          alert("Transaction was cancelled or rejected on the handset.");
-        }
-        
-
-      } catch (pollError) {
-        console.error("Error during background status check:", pollError);
-      }
-    }, 3000);
-
-    
-    setTimeout(() => {
-      clearInterval(pollInterval);
-      setPaymentStatus((currentStatus) => {
-        if (currentStatus === 'prompting') {
-          alert("M-Pesa payment validation timed out. Please check your phone or try again.");
-          return 'failed';
-        }
-        return currentStatus;
+      const response = await fetch('/api/mpesa/trigger-push/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken'),
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify({
+          invoice_id: invoiceId,
+          phone_number: phoneNumber,
+          validated_items: cart
+        })
       });
-    }, 60000); // 60,000ms = 1 minute
 
-  } catch (error) {
-    console.error("Payment initiation failed:", error);
-    alert(error.message || "An unexpected error occurred.");
-    setPaymentStatus('idle'); 
-  }
-};
+      const data = await response.json();
 
-  // Connects live corporate underwriters to claims validators
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to initiate M-Pesa payment.");
+      }
+
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await fetch(`/api/mpesa/check-status/${invoiceId}/`, {
+            headers: getAuthHeaders()
+          });
+          const statusData = await statusResponse.json();
+
+          if (statusData.status === 'PAID') {
+            clearInterval(pollInterval);
+            setPaymentStatus('success');
+          } else if (statusData.status === 'UNPAID') {
+            clearInterval(pollInterval);
+            setPaymentStatus('failed');
+            alert("Transaction was cancelled or rejected on the handset.");
+          }
+        } catch (pollError) {
+          console.error("Error during background status check:", pollError);
+        }
+      }, 3000);
+
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        setPaymentStatus((currentStatus) => {
+          if (currentStatus === 'prompting') {
+            alert("M-Pesa payment validation timed out. Please check your phone or try again.");
+            return 'failed';
+          }
+          return currentStatus;
+        });
+      }, 60000);
+
+    } catch (error) {
+      console.error("Payment initiation failed:", error);
+      alert(error.message || "An unexpected error occurred.");
+      setPaymentStatus('idle'); 
+    }
+  };
+
   const handleVerifyInsurance = async (e) => {
     e.preventDefault();
     if (!selectedPatient || !invoiceId) return;
@@ -332,11 +277,16 @@ const getCookie = (name) => {
     }
   };
 
+  // ✨ NEW: Handles isolated print and download routing for window media configurations
+  const handlePrintInvoice = () => {
+    window.print();
+  };
+
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-5 text-slate-700 font-sans p-4">
+    <div className="w-full max-w-7xl mx-auto space-y-5 text-slate-700 font-sans p-4 print:p-0">
       
-      {/* HEADER SECTION */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#0a0f1d] p-5 rounded-xl border border-slate-800 shadow-sm">
+      {/* HEADER SECTION (HIDDEN ON PRINT) */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#0a0f1d] p-5 rounded-xl border border-slate-800 shadow-sm print:hidden">
         <div>
           <h1 className="text-lg font-bold text-white tracking-tight">
             Salama <span className="text-emerald-400">POS Billing Terminal</span>
@@ -362,8 +312,8 @@ const getCookie = (name) => {
         </div>
       </div>
 
-      {/* PATIENT SELECTOR */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs relative">
+      {/* PATIENT SELECTOR (HIDDEN ON PRINT) */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs relative print:hidden">
         <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Patient</label>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
@@ -377,7 +327,6 @@ const getCookie = (name) => {
           {(isSearching || isLoadingCatalog) && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />}
         </div>
 
-        {/* PATIENT SEARCH DROPDOWN MATRIX */}
         {patientQueryResults.length > 0 && (
           <div className="absolute left-4 right-4 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 overflow-hidden divide-y divide-slate-100">
             {patientQueryResults.map(p => (
@@ -403,14 +352,12 @@ const getCookie = (name) => {
           </div>
         )}
 
-        {/* NO RESULTS FOUND BOUNDARY */}
         {hasSearched && patientQueryResults.length === 0 && searchPatient.trim().length > 2 && !isSearching && (
           <div className="absolute left-4 right-4 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-4 text-center text-xs text-slate-400 font-medium">
             No active outpatient encounters match your parameters.
           </div>
         )}
 
-        {/* SELECTED ACTIVE PATIENT BANNER */}
         {selectedPatient && (
           <div className="mt-2.5 flex items-center justify-between bg-emerald-50/40 border border-emerald-100 p-2.5 rounded-lg text-xs">
             <div className="flex items-center gap-2.5">
@@ -431,8 +378,8 @@ const getCookie = (name) => {
         )}
       </div>
 
-      {/* CORE WORKFLOW AREA */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+      {/* CORE WORKFLOW AREA (HIDDEN ON PRINT) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start print:hidden">
         
         {/* CHARGES TABLE BREAKDOWN */}
         <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
@@ -484,8 +431,13 @@ const getCookie = (name) => {
 
           {cart.length > 0 && (
             <div className="p-3 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
-              <button type="button" className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all text-slate-700">
-                <Receipt size={13} /> Draft Invoice
+              {/* ✨ MODIFIED: Connects Draft Invoice Action to state reveal matrix */}
+              <button 
+                type="button" 
+                onClick={() => setShowInvoiceModal(true)}
+                className="px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all text-slate-700"
+              >
+                <Receipt size={13} /> Create & Preview Invoice
               </button>
               <button type="button" className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all">
                 <Plus size={13} /> Add Charge
@@ -516,7 +468,6 @@ const getCookie = (name) => {
                 </div>
               </div>
 
-              {/* ✨ NEW: Input errors parsing viewport banner */}
               {errorMessage && (
                 <div className="p-3 bg-red-950/40 border border-red-500/30 text-red-200 rounded-lg flex items-center gap-2.5 text-[11px]">
                   <AlertTriangle size={14} className="text-red-400 shrink-0" />
@@ -536,7 +487,6 @@ const getCookie = (name) => {
                   <button type="button" onClick={() => { setPaymentStatus('idle'); setSelectedPatient(null); setCart([]); setInvoiceId(null); setErrorMessage(''); }} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white py-2 rounded-lg text-xs font-bold transition-all">Clear Terminal</button>
                 </div>
               ) : paymentStatus === 'prompting' ? (
-                /* ✨ NEW: High-contrast modal block locking view while user inputs phone PIN */
                 <div className="bg-slate-900 border border-emerald-500/20 p-4 rounded-lg text-center space-y-2">
                   <div className="flex items-center justify-center gap-2.5 text-emerald-400 font-bold text-xs uppercase tracking-wide">
                     <Loader2 className="animate-spin" size={14} />
@@ -611,7 +561,7 @@ const getCookie = (name) => {
             </div>
           ) : (
             /* INSURANCE VERIFICATION VIEW */
-            <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-xs space-y-3.5">
+            <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-xs space-y-3.5 print:hidden">
               <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
                 <ShieldCheck className="text-blue-600" size={16} />
                 <div>
@@ -701,6 +651,180 @@ const getCookie = (name) => {
           )}
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* ✨ NEW: INVOICE GENERATOR MODAL VIEW (AUTO-ISOLATED FOR PRINT & PDF)      */}
+      {/* ========================================================================= */}
+      {showInvoiceModal && selectedPatient && (
+  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto print:absolute print:inset-0 print:bg-white print:p-0 print:z-auto">
+    
+    <style>{`
+      @media print {
+        body * {
+          visibility: hidden !important;
+        }
+        #salama-invoice-printable, #salama-invoice-printable * {
+          visibility: visible !important;
+        }
+        #salama-invoice-printable {
+          position: absolute !important;
+          left: 0 !important;
+          top: 0 !important;
+          width: 100% !important;
+          background: white !important;
+          color: black !important;
+          padding: 0px !important;
+          margin: 0px !important;
+        }
+        @page {
+          size: auto;
+          margin: 15mm 20mm 15mm 20mm;
+        }
+      }
+    `}</style>
+
+    {/* Main Document Box */}
+    <div className="bg-white w-full max-w-3xl rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-slate-200 print:border-none print:shadow-none print:max-h-full print:w-full print:bg-white">
+      
+      {/* Control Bar (Hidden on print) */}
+      <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between print:hidden shrink-0">
+        <div className="flex items-center gap-2">
+          <Receipt size={16} className="text-slate-600" />
+          <span className="text-sm font-bold text-slate-800">Official Patient Invoice</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handlePrintInvoice}
+            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+          >
+            <Printer size={14} /> Download / Print PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowInvoiceModal(false)}
+            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* Print Content Wrapper */}
+      <div 
+        className="p-12 overflow-y-auto font-sans text-slate-800 print:overflow-visible print:p-0 bg-white" 
+        id="salama-invoice-printable"
+      >
+        
+        {/* 1. REPLICATED LAB HEADER: Centralized/Clean Brand Alignment with Contact Details */}
+        <div className="text-center border-b-2 border-slate-800 pb-4">
+          <div className="flex justify-center items-center gap-3 mb-1">
+            <img 
+              src={SalamaLogo} 
+              alt="Salama Cancer Centre" 
+              className="h-14 w-auto object-contain"
+            />
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-slate-900">SALAMA CANCER CENTRE</h1>
+              <p className="text-xs font-semibold text-emerald-600 tracking-wide -mt-0.5">Holistic Cancer and Palliative Care</p>
+            </div>
+          </div>
+          
+          <h2 className="text-sm font-bold text-slate-800 tracking-wider uppercase mt-2 bg-slate-100 py-1 print:bg-transparent">
+            OFFICIAL PATIENT INVOICE
+          </h2>
+          
+          <p className="text-[11px] text-slate-500 font-medium mt-1.5">
+            PO BOX 19619-40123, Kisumu, Kenya<br />
+            Tel: +254 756 364 419 | Email: scanccentre@gmail.com
+          </p>
+        </div>
+
+        {/* Top Floating Metadata Row */}
+        <div className="flex justify-between items-center my-4 text-xs font-medium border-b border-slate-100 pb-3">
+          <p className="font-mono text-slate-600">
+            {/* 2. DYNAMIC FORMAT: Prefixed with INV- followed directly by the HRN string */}
+            Invoice No: <span className="text-slate-900 font-bold">INV-{selectedPatient.health_record_number || "SCC-XXXX/XX"}</span>
+          </p>
+          <p className="text-slate-600">
+            Date: <span className="text-slate-900 font-semibold">{new Date().toLocaleDateString('en-KE')}</span>
+          </p>
+          {/* 3. TERMS REMOVED: (Due on Presentation row is completely gone from here) */}
+        </div>
+
+        {/* 4. MODIFIED PATIENT AREA: Payment/Coverage Scheme column completely removed */}
+        <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 my-6 text-xs print:bg-transparent print:border-none print:p-0">
+          <h4 className="font-bold text-[10px] text-slate-400 uppercase tracking-wider mb-2">Patient Details</h4>
+          <div className="grid grid-cols-2 gap-y-1.5 gap-x-4">
+            <p className="text-slate-600">Patient Full Name:</p>
+            <p className="font-bold text-slate-900">{selectedPatient.name}</p>
+
+            <p className="text-slate-600">Health Record Number (HRN):</p>
+            <p className="font-mono font-bold text-slate-900">{selectedPatient.health_record_number}</p>
+
+            {phoneNumber && (
+              <>
+                <p className="text-slate-600">Phone Account:</p>
+                <p className="font-medium text-slate-900">{phoneNumber}</p>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Invoice Lines Table Matrix */}
+        <div className="border border-slate-200 rounded-lg overflow-hidden my-6 print:border-slate-300">
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider print:bg-transparent print:border-b-2 print:border-slate-800">
+                <th className="py-3 px-4 w-1/3">Originating Department / Station</th>
+                <th className="py-3 px-4 w-1/2">Service / Procedure Rendered</th>
+                <th className="py-3 px-4 text-right w-1/4">Cost (KES)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700 print:divide-slate-200">
+              {cart.map((item) => (
+                <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="py-3 px-4 font-semibold text-slate-500 uppercase tracking-wide text-[10px]">
+                    {item.station}
+                  </td>
+                  <td className="py-3 px-4 text-slate-900 font-medium">{item.service}</td>
+                  <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
+                    {(parseFloat(item.price) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Financial Summary Aggregations Block */}
+        <div className="mt-4 flex justify-end">
+          <div className="w-72 bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-xs print:bg-transparent print:border-none print:p-0">
+            <div className="flex justify-between text-slate-500">
+              <span>Gross Charges Subtotal</span>
+              <span className="font-mono font-semibold">KES {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+            </div>
+            <div className="h-px bg-slate-200 my-1 print:bg-slate-400"></div>
+            <div className="flex justify-between items-baseline pt-1">
+              <span className="text-sm font-bold text-slate-900">Total Balance Due</span>
+              <span className="text-xl font-bold font-mono text-slate-900 border-b-4 border-double border-slate-900 pb-0.5">
+                <span className="text-xs font-normal mr-0.5">KES</span>
+                {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer Declarations */}
+        <div className="mt-16 pt-6 border-t border-slate-200 text-center text-[10px] text-slate-400 font-medium space-y-1 print:mt-24">
+          <p className="text-slate-600 font-semibold">Thank you for choosing Salama Cancer Centre.</p>
+          <p className="font-mono text-[9px]">Report Generated Electronically - Salama HMS Billing Platform</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+)}
 
     </div>
   );

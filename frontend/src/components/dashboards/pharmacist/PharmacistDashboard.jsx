@@ -3,6 +3,7 @@ import PharmacistSidebar from './PharmacistSidebar';
 import PharmacyOverview from './modules/PharmacyOverview'; 
 import BillingRequisition from './modules/BillingRequisition';
 import PrescriptionQueue from './modules/PrescriptionQueue';
+import LaboratoryResults from "../oncologist/modules/LaboratoryResults";
 import InventoryManager from './modules/InventoryManager';
 import PatientRegistry from "../../shared/PatientRegistry";
 import PharmacyRequisitionsTab from './modules/PharmacyRequisitionsTab';
@@ -35,6 +36,9 @@ const PharmacistDashboard = () => {
         
       case 'inventory':
         return <InventoryManager />;
+
+      case 'labs':
+        return <LaboratoryResults/>;
         
       case 'dispensing': 
         return (

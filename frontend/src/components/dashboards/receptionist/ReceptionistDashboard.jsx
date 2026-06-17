@@ -12,6 +12,7 @@ import PaymentPortal from './modules/PaymentPortal';
 import QueueStatus from './modules/QueueStatus';
 import TriagePortal from './modules/TriagePortal';
 import ReceptionistSidebar from './ReceptionistSidebar';
+import ServiceCatalogue from '../billingofficer/modules/ServiceCatalogue';
 
 const ReceptionistDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -43,7 +44,7 @@ const ReceptionistDashboard = () => {
     } catch (err) {
       console.error("Dashboard Sync Error:", err);
     } finally {
-      setLoading(false); // FIXED: Changed 'loading(false)' to 'setLoading(false)' to resolve internal crashes
+      setLoading(false); 
     }
   }, [activeTab]);
 
@@ -80,6 +81,7 @@ const ReceptionistDashboard = () => {
       case 'appointments': return <AppointmentCalendar onStatusUpdated={fetchDashboardData} />;
       case 'billing': return <PaymentPortal />;
       case 'queue': return <QueueStatus />;
+      case 'service-catalogue': return <ServiceCatalogue />;
       case 'overview':
       default:
         return (
