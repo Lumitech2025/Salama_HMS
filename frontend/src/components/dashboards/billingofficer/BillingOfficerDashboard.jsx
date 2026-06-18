@@ -5,6 +5,7 @@ import FinancialClearance from './modules/FinancialClearance';
 import InsuranceProviders from './modules/InsuranceProviders';
 import ServiceCatalogue from './modules/ServiceCatalogue';
 import PaymentPortal from '../receptionist/modules/PaymentPortal';
+import BillingHome from './modules/BillingHome';
 
 
 import { 
@@ -14,7 +15,8 @@ import {
 } from 'lucide-react';
 
 const BillingOfficerDashboard = () => {
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('home'); 
+
   
   // Cross-Module Passing Memory States
   const [targetedPatient, setTargetedPatient] = useState(null);
@@ -157,20 +159,45 @@ const BillingOfficerDashboard = () => {
   };
 
   const renderContent = () => {
-    switch (activeTab) {
-      case 'clearance': 
-        return (
-          <FinancialClearance 
-            initialSelectedPatient={targetedPatient} 
-            clearTargetMemory={() => setTargetedPatient(null)} 
-          />
-        );
-      
-      case 'claims': return <ClaimsTracker />;
-      case 'reconciliation': return <PharmacyReconciliation />;
-      case 'billing': return <PaymentPortal />;
-      case 'insurance-providers': return <InsuranceProviders />;
-      case 'service-catalogue': return <ServiceCatalogue />;
+  switch (activeTab) {
+    case 'home': 
+      return (
+        <BillingHome 
+          // 💳 CASH PATIENTS ROUTING PATHWAY
+          onRouteToPayment={(patient) => {
+            // Transform registration record into a shape PaymentPortal understands if needed, or pass directly
+            setTargetedPatient(patient); 
+            setActiveTab('billing'); // Automatically slides view to the Payment Terminal
+          }}
+          // 🛡️ INSURANCE PATIENTS ROUTING PATHWAY
+          onTriggerVerification={(patient) => {
+            setTargetedPatient(patient); 
+            setActiveTab('clearance'); // Automatically slides view to Insurance Verification
+          }}
+        />
+      );
+
+    case 'clearance': 
+      return (
+        <FinancialClearance 
+          initialSelectedPatient={targetedPatient} 
+          clearTargetMemory={() => setTargetedPatient(null)} 
+        />
+      );
+    
+    case 'billing': 
+      return (
+        <PaymentPortal 
+          // If your PaymentPortal component can auto-load an active patient instance passed as a prop:
+          activePatientRecord={targetedPatient}
+          clearActiveRecord={() => setTargetedPatient(null)}
+        />
+      );
+
+    case 'claims': return <ClaimsTracker />;
+    case 'reconciliation': return <PharmacyReconciliation />;
+    case 'insurance-providers': return <InsuranceProviders />;
+    case 'service-catalogue': return <ServiceCatalogue />;
       
       // OVERVIEW VIEW: Aligned with the exact Registration workspaces layout
       default: return (

@@ -27,6 +27,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.shortcuts import get_object_or_404
 from .mpesa import MpesaClient
+from decimal import Decimal
 import logging
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -279,7 +280,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             'patient',
             'visit', 
             'visit__visit',
-            'diagnosis'  # 🌟 Added to prefetch full primary site & long description details
+            'diagnosis'
         ).prefetch_related(
             'items__drug',
             'visit__visit__vitals',      
@@ -298,28 +299,22 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         lookup_value = self.kwargs[lookup_url_kwarg]
 
         try:
-            # First, try to match the direct Prescription ID primary key allocation row
             return super().get_object()
         except Exception:
-            # Fallback 1: Look up by the underlying Encounter Visit Session ID reference
             prescription = queryset.filter(visit_id=lookup_value).first()
             if prescription:
                 return prescription
                 
-            # Fallback 2: Check if the frontend passed a Queue ID instead
-            # This completely patches the 404 mismatch showing in your dev console logs
-            from core.models import Queue
             queue_item = Queue.objects.filter(id=lookup_value).first()
             if queue_item and queue_item.visit:
                 prescription = queryset.filter(visit=queue_item.visit).first()
                 if prescription:
                     return prescription
             
-            # If everything fails, raise standard 404 message block cleanly
             raise Http404("No Prescription matches the given query parameters.")
 
     def _get_deduction_qty(self, item):
-        """Standardized logic for oncology inventory depletion."""
+        """Standardized fallback logic for oncology inventory depletion if raw metrics missing."""
         if item.stage == 'PRE_CHEMO': return 1
         if item.stage == 'POST_CHEMO': return 10
         match = re.search(r'\d+', item.dosage or '')
@@ -327,25 +322,67 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_create(self, serializer):
+        from core.models import Queue, RegistrationRecord  # Adjust model import paths if needed
+        
         practitioner = self.request.user.get_full_name() or self.request.user.username
-        
-        # 1. 🔍 RESOLVE DYNAMIC DIAGNOSIS
-        visit_record = serializer.validated_data.get('visit')
         diagnosis_obj = serializer.validated_data.get('diagnosis')
+        patient_obj = serializer.validated_data.get('patient')
         
-        if not diagnosis_obj and visit_record:
-            underlying_clinic_visit = getattr(visit_record, 'visit', None)
+        # 1. Inspect raw input values since frontend keys might bypass standard validation fields
+        raw_visit_val = self.request.data.get('visit') or self.request.data.get('registration')
+        queue_instance = None
+
+        if raw_visit_val:
+            try:
+                # Scenario A: The value sent is actually a direct primary key to a Queue record
+                if Queue.objects.filter(id=int(raw_visit_val)).exists():
+                    queue_instance = Queue.objects.get(id=int(raw_visit_val))
+                    if not patient_obj:
+                        # Grab patient from the queue's registration record relationship cascade
+                        queue_reg = getattr(queue_instance, 'registration', None) or getattr(queue_instance, 'visit', None)
+                        patient_obj = getattr(queue_reg, 'patient', None)
+                
+                # Scenario B: The value sent is a RegistrationRecord ID (Oncology Portal pathway)
+                elif RegistrationRecord.objects.filter(id=int(raw_visit_val)).exists():
+                    registration_record = RegistrationRecord.objects.get(id=int(raw_visit_val))
+                    if not patient_obj:
+                        patient_obj = registration_record.patient
+                    
+                    # Track down the active Queue record associated with this specific registration node
+                    # prioritizing the active PHARMACY station route tracker.
+                    queue_instance = Queue.objects.filter(
+                        registration=registration_record
+                    ).first() or Queue.objects.filter(
+                        visit=registration_record
+                    ).first()
+            except (ValueError, TypeError):
+                pass
+
+        # Fallback to standard serializer validation extraction rules if above custom routing misses
+        if not queue_instance:
+            queue_instance = serializer.validated_data.get('visit')
+            if queue_instance and not patient_obj:
+                queue_reg = getattr(queue_instance, 'registration', None) or getattr(queue_instance, 'visit', None)
+                patient_obj = getattr(queue_reg, 'patient', None)
+
+        # 2. Dynamic Diagnosis snapshot capture adjustments
+        if not diagnosis_obj and queue_instance:
+            # Safely traverse the queue relations structure to locate the first listed clinical diagnosis
+            reg_context = getattr(queue_instance, 'registration', None) or getattr(queue_instance, 'visit', None)
+            underlying_clinic_visit = getattr(reg_context, 'visit', None) if reg_context else None
             if underlying_clinic_visit and hasattr(underlying_clinic_visit, 'diagnoses'):
                 diagnosis_obj = underlying_clinic_visit.diagnoses.first()
 
-        # Save the master prescription envelope container
+        # 3. Save the master envelope with correct, explicitly resolved type models
         prescription = serializer.save(
+            visit=queue_instance,   # This will now successfully receive a verified Queue instance
+            patient=patient_obj,    # Bypasses the strict NOT NULL constraint crash
             prescribed_by=practitioner,
             diagnosis=diagnosis_obj,
             pharmacy_status='PENDING'
         )
         
-        # 2. 💊 AUTO-CREATE PRE-CHEMO ITEMS
+        # Auto-create pre-chemo constants
         pre_chemo_constants = [
             {"name": "Metoclopramide", "dosage": "10mg STAT", "route": "I.V", "duration": "STAT"},
             {"name": "Chlorpheniramine", "dosage": "10mg STAT", "route": "I.V", "duration": "STAT"},
@@ -368,12 +405,10 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 duration=pc["duration"]
             )
 
-        # 3. 🧬 PROCESS DYNAMIC CORE CHEMOTHERAPY ORDERS FROM FRONTEND PAYLOAD
-        # Since items is read_only in the serializer, we extract it directly from request.data
+        # Process chemotherapy payload items from frontend matrix
         raw_items = self.request.data.get('items', [])
         if isinstance(raw_items, list):
             for item_data in raw_items:
-                # Target only the CHEMO rows sent by the frontend matrix
                 if item_data.get('stage') == 'CHEMO':
                     drug_id = item_data.get('drug')
                     drug_instance = None
@@ -397,7 +432,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                         duration=item_data.get('duration', '30 mins')
                     )
 
-        # 4. 💊 AUTO-CREATE POST-CHEMO ITEMS
+        # Auto-create post-chemo constants
         post_chemo_constants = [
             {"name": "FeSO4/FA", "dosage": "200mg/1 tab", "route": "P.O", "duration": "OD × 5/7"},
             {"name": "Ondansetron", "dosage": "8mg 1 tab", "route": "P.O", "duration": "BD × 5/7"},
@@ -420,7 +455,6 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 duration=po["duration"]
             )
 
-        # 5. 🔄 ROUTE VISITATION QUEUE
         if prescription.visit:
             queue_ticket = prescription.visit
             queue_ticket.current_station = 'PHARMACY'
@@ -436,93 +470,144 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             
         return super().partial_update(request, *args, **kwargs)
 
+    @action(detail=True, methods=['post'], url_path='dispense')
+    def dispense(self, request, pk=None):
+        """
+        Explicit POST router action endpoint mapping targeting:
+        POST /api/prescriptions/{id}/dispense/
+        """
+        prescription = self.get_object()
+        return self._dispense_prescription(request, prescription)
+
     @transaction.atomic
     def _dispense_prescription(self, request, prescription):
-        # Inline imports inside the transaction to avoid cyclic imports
-        from core.models import PatientInvoice, PatientBillableItem, Service
-        import re
+        """
+        Intercepts the prescription final status change request payload, 
+        synchronizes exact data line lists directly to billing systems, balances store sheets, 
+        and updates workflow station routing markers.
+        """
+        from decimal import Decimal
 
         try:
-            # 1. Fetch or initialize the active open billing invoice ledger
-            if not prescription.visit:
-                return Response({"error": "No active registration record context found for billing."}, status=status.HTTP_400_BAD_REQUEST)
+            # --- MULTI-PATHWAY REGISTRATION CONTEXT RESOLUTION ---
+            registration_context = None
+
+            if hasattr(prescription, 'registration') and prescription.registration:
+                registration_context = prescription.registration
+            elif hasattr(prescription, 'visit') and prescription.visit:
+                # Look up registration context from the associated Queue model
+                registration_context = getattr(prescription.visit, 'registration', None) or getattr(prescription.visit, 'visit', None) or prescription.visit
+
+            if not registration_context:
+                return Response(
+                    {"error": "No active registration record context found for billing."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
                 
+            # 1. Fetch or initialize the active open billing invoice ledger linked to the resolved context
+            # Fallback handling to pull the raw concrete entity id reference
+            concrete_visit = getattr(registration_context, 'visit', None) or registration_context
+
             invoice, _ = PatientInvoice.objects.get_or_create(
-                visit=prescription.visit,
+                visit=concrete_visit,
                 patient=prescription.patient,
                 defaults={'status': 'UNPAID'}
             )
 
-            # Locate your master pharmacy service folder/SKU for tracking structure integrity
             fallback_pharmacy_service = Service.objects.filter(dept='PHA', active=True).first()
 
-            # 2. Open an isolated transaction block with explicit row-level locking
-            with transaction.atomic():
-                for item in prescription.items.all():
-                    if not item.drug:
-                        continue
-                    
-                    # Lock and fetch to prevent race conditions during concurrent checkouts
-                    locked_drug = Drug.objects.select_for_update().get(id=item.drug.id)
-                    
-                    # Skip if the medication is expired
-                    if getattr(locked_drug, 'is_expired', False):
-                        raise ValueError(f"Cannot dispense {locked_drug.name} - Medication batch is expired.")
+            # 2. Extract item summaries provided directly by our frontend component
+            meta_extensions = request.data.get('meta_extensions', {})
+            frontend_items = meta_extensions.get('dispensation_summary', [])
 
-                    deduction_qty = self._get_deduction_qty(item)
-                    
-                    if locked_drug.stock_quantity < deduction_qty:
-                        raise ValueError(f"Insufficient stock for {locked_drug.name}. Requested: {deduction_qty}, Available: {locked_drug.stock_quantity}")
-                    
-                    # A. Deduct Inventory Stock
-                    locked_drug.stock_quantity -= deduction_qty
-                    locked_drug.save(update_fields=['stock_quantity'])
+            # Map frontend items to an easily queryable dictionary by drug ID
+            frontend_items_map = {}
+            if isinstance(frontend_items, list):
+                for fi in frontend_items:
+                    d_id = fi.get('drug_id') or fi.get('id')
+                    if d_id:
+                        frontend_items_map[int(d_id)] = fi
 
-                    # B. Process Real-Time Patient Invoice Itemization
-                    retail_rate = getattr(locked_drug, 'selling_price_kes', 0)
-                    billing_item_name = f"Medication: {locked_drug.name} ({getattr(locked_drug, 'strength', 'N/A')})"
-
-                    # Check if this precise item line has already been posted to prevent duplication
-                    already_billed = PatientBillableItem.objects.filter(
-                        invoice=invoice,
-                        name=billing_item_name
-                    ).exists()
-
-                    if not already_billed:
-                        extra_fields = {}
-                        if hasattr(PatientBillableItem, 'unit_price'):
-                            extra_fields['unit_price'] = retail_rate
-                        if hasattr(PatientBillableItem, 'name'):
-                            extra_fields['name'] = billing_item_name
-                        if hasattr(PatientBillableItem, 'drug'):
-                            extra_fields['drug'] = locked_drug
-
-                        PatientBillableItem.objects.create(
-                            invoice=invoice,
-                            service=fallback_pharmacy_service,  
-                            quantity=deduction_qty,
-                            **extra_fields
-                        )
-
-                # 3. Finalize Master Records Status Parameters
-                prescription.pharmacy_status = 'DISPENSED'
-                # Pass update_fields so that general signals do not get triggered unnecessarily
-                prescription.save(update_fields=['pharmacy_status'])
+            # 3. Process items within single transaction scope with row-level locks
+            for item in prescription.items.all():
+                if not item.drug:
+                    continue
                 
-                # 4. Route Patient workflow tracking to Billing station
-                if prescription.visit:
-                    prescription.visit.current_station = 'BILLING'
-                    prescription.visit.status = 'COMPLETED'
-                    prescription.visit.save(update_fields=['current_station', 'status'])
+                # Lock the drug profile rows to prevent race conditions across concurrent pharmacy counters
+                locked_drug = Drug.objects.select_for_update().get(id=item.drug.id)
+                
+                if getattr(locked_drug, 'is_expired', False):
+                    raise ValueError(f"Cannot dispense {locked_drug.name} - Medication batch is expired.")
+
+                # Look for explicit frontend overrides for dispensation measurements
+                fi_override = frontend_items_map.get(locked_drug.id)
+                if fi_override:
+                    deduction_qty = int(fi_override.get('quantity_dispensed', fi_override.get('qtyDispensed', 1)))
+                    retail_rate = Decimal(str(fi_override.get('unit_price', fi_override.get('unitPrice', getattr(locked_drug, 'selling_price_kes', 0)))))
+                else:
+                    deduction_qty = self._get_deduction_qty(item)
+                    retail_rate = Decimal(str(getattr(locked_drug, 'selling_price_kes', 0)))
+
+                if locked_drug.stock_quantity < deduction_qty:
+                    raise ValueError(f"Insufficient stock for {locked_drug.name}. Requested: {deduction_qty}, Available: {locked_drug.stock_quantity}")
+                
+                # A. Deduct Inventory Stock levels
+                locked_drug.stock_quantity -= deduction_qty
+                locked_drug.save(update_fields=['stock_quantity'])
+
+                # B. Process Real-Time Patient Invoice Itemization
+                billing_item_name = f"Medication: {locked_drug.name} ({getattr(locked_drug, 'strength', 'N/A')})"
+
+                # Enforce strict line filtering checks to prevent double-posting anomalies on multiple clicks
+                already_billed = PatientBillableItem.objects.filter(
+                    invoice=invoice,
+                    name=billing_item_name
+                ).exists()
+
+                if not already_billed:
+                    PatientBillableItem.objects.create(
+                        invoice=invoice,
+                        station='Pharmacy',  # Case-matched tag for frontend PaymentPortal filtering
+                        service=fallback_pharmacy_service,  
+                        drug=locked_drug,
+                        name=billing_item_name,
+                        unit_price=retail_rate,
+                        quantity=deduction_qty,
+                        is_paid=False
+                    )
+
+            # 4. Save structural status variables onto the master record envelope
+            prescription.pharmacy_status = 'DISPENSED'
+            if isinstance(meta_extensions, dict) and meta_extensions:
+                prescription.meta_extensions = meta_extensions
+            prescription.save(update_fields=['pharmacy_status', 'meta_extensions'])
             
-            return Response(self.get_serializer(prescription).data)
+            # 5. Route Patient registration visitation records to Billing station queue safely
+            if registration_context and registration_context.__class__.__name__ == 'Queue':
+                registration_context.current_station = 'BILLING'
+                registration_context.status = 'COMPLETED'
+                registration_context.save(update_fields=['current_station', 'status'])
+
+            # 6. FIXED: Use the correct 'visit' keyword field mapped onto the Queue model to trigger escalation
+            if registration_context:
+                active_tickets = Queue.objects.filter(
+                    visit=concrete_visit, 
+                    current_station='PHARMACY'
+                )
+                for ticket in active_tickets:
+                    ticket.current_station = 'BILLING'
+                    ticket.status = 'WAITING'
+                    ticket.save(update_fields=['current_station', 'status'])
+        
+            return Response(self.get_serializer(prescription).data, status=status.HTTP_200_OK)
             
         except ValueError as e:
+            # Handles expected stock or expiration business logic check violations cleanly
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            # You can attach a logger here to inspect internal anomalies
-            return Response({"error": f"An unexpected error occurred: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
+            # Catch unexpected server anomalies safely
+            return Response({"error": f"Internal dispensation logging error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
 # --- 6. APPOINTMENTS & BILLING ---
 
 class AppointmentViewSet(viewsets.ModelViewSet):
@@ -1599,86 +1684,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK
         )
 
-
-class PatientBillableItemViewSet(viewsets.ModelViewSet):
-    """
-    Handles point-of-care item charging across multiple clinical workflow stations.
-    """
-    queryset = PatientBillableItem.objects.all()
-    serializer_class = PatientBillableItemSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['patient', 'visit', 'station_charged', 'billing_status']
-    search_fields = ['service_sku_snapshot', 'service_name_snapshot', 'visit__queue_id', 'patient__name']
-
-    def get_queryset(self):
-        """
-        Optimizes database performance using select_related, minimizing 
-        N+1 lookup problems on heavy finance tracking queries.
-        """
-        return self.queryset.select_related('patient', 'visit', 'service', 'ordered_by')
-
-    @action(detail=False, methods=['get'], url_path='active-invoice')
-    def active_invoice(self, request):
-        """
-        Custom endpoint for the billing/cashier desk to instantly retrieve all 
-        PENDING charges for a patient's active visit loop using their queue ID or visit record.
-        Example query: /api/billable-items/active-invoice/?visit_id=5 or ?queue_id=Q26-001
-        """
-        visit_id = request.query_params.get('visit_id')
-        queue_id = request.query_params.get('queue_id')
-        
-        queryset = self.get_queryset().filter(billing_status='PENDING')
-        
-        if visit_id:
-            queryset = queryset.filter(visit_id=visit_id)
-        elif queue_id:
-            queryset = queryset.filter(visit__queue_id__iexact=queue_id)
-        else:
-            return Response(
-                {"error": "Please provide a 'visit_id' or 'queue_id' query parameter."}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        serializer = self.get_serializer(queryset, many=True)
-        
-        # Calculate summary metadata block for the billing UI
-        subtotal = sum(item.total_amount for item in queryset)
-        
-        return Response({
-            "items": serializer.data,
-            "invoice_metadata": {
-                "item_count": queryset.count(),
-                "total_pending_kes": subtotal
-            }
-        }, status=status.HTTP_200_OK)
-
-    @action(detail=True, methods=['post'], url_path='update-status')
-    def update_status(self, request, pk=None):
-        """
-        Explicit action endpoint for the cashier or administrative desk to settle payments or issue waivers.
-        Expected payload: {"status": "PAID"} or {"status": "WAIVED"}
-        """
-        billable_item = self.get_object()
-        new_status = request.data.get('status')
-        
-        valid_statuses = [choice[0] for choice in PatientBillableItem.BILLING_STATUS_CHOICES]
-        if new_status not in valid_statuses:
-            return Response(
-                {"error": f"Invalid status selection. Choose from: {', '.join(valid_statuses)}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        billable_item.billing_status = new_status
-        billable_item.save()
-        
-        return Response({
-            "message": f"Item status updated successfully to {new_status}.",
-            "item_id": billable_item.id,
-            "new_status": billable_item.billing_status
-        }, status=status.HTTP_200_OK)
-
-
 # APIs
 class ICD11TokenProxyView(APIView):
     """
@@ -1959,6 +1964,85 @@ class PatientBillingSearchViewSet(viewsets.ReadOnlyModelViewSet):
         return RegistrationRecord.objects.none()
 
 
+class PatientBillableItemViewSet(viewsets.ModelViewSet):
+    """
+    Handles point-of-care item charging across multiple clinical workflow stations.
+    """
+    queryset = PatientBillableItem.objects.all()
+    serializer_class = PatientBillableItemSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    
+    # Harmonized to match actual model fields: station and is_paid
+    filterset_fields = ['invoice__patient', 'invoice__visit', 'station', 'is_paid']
+    search_fields = ['name', 'invoice__visit__queue_id', 'invoice__patient__name']
+
+    def get_queryset(self):
+        """
+        Optimizes database performance using select_related to prevent N+1 queries.
+        """
+        return self.queryset.select_related('invoice', 'invoice__patient', 'invoice__visit', 'service', 'drug')
+
+    @action(detail=False, methods=['get'], url_path='active-invoice')
+    def active_invoice(self, request):
+        """
+        Custom endpoint for the billing desk to instantly retrieve UNPAID 
+        charges for a patient's active visit loop using their queue ID or visit record.
+        Example: /api/billable-items/active-invoice/?visit_id=5 or ?queue_id=Q26-001
+        """
+        visit_id = request.query_params.get('visit_id')
+        queue_id = request.query_params.get('queue_id')
+        
+        # Filter items where is_paid=False (Pending payment settlement)
+        queryset = self.get_queryset().filter(is_paid=False)
+        
+        if visit_id:
+            queryset = queryset.filter(invoice__visit_id=visit_id)
+        elif queue_id:
+            queryset = queryset.filter(invoice__visit__queue_id__iexact=queue_id)
+        else:
+            return Response(
+                {"error": "Please provide a 'visit_id' or 'queue_id' query parameter."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        serializer = self.get_serializer(queryset, many=True)
+        
+        # Dynamic calculation block evaluating total costs across unit prices and quantities
+        subtotal = sum(item.total_cost for item in queryset)
+        
+        return Response({
+            "items": serializer.data,
+            "invoice_metadata": {
+                "item_count": queryset.count(),
+                "total_pending_kes": float(subtotal)
+            }
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='update-status')
+    def update_status(self, request, pk=None):
+        """
+        Action endpoint for administrative changes (e.g., toggling payment flags explicitly).
+        """
+        billable_item = self.get_object()
+        is_paid_input = request.data.get('is_paid')
+        
+        if is_paid_input is None:
+            return Response(
+                {"error": "Please provide an explicit boolean value for 'is_paid'."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        billable_item.is_paid = bool(is_paid_input)
+        billable_item.save()
+        
+        return Response({
+            "message": f"Item billing status updated successfully.",
+            "item_id": billable_item.id,
+            "is_paid": billable_item.is_paid
+        }, status=status.HTTP_200_OK)
+
+
 class PatientInvoiceViewSet(viewsets.ModelViewSet):
     """
     API endpoint to handle actions on the master Invoice ledger sheets, 
@@ -1966,6 +2050,7 @@ class PatientInvoiceViewSet(viewsets.ModelViewSet):
     """
     queryset = PatientInvoice.objects.all()
     serializer_class = ActiveInvoiceSerializer
+    permission_classes = [IsAuthenticated]
 
     @action(detail=True, methods=['post'], url_path='settle-payment')
     def settle_payment(self, request, pk=None):
@@ -1973,53 +2058,99 @@ class PatientInvoiceViewSet(viewsets.ModelViewSet):
         Custom action endpoint to execute transaction settlements.
         Validates client-side items against accounting rows to prevent leakage.
         """
+        return self._process_invoice_settlement(request, pk, payment_method_override=None)
+
+    @action(detail=True, methods=['post'], url_path='settle-cash')
+    @transaction.atomic
+    def settle_cash(self, request, pk=None):
+        """
+        EXPLICIT NEW PATHWAY PATH: Maps perfectly to frontend's:
+        POST /api/invoices/{id}/settle-cash/
+        """
+        return self._process_invoice_settlement(request, pk, payment_method_override='CASH')
+
+    @action(detail=True, methods=['post'], url_path='submit-insurance')
+    @transaction.atomic
+    def submit_insurance(self, request, pk=None):
+        """
+        NEW PATHWAY PATH: Submits the active invoice tracker to insurance pre-authorization tracking.
+        Updates billing states and advances queue routing.
+        """
         invoice = self.get_object()
-        payment_method = request.data.get('payment_method', 'CASH')
+        invoice.status = 'INSURANCE_PENDING'
+        invoice.payment_method = 'INSURANCE'
+        invoice.save()
+
+        # Update queue tracking nodes to mark billing station route complete
+        Queue.objects.filter(visit=invoice.visit, current_station='BILLING').update(
+            status='COMPLETED',
+            current_station='DISCHARGED'
+        )
+
+        return Response({
+            "status": "success",
+            "message": f"Invoice {invoice.invoice_number or invoice.id} successfully queued for Insurance Pre-Auth.",
+            "invoice_number": invoice.invoice_number
+        }, status=status.HTTP_200_OK)
+
+    def _process_invoice_settlement(self, request, pk, payment_method_override=None):
+        invoice = self.get_object()
+        payment_method = payment_method_override or request.data.get('payment_method', 'CASH')
         validated_items = request.data.get('validated_items', [])
         
         if validated_items:
-            # 1. Extract IDs of items remaining in frontend cart
+            # 1. Extract IDs of items remaining in the frontend cart
             frontend_item_ids = [item.get('id') for item in validated_items if item.get('id')]
             
-            # 2. Drop items deleted from the cart by the terminal clerk
+            # 2. Safely remove line items dropped by the cashier terminal clerk
             invoice.items.exclude(id__in=frontend_item_ids).delete()
             
-            # 3. Synchronize adjusted catalog prices into ledger database logs
+            # 3. Synchronize adjusted parameters, handling price changes and applying quantities
             for item_data in validated_items:
                 item_id = item_data.get('id')
                 if item_id:
-                    # Parse calculated client rates safely
-                    client_price = item_data.get('price', 0)
+                    client_price = float(item_data.get('price', 0))
+                    client_qty = int(item_data.get('quantity', 1))
+                    
                     PatientBillableItem.objects.filter(id=item_id, invoice=invoice).update(
-                        unit_price=client_price,
+                        unit_price=Decimal(str(client_price)),
+                        quantity=client_qty,
                         is_paid=True
                     )
         else:
-            # Fallback if payload is missing item-level arrays
+            # Fallback if payload array lacks explicit item overrides
             invoice.items.all().update(is_paid=True)
         
-        # Set overall invoice status header
+        # Settle the master invoice tracking states
         invoice.status = 'PAID'
-        invoice.save()
+        invoice.payment_method = payment_method
+        invoice.save() # This triggers your custom model save() override to guarantee 'invoice_number' format generation
+
+        # 4. QUEUE AUTO-ADVANCE MANAGEMENT:
+        # Clear the patient from the BILLING station and mark their ticket status as complete
+        Queue.objects.filter(visit=invoice.visit, current_station='BILLING').update(
+            status='COMPLETED',
+            current_station='DISCHARGED'
+        )
         
         return Response({
             "status": "success",
-            "message": f"Invoice KES {invoice.total_payable:,} successfully cleared via {payment_method}.",
-            "invoice_id": invoice.id
+            "message": f"Invoice {invoice.invoice_number} tracking KES {float(invoice.total_payable):,} successfully cleared via {payment_method}.",
+            "invoice_id": invoice.id,
+            "invoice_number": invoice.invoice_number
         }, status=status.HTTP_200_OK)
-    
-
-logger = logging.getLogger(__name__)
 
 
 @method_decorator(csrf_exempt, name='dispatch')
 class MpesaPaymentTriggerView(APIView):
-    """Triggers the STK Push when called by our React POS frontend."""
+    """Triggers the Safaricom STK Push from the React POS frontend."""
+    permission_classes = [IsAuthenticated]
+
     def post(self, request):
         try:
             invoice_id = request.data.get("invoice_id")
             phone_number = request.data.get("phone_number")
-            validated_items = request.data.get("validated_items", []) # Pull cart values directly
+            validated_items = request.data.get("validated_items", [])
             
             if not invoice_id or not phone_number:
                 return Response({"error": "Missing invoice_id or phone_number"}, status=400)
@@ -2027,42 +2158,40 @@ class MpesaPaymentTriggerView(APIView):
             invoice = get_object_or_404(PatientInvoice, id=invoice_id)
             
             if validated_items:
-                # Calculate from the array items React passed us
-                total_amount = sum(float(item.get('price', 0)) for item in validated_items)
+                total_amount = sum(
+                    float(item.get('price', 0)) * int(item.get('quantity', 1)) 
+                    for item in validated_items
+                )
             else:
-                # If frontend payload didn't include it, look for standard reverse relations
-                if hasattr(invoice, 'items'):
-                    total_amount = sum(float(item.price) for item in invoice.items.all())
-                elif hasattr(invoice, 'invoiceitem_set'):
-                    total_amount = sum(float(item.price) for item in invoice.invoiceitem_set.all())
-                else:
-                    # Absolute generic emergency default fallback value if database layout is locked
-                    return Response({"error": "Invoice items structure could not be parsed dynamically by the backend template manager."}, status=400)
+                total_amount = float(invoice.total_payable)
 
             if total_amount <= 0:
                 return Response({"error": "Cannot bill an empty invoice ledger"}, status=400)
 
+            from entrypoint_or_mpesa_module import MpesaClient 
             client = MpesaClient()
             result = client.send_stk_push(phone_number, total_amount, invoice.id)
             
-            if result["status"] == "success":
-                # Ensure these fields are explicitly defined in your PatientInvoice model!
-                if hasattr(invoice, 'mpesa_checkout_id'):
-                    invoice.mpesa_checkout_id = result["checkout_request_id"]
+            if result.get("status") == "success":
+                invoice.mpesa_checkout_id = result.get("checkout_request_id")
                 invoice.status = "PROCESSING"
                 invoice.save()
-                return Response({"message": "STK Push sent!", "checkout_id": result["checkout_request_id"]})
+                return Response({
+                    "message": "STK Push sent successfully!", 
+                    "checkout_id": result.get("checkout_request_id")
+                }, status=200)
                 
-            return Response({"error": result["message"]}, status=400)
+            return Response({"error": result.get("message", "STK Request rejected by operator")}, status=400)
             
         except Exception as e:
-            return Response({"error": f"Internal Server Crash: {str(e)}"}, status=500)
+            logger.error(f"Mpesa STK trigger system failure: {str(e)}")
+            return Response({"error": f"Internal Server Error: {str(e)}"}, status=500)
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def mpesa_callback_webhook(request):
-    """Public webhook that receives Safaricom's real-time transaction updates via ngrok."""
+    """Public webhook that receives Safaricom's real-time transaction updates."""
     stk_callback = request.data.get("Body", {}).get("stkCallback", {})
     result_code = stk_callback.get("ResultCode")
     checkout_id = stk_callback.get("CheckoutRequestID")
@@ -2070,45 +2199,54 @@ def mpesa_callback_webhook(request):
     try:
         invoice = PatientInvoice.objects.get(mpesa_checkout_id=checkout_id)
     except PatientInvoice.DoesNotExist:
-        logger.error(f"Unknown checkout id returned: {checkout_id}")
-        return Response({"ResultCode": 1, "ResultDesc": "Mismatch"}, status=404)
+        logger.error(f"Unknown checkout id returned via safaricom network callback: {checkout_id}")
+        return Response({"ResultCode": 1, "ResultDesc": "Mismatch context ID unrecognized"}, status=404)
 
-    if result_code == 0:  # Code 0 = Success!
+    if result_code == 0:  # Code 0 == Operational Success
         callback_metadata = stk_callback.get("CallbackMetadata", {}).get("Item", [])
-        mpesa_receipt = next((item.get("Value") for item in callback_metadata if item.get("Name") == "MpesaReceiptNumber"), None)
+        mpesa_receipt = next(
+            (item.get("Value") for item in callback_metadata if item.get("Name") == "MpesaReceiptNumber"), 
+            None
+        )
                 
         invoice.status = "PAID"
         invoice.receipt_number = mpesa_receipt
         invoice.payment_method = "MPESA"
         invoice.save()
 
-        invoice.items.update(is_paid=True)
+        # Flag line items across all departments as cleared
+        invoice.items.all().update(is_paid=True)
+
+        # Update tracking nodes to mark billing route tracker step complete on successful push transaction
+        Queue.objects.filter(visit=invoice.visit, current_station='BILLING').update(
+            status='COMPLETED',
+            current_station='DISCHARGED'
+        )
         
         return Response({"ResultCode": 0, "ResultDesc": "Success acknowledged"}, status=200)
     else:
+        # Revert tracking locks on failure
         invoice.status = "UNPAID"
         invoice.save()
-        return Response({"ResultCode": 0, "ResultDesc": "Failure acknowledged"}, status=200)
+        return Response({"ResultCode": 0, "ResultDesc": "Failure acknowledged gracefully"}, status=200)
     
-# backend/core/views.py
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def check_invoice_status(request, invoice_id):
     """
-    Lightweight endpoint for frontend polling to monitor transaction resolution state.
+    Lightweight polling endpoint for the frontend to monitor real-time transaction updates.
     """
     try:
         invoice = PatientInvoice.objects.get(id=invoice_id)
         return Response({
             "status": invoice.status, 
-            "receipt_number": getattr(invoice, 'receipt_number', None)
+            "receipt_number": getattr(invoice, 'receipt_number', None),
+            "payment_method": getattr(invoice, 'payment_method', None),
+            "invoice_number": invoice.invoice_number
         }, status=200)
     except PatientInvoice.DoesNotExist:
-        return Response({"error": "Invoice not found"}, status=404)
-    
-
-
+        return Response({"error": "Invoice record not found"}, status=404)
 
 class FixedAssetViewSet(viewsets.ModelViewSet):
     """

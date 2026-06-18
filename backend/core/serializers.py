@@ -1685,58 +1685,6 @@ class ServiceSerializer(serializers.ModelSerializer):
 
 # --- Real-Time Point-of-Care Billing Serializer ---
 
-class PatientBillableItemSerializer(serializers.ModelSerializer):
-    # Read-only nested lookup helpers for the UI dashboards
-    patient_name = serializers.CharField(source='patient.name', read_only=True)
-    health_record_number = serializers.CharField(source='visit.health_record_number', read_only=True)
-    queue_id = serializers.CharField(source='visit.queue_id', read_only=True)
-    ordered_by_name = serializers.CharField(source='ordered_by.get_full_name', read_only=True)
-    station_display = serializers.CharField(source='get_station_charged_display', read_only=True)
-    
-    class Meta:
-        model = PatientBillableItem
-        fields = [
-            'id', 'patient', 'patient_name', 'visit', 'health_record_number', 'queue_id',
-            'service', 'service_sku_snapshot', 'service_name_snapshot',
-            'station_charged', 'station_display', 'qty', 'price_snap', 'total_amount', 
-            'billing_status', 'ordered_by', 'ordered_by_name', 'created_at'
-        ]
-        read_only_fields = [
-            'id', 'service_sku_snapshot', 'service_name_snapshot', 
-            'total_amount', 'ordered_by', 'created_at'
-        ]
-
-    def validate(self, data):
-        """
-        Validate and automatically establish price snapshots from the 
-        Service template matrix if not explicitly overridden.
-        """
-        service = data.get('service')
-        price_snap = data.get('price_snap')
-
-        # If a service blueprint is provided, pull its defaults if snapshots are missing
-        if service:
-            if not price_snap:
-                data['price_snap'] = service.price
-        elif not price_snap:
-            raise serializers.ValidationError({
-                "price_snap": "A baseline price rate must be supplied if no master service template is selected."
-            })
-            
-        return data
-
-    def create(self, validated_data):
-        """Inject the requesting clinical user context directly from the active HTTP session."""
-        request = self.context.get('request')
-        if request and request.user:
-            validated_data['ordered_by'] = request.user
-        else:
-            # Fallback error check if context isn't clean
-            raise serializers.ValidationError("Authentication context is required to register automated point-of-care billing charges.")
-            
-        return super().create(validated_data)
-    
-
 class ICD10DiagnosisSerializer(serializers.ModelSerializer):
     """
     Serializer optimized for anatomical site filtering and autocomplete.
@@ -2058,16 +2006,20 @@ class PaymentVoucherSerializer(serializers.ModelSerializer):
 class PatientBillableItemSerializer(serializers.ModelSerializer):
     """
     Serializes individual line items to match the columns on the React frontend:
-    Station, Service/Procedure, Cost (KES).
+    Station, Service/Procedure, Unit Price, and Quantity metrics.
     """
-    # Use the human-readable display string for the station choice field
-    station = serializers.CharField(source='get_station_display')
+    # Directly pull the raw choice code ('Pharmacy', 'Laboratory', etc.) for stable frontend matching
+    station = serializers.CharField() 
+    # Map the stored historical string name to the expected 'service' property key
     service = serializers.CharField(source='name')
-    price = serializers.FloatField(source='total_cost')
+    # Return the explicit base unit price to avoid double-multiplication errors in React
+    price = serializers.FloatField(source='unit_price')
+    # Expose the item quantity field
+    quantity = serializers.IntegerField()
 
     class Meta:
         model = PatientBillableItem
-        fields = ['id', 'station', 'service', 'price']
+        fields = ['id', 'station', 'service', 'price', 'quantity', 'is_paid', 'incurred_at']
 
 
 class ActiveInvoiceSerializer(serializers.ModelSerializer):
@@ -2087,7 +2039,6 @@ class PatientBillingLookupSerializer(serializers.ModelSerializer):
     Used when searching patients at the front desk. Resolves identification,
     payment coverage flags, and hooks into their active transaction ledger.
     """
-    # Flatten names cleanly using your model helper property
     name = serializers.CharField(source='full_name', read_only=True)
     scheme = serializers.SerializerMethodField()
     active_bill = serializers.SerializerMethodField()
@@ -2107,15 +2058,12 @@ class PatientBillingLookupSerializer(serializers.ModelSerializer):
         Resolves an active open invoice context. Auto-instantiates 
         the row safely if it doesn't exist yet to secure station connectivity.
         """
-        # 1. First, check if ANY invoice at all exists for this visit session to prevent UNIQUE clashes
         invoice = PatientInvoice.objects.filter(visit=obj).first()
         
-        # 2. If absolutely no invoice exists for this visit, safely create it on the fly
         if not invoice:
             patient_record = getattr(obj, 'patient', None)
             if patient_record:
                 try:
-                    # Using get_or_create provides an extra layer of structural race-condition safety
                     invoice, created = PatientInvoice.objects.get_or_create(
                         visit=obj,
                         defaults={
@@ -2123,15 +2071,12 @@ class PatientBillingLookupSerializer(serializers.ModelSerializer):
                             'status': 'UNPAID'
                         }
                     )
-                except Exception as e:
-                    # Log or handle unexpected database locking gracefully
+                except Exception:
                     invoice = PatientInvoice.objects.filter(visit=obj).first()
 
-        # 3. Return the serialized data if we successfully found or generated the record
         if invoice:
             return ActiveInvoiceSerializer(invoice).data
             
-        # Hard fallback only if database integrity is fundamentally broken
         return {
             "id": None,
             "status": "UNPAID",

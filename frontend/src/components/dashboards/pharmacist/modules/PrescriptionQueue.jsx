@@ -294,94 +294,69 @@ const PrescriptionQueue = ({ onDispensingComplete }) => {
   }, [preMeds, chemoDrugs, postMeds]);
 
   const handleSaveAndSubmit = async () => {
-    if (!selectedPrescription) return;
-    setIsProcessing(true);
-    try {
-      const jwtToken = localStorage.getItem('access_token');
-      const csrfToken = getCookie('csrftoken');
-      const headers = {
-        ...(jwtToken && { Authorization: `Bearer ${jwtToken}` }),
-        ...(csrfToken && { 'X-CSRFToken': csrfToken })
-      };
+  if (!selectedPrescription) return;
+  setIsProcessing(true);
+  
+  try {
+    const jwtToken = localStorage.getItem('access_token');
+    const csrfToken = getCookie('csrftoken');
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(jwtToken && { Authorization: `Bearer ${jwtToken}` }),
+      ...(csrfToken && { 'X-CSRFToken': csrfToken })
+    };
 
-      // 1. Collect all dispensed items across all medical stages
-      const allDispensedItems = [
-        ...calculatedDispensation.preMeds,
-        ...calculatedDispensation.chemoDrugs,
-        ...calculatedDispensation.postMeds
-      ];
+    // 1. Collect all dispensed items across all medical stages (Pre-meds, Chemo, Post-meds)
+    const allDispensedItems = [
+      ...calculatedDispensation.preMeds,
+      ...calculatedDispensation.chemoDrugs,
+      ...calculatedDispensation.postMeds
+    ];
 
-      // 2. Automate Pharmacy Store Stock Catalog Deductions
-      await Promise.all(
-        allDispensedItems.map(async (item) => {
-          if (item.drug && typeof item.current_stock === 'number') {
-            const calculatedNewStock = Math.max(0, item.current_stock - item.qtyDispensed);
-            try {
-              await API.patch(`drugs/${item.drug}/`, {
-                stock_quantity: calculatedNewStock
-              }, { headers });
-              console.log(`[Inventory Adjusted] Drug ID ${item.drug}: Balance updated down to ${calculatedNewStock}`);
-            } catch (stockError) {
-              console.error(`[Inventory Sync Failed] Error on item ${item.drug}:`, stockError);
-            }
-          }
-        })
-      );
+    // 2. Map payload keys cleanly to match backend architecture expectations
+    const itemPayloads = allDispensedItems.map(item => ({
+      drug_id: item.drug,
+      quantity_dispensed: parseInt(item.qtyDispensed || 1, 10), 
+      unit_price: parseFloat(item.unitPrice || 0)
+    }));
 
-      // 3. Build out structural metadata array map lists
-      const dispatchPayload = allDispensedItems.map(item => ({
-        id: item.id,
-        drug_id: item.drug,
-        quantity_dispensed: item.qtyDispensed, 
-        unit_price: item.unitPrice,
-        cost: item.cost
-      }));
-
-      const cleanUpdatePayload = {
-        pharmacy_status: 'DISPENSED',
-        meta_extensions: { 
-          dispensation_summary: dispatchPayload, 
-          final_cost: calculatedDispensation.grandTotal 
-        }
-      };
-
-      // 4. Update the Prescription entity status (Wrapped in a try-catch circuit-breaker)
-      try {
-        await API.patch(`prescriptions/${selectedPrescription.id}/`, cleanUpdatePayload, { headers });
-      } catch (prescriptionPatchError) {
-        // If the backend signals throw a string mismatch but inventory was cleanly subtracted, 
-        // catch the error silently so the user interface can continue to progress workflow routing operations safely
-        console.warn("[Prescription Signal Override] Handled internal validation query alert, proceeding to queue routing:", prescriptionPatchError);
+    // --- FIX Applied HERE: Nest data inside meta_extensions.dispensation_summary ---
+    const cleanUpdatePayload = {
+      meta_extensions: {
+        dispensation_summary: itemPayloads
       }
+    };
 
-      // 5. 🚀 NEW: Route the patient directly to the Billing Officer's Queue Panel
-      // Use activeQueueItem tracking indicators to isolate the queue ticket resource
-      if (activeQueueItem && activeQueueItem.id) {
-        const queueTicketId = activeQueueItem.id;
-        
-        const queueRoutingPayload = {
-          current_station: 'BILLING', // Switch station target to Billing/Discharge
-          status: 'WAITING'          // Place them back in "Waiting" status for the next room officer
-        };
+    // 3. Dispatch data to our backend atomic transaction manager
+    const response = await fetch(`/api/prescriptions/${selectedPrescription.id}/dispense/`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(cleanUpdatePayload)
+    });
 
-        await API.patch(`queue/${queueTicketId}/`, queueRoutingPayload, { headers });
-        console.log(`[Queue Forwarder] Patient successfully escalated to Billing station queue ticket ID: ${queueTicketId}`);
-      }
-
-      alert("Dispensation records processed, inventory adjusted, and patient forwarded to Billing desk successfully!");
-      
-      // 6. Refresh the operational dashboard layout view cards safely
-      setSelectedQueueId('');
-      await loadPharmacyQueue();
-      if (onDispensingComplete) onDispensingComplete();
-      
-    } catch (err) {
-      console.error("[Salama Pharma Hub Critical Exception] Complete dispensation pipeline failure:", err);
-      alert("Error committing transactional routing adjustments or synchronizing station queues.");
-    } finally {
-      setIsProcessing(false);
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Server rejected prescription processing pipeline');
     }
-  }; // <--- Structural functions are now cleanly closed!
+
+    const result = await response.json();
+    console.log("[Dispensation Engine Success]", result);
+
+    alert("Dispensation records processed, inventory adjusted, and patient forwarded to Billing desk successfully!");
+    
+    // 4. Refresh local interface blocks smoothly
+    setSelectedQueueId('');
+    setSelectedPrescription(null); // Clear active item overview frame panel state
+    await loadPharmacyQueue();
+    if (onDispensingComplete) onDispensingComplete();
+    
+  } catch (err) {
+    console.error("[Salama Pharma Hub Critical Exception] Complete dispensation pipeline failure:", err);
+    alert(`Operational Error: ${err.message}`);
+  } finally {
+    setIsProcessing(false);
+  }
+};
 
   const vitals = selectedPrescription?.vitals_snapshot || {};
 

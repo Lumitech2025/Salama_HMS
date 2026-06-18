@@ -52,9 +52,6 @@ class Patient(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     
-
-    
-
 class RegistrationRecord(models.Model):
     GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
     PAYMENT_MODE_CHOICES = [('CASH', 'Cash'), ('INSURANCE', 'Insurance')]
@@ -2144,9 +2141,6 @@ class Service(models.Model):
     def __str__(self):
         return f"{self.sku} - {self.name} ({self.charge_type} - KES {self.price})"
 
-
-# --- Transactional Point-Of-Care Billing Matrix ---
-
 class PatientInvoice(models.Model):
     """
     Groups all station charges incurred during a specific outpatient visit session.
@@ -2157,6 +2151,9 @@ class PatientInvoice(models.Model):
         ('PAID', 'Fully Settled'),
         ('INSURANCE_PENDING', 'Awaiting Insurance Pre-Auth Clear'),
     ]
+
+    # Unique Patient-Scoped Invoice tracking key matching: INV001-SCC-015/26 format
+    invoice_number = models.CharField(max_length=100, unique=True, blank=True, null=True)
 
     visit = models.OneToOneField(
         'RegistrationRecord', 
@@ -2180,21 +2177,60 @@ class PatientInvoice(models.Model):
         """Aggregates all related line item costs dynamically for the frontend total"""
         return sum(item.total_cost for item in self.items.all())
 
+    @classmethod
+    def get_or_create_active_invoice(cls, registration_record):
+        """
+        Safety Hook: Locates an existing open invoice session ledger for the 
+        current registration file or builds a clean one on demand.
+        """
+        invoice, created = cls.objects.get_or_create(
+            visit=registration_record,
+            patient=registration_record.patient,
+            defaults={'status': 'UNPAID'}
+        )
+        return invoice
+
+    def save(self, *args, **kwargs):
+        """
+        Intercept instance saves to auto-calculate patient-scoped structural tracking identifiers.
+        """
+        # Save first to establish a primary key if this is a new object
+        super().save(*args, **kwargs)
+
+        # Generate invoice tracker identifier sequences safely if completely empty
+        if not self.invoice_number:
+            # 1. Fetch the absolute, unchangeable health record number from the patient profile
+            # e.g., 'SCC-015'
+            hr_number = self.patient.health_record_number if self.patient else "UNKNOWN"
+            
+            # 2. Get current trailing 2-digit financial tracking year, e.g., '26'
+            current_year = timezone.now().strftime('%y')
+            
+            # 3. Dynamic Patient Scope Check: Count pre-existing invoices recorded for this specific patient profile
+            # We exclude self.id just in case a partial save was called elsewhere
+            prior_invoice_count = type(self).objects.filter(patient=self.patient).exclude(id=self.id).count()
+            
+            # 4. Increment the historical ledger row depth by 1 and pad with zeros (e.g., 0 -> '001', 1 -> '002')
+            sequence_string = str(prior_invoice_count + 1).zfill(3)
+            
+            # 5. Assemble exact requested format block: INV001-SCC-015/26
+            self.invoice_number = f"INV{sequence_string}-{hr_number}/{current_year}"
+            
+            # 6. Push explicit updates into database rows without entering recursive save loops
+            type(self).objects.filter(id=self.id).update(invoice_number=self.invoice_number)
+
     def __str__(self):
-    # Safe fallback if 'patient' relationship or 'name' is missing
+        if self.invoice_number:
+            return f"{self.invoice_number} - {self.patient.name if self.patient else 'Unknown'}"
         if hasattr(self, 'patient') and self.patient:
             return f"Invoice for {self.patient.name}"
-        elif hasattr(self, 'name'):
-            return f"{self.name}"
         return f"Invoice #{self.id}"
-
 
 class PatientBillableItem(models.Model):
     """
     Unified line-item ledger that pulls costs from both standard Services 
     and Pharmacy Drugs, tracking the 6 exact active charging stations.
     """
-    # ✨ Explicitly mapped to your 6 active charging stations (Registration removed)
     STATION_DISPLAY_CHOICES = [
         ('Consultation', 'Oncology (Consultation Room)'),
         ('Laboratory', 'Laboratory'),
@@ -2210,14 +2246,12 @@ class PatientBillableItem(models.Model):
         related_name='items'
     )
     
-    # Track the exact station matching your new frontend column layout
     station = models.CharField(
         max_length=30, 
         choices=STATION_DISPLAY_CHOICES, 
         default='Consultation'
     )
 
-    # Polymorphic links (Both are blank=True, null=True)
     service = models.ForeignKey(
         'Service', 
         on_delete=models.SET_NULL, 
@@ -2226,14 +2260,13 @@ class PatientBillableItem(models.Model):
         related_name='billable_items'
     )
     drug = models.ForeignKey(
-        Drug, 
+        'Drug',  
         on_delete=models.SET_NULL, 
         blank=True, 
         null=True, 
         related_name='billable_items'
     )
 
-    # Snapshotted text values to safeguard historical financial accounting audits
     name = models.CharField(
         max_length=255, 
         help_text="Captured name at the moment of entry execution"
@@ -2261,7 +2294,6 @@ class PatientBillableItem(models.Model):
             self.name = self.service.name
             self.unit_price = self.service.price
             
-            # ✨ Maps the 3-letter Service.dept choices perfectly to your exact frontend display strings
             dept_mapping = {
                 'ONC': 'Consultation',
                 'LAB': 'Laboratory',
@@ -2274,16 +2306,14 @@ class PatientBillableItem(models.Model):
             
         elif self.drug and not self.name:
             self.name = f"{self.drug.name} ({self.drug.strength or ''})"
-            self.unit_price = self.drug.selling_price_kes
+            if self.unit_price == Decimal('0.00') and hasattr(self.drug, 'selling_price_kes'):
+                self.unit_price = self.drug.selling_price_kes
             self.station = 'Pharmacy'
 
         super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.station} -> {self.name} ({self.quantity}x KES {self.unit_price})"
-
-
-
 
 
 class FixedAsset(models.Model):

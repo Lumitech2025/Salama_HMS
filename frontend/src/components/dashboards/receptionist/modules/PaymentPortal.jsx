@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   CreditCard, Smartphone, Receipt, Search, Plus, 
   CheckCircle2, ArrowRight, ShieldCheck, User, 
-  Loader2, X, Mail, MessageSquare, ArrowUpRight, Check, AlertTriangle,
-  Download, Printer
+  Loader2, X, AlertTriangle, Check, Printer, ShoppingBag
 } from 'lucide-react';
 
 // Imported Salama Cancer Centre Logo
 import SalamaLogo from "@/assets/Salama Cancer Centre logo.png";
 
-const PaymentPortal = () => {
+// Receives standard incoming routed properties seamlessly from active queue desk triggers
+const PaymentPortal = ({ routedPatient, onClearRoute }) => {
   const [billingMode, setBillingMode] = useState('self_pay'); 
   const [paymentMethod, setPaymentMethod] = useState('mpesa');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -33,8 +33,6 @@ const PaymentPortal = () => {
 
   const [errorMessage, setErrorMessage] = useState('');
   const [countdown, setCountdown] = useState(60);
-
-  // ✨ NEW: State to trigger the Invoice Document Modal Preview
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
 
   // Helper to retrieve the CSRF token from Django cookies
@@ -58,6 +56,7 @@ const PaymentPortal = () => {
     return token ? { 'Authorization': `Bearer ${token}` } : {};
   };
 
+  // M-Pesa STK Handset Countdown Monitor Logic
   useEffect(() => {
     let timer;
     if (paymentStatus === 'prompting' && countdown > 0) {
@@ -69,6 +68,52 @@ const PaymentPortal = () => {
     }
     return () => clearTimeout(timer);
   }, [countdown, paymentStatus]);
+
+  // ✨ Intercept and ingest routed components triggered globally inside the Billing Desk workflow
+  useEffect(() => {
+    if (routedPatient) {
+      // Direct field parsing matching RegistrationRecord schema layouts
+      const standardizedPatient = {
+        id: routedPatient.id,
+        name: routedPatient.patient_name || routedPatient.full_name || "UNREGISTERED ENCOUNTER",
+        health_record_number: routedPatient.health_record_number,
+        queue_id: routedPatient.token_id || routedPatient.queue_id || `Q-${routedPatient.id}`,
+        phone: routedPatient.patient_id_no || routedPatient.phone || '',
+        scheme: routedPatient.payment_mode || routedPatient.payment_method || 'CASH'
+      };
+
+      setSelectedPatient(standardizedPatient);
+      setPhoneNumber(standardizedPatient.phone);
+      
+      // Sync upper interface billing mode selector tabs to matching model parameters automatically
+      if (standardizedPatient.scheme.toUpperCase() === 'INSURANCE') {
+        setBillingMode('insurance');
+      } else {
+        setBillingMode('self_pay');
+        setPaymentMethod(standardizedPatient.phone ? 'mpesa' : 'cash');
+      }
+
+      setVerificationStatus('unverified');
+      setPaymentStatus('idle');
+      setErrorMessage('');
+
+      // Aggregates matching dynamic bills, pharmacy prescription entries, and structural line charges
+      if (routedPatient.active_bill && Array.isArray(routedPatient.active_bill.items)) {
+        setCart(routedPatient.active_bill.items);
+        setInvoiceId(routedPatient.active_bill.id);
+      } else if (routedPatient.items && Array.isArray(routedPatient.items)) {
+        setCart(routedPatient.items);
+        setInvoiceId(routedPatient.id || routedPatient.invoice_id);
+      } else {
+        // Fallback placeholder generating clean items structure if records are separated
+        const fallbackItems = [];
+        if (routedPatient.service_charges) fallbackItems.push(...routedPatient.service_charges);
+        if (routedPatient.pharmacy_invoice?.items) fallbackItems.push(...routedPatient.pharmacy_invoice.items);
+        setCart(fallbackItems);
+        setInvoiceId(routedPatient.id);
+      }
+    }
+  }, [routedPatient]);
 
   const fetchMasterCatalogPrices = useCallback(async () => {
     try {
@@ -105,6 +150,7 @@ const PaymentPortal = () => {
     fetchMasterCatalogPrices();
   }, [fetchMasterCatalogPrices]);
 
+  // Live Patient Index search stream tracker
   useEffect(() => {
     if (searchPatient.trim().length > 2) {
       setIsSearching(true);
@@ -120,8 +166,6 @@ const PaymentPortal = () => {
           if (response.ok) {
             const data = await response.json();
             setPatientQueryResults(data);
-          } else {
-            console.error("Search unauthorized or terminal validation failed.");
           }
         } catch (error) {
           console.error("Error communicating with HMS billing ledger:", error);
@@ -176,12 +220,48 @@ const PaymentPortal = () => {
     setCart(cart.filter(item => item.id !== id));
   };
 
+  // ✨ EXECUTE MPESA OR PHYSICAL CASH TERMINATION SETTLEMENTS
   const handleProcessPayment = async () => {
-    if (!phoneNumber || phoneNumber.trim() === '') {
+    if (paymentMethod === 'mpesa' && (!phoneNumber || phoneNumber.trim() === '')) {
       alert("Please enter a valid M-Pesa phone number.");
       return;
     }
 
+    setIsProcessing(true);
+    setErrorMessage('');
+
+    if (paymentMethod === 'cash') {
+      // Execute Direct Physical Cash Ledger Ingestion Workflow
+      try {
+        const response = await fetch(`/api/invoices/${invoiceId}/settle-cash/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCookie('csrftoken'),
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify({
+            amount_paid: total,
+            validated_items: cart
+          })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || "Failed to update physical cash model records.");
+        }
+
+        setPaymentStatus('success');
+      } catch (err) {
+        setErrorMessage(err.message || "Cash collection logging operation failed.");
+        setPaymentStatus('failed');
+      } finally {
+        setIsProcessing(false);
+      }
+      return;
+    }
+
+    // Standard automated M-Pesa STK Flow
     try {
       setPaymentStatus('prompting'); 
       setCountdown(60);             
@@ -241,6 +321,8 @@ const PaymentPortal = () => {
       console.error("Payment initiation failed:", error);
       alert(error.message || "An unexpected error occurred.");
       setPaymentStatus('idle'); 
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -277,9 +359,18 @@ const PaymentPortal = () => {
     }
   };
 
-  // ✨ NEW: Handles isolated print and download routing for window media configurations
   const handlePrintInvoice = () => {
     window.print();
+  };
+
+  // Reset routed context state properties on clear terminal action calls
+  const handleClearTerminal = () => {
+    setPaymentStatus('idle');
+    setSelectedPatient(null);
+    setCart([]);
+    setInvoiceId(null);
+    setErrorMessage('');
+    if (onClearRoute) onClearRoute();
   };
 
   return (
@@ -314,18 +405,42 @@ const PaymentPortal = () => {
 
       {/* PATIENT SELECTOR (HIDDEN ON PRINT) */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs relative print:hidden">
-        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Patient</label>
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
-          <input 
-            type="text" 
-            placeholder="Type patient name, queue ID, or HRN number to fetch Patient's bills..." 
-            value={searchPatient}
-            onChange={(e) => setSearchPatient(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-9 pr-4 text-xs font-medium outline-none focus:border-slate-300 focus:bg-white transition-all"
-          />
-          {(isSearching || isLoadingCatalog) && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />}
-        </div>
+        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Active Inspected Patient Context</label>
+        
+        {/* Render interactive inputs only if no patient is routed to maintain workflow isolation */}
+        {!selectedPatient ? (
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+            <input 
+              type="text" 
+              placeholder="Type patient name, queue ID, or HRN number to fetch Patient's bills..." 
+              value={searchPatient}
+              onChange={(e) => setSearchPatient(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-9 pr-4 text-xs font-medium outline-none focus:border-slate-300 focus:bg-white transition-all"
+            />
+            {(isSearching || isLoadingCatalog) && <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />}
+          </div>
+        ) : (
+          <div className="flex items-center justify-between bg-emerald-50/60 border border-emerald-100 p-3.5 rounded-xl text-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-black text-xs shadow-sm">
+                {selectedPatient.name ? selectedPatient.name[0].toUpperCase() : 'P'}
+              </div>
+              <div>
+                <span className="font-black text-slate-900 text-sm block">
+                  {selectedPatient.name} 
+                  <span className="ml-2 font-mono text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded text-xs font-bold">HRN: {selectedPatient.health_record_number}</span>
+                </span>
+                <span className="block text-slate-500 font-medium text-[11px] mt-0.5">
+                  Registered Mode: <span className="font-bold text-slate-800">{selectedPatient.scheme || 'CASH'}</span> | Active Token Reference: <span className="font-mono text-slate-700 font-bold">{selectedPatient.queue_id}</span>
+                </span>
+              </div>
+            </div>
+            <button type="button" onClick={handleClearTerminal} className="text-slate-400 hover:text-rose-600 p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
+              <X size={16} />
+            </button>
+          </div>
+        )}
 
         {patientQueryResults.length > 0 && (
           <div className="absolute left-4 right-4 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 overflow-hidden divide-y divide-slate-100">
@@ -345,7 +460,7 @@ const PaymentPortal = () => {
                 </div>
                 <div className="text-right">
                   <span className="inline-block px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-medium">{p.scheme || 'Cash/Self-Pay'}</span>
-                  <span className="text-emerald-600 font-bold block mt-0.5 text-[11px] flex items-center gap-1 justify-end">Pull Charges <ArrowUpRight size={11}/></span>
+                  <span className="text-emerald-600 font-bold block mt-0.5 text-[11px] flex items-center gap-1 justify-end">Pull Charges <ArrowRight size={11}/></span>
                 </div>
               </button>
             ))}
@@ -357,43 +472,26 @@ const PaymentPortal = () => {
             No active outpatient encounters match your parameters.
           </div>
         )}
-
-        {selectedPatient && (
-          <div className="mt-2.5 flex items-center justify-between bg-emerald-50/40 border border-emerald-100 p-2.5 rounded-lg text-xs">
-            <div className="flex items-center gap-2.5">
-              <div className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-[11px]">
-                {selectedPatient.name ? selectedPatient.name[0] : 'P'}
-              </div>
-              <div>
-                <span className="font-bold text-slate-900">
-                  {selectedPatient.name} — <span className="font-mono text-emerald-700 bg-emerald-100/60 px-1.5 py-0.5 rounded text-[11px]">HRN: {selectedPatient.health_record_number}</span>
-                </span>
-                <span className="block text-slate-400 text-[10px] mt-0.5">Active Cover Link: {selectedPatient.scheme || 'Cash / Self-Pay'} | Token ID: {selectedPatient.queue_id}</span>
-              </div>
-            </div>
-            <button type="button" onClick={() => { setSelectedPatient(null); setCart([]); setInvoiceId(null); setErrorMessage(''); }} className="text-slate-400 hover:text-slate-600 p-1">
-              <X size={14} />
-            </button>
-          </div>
-        )}
       </div>
 
       {/* CORE WORKFLOW AREA (HIDDEN ON PRINT) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start print:hidden">
         
-        {/* CHARGES TABLE BREAKDOWN */}
+        {/* INTEGRATED SERVICE CHARGES & PHARMACY INVOICES MATRIX */}
         <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-3.5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Incurred Station Charges Matrix</h3>
-            <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded font-mono text-[10px] font-bold">{cart.length} Items</span>
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+              <ShoppingBag size={14} className="text-slate-400" /> Aggregated System Invoices
+            </h3>
+            <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded font-mono text-[10px] font-bold">{cart.length} Combined Entries</span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase bg-slate-50/20">
-                  <th className="py-2.5 px-4 w-1/4">Station</th>
-                  <th className="py-2.5 px-4 w-1/2">Service / Procedure</th>
+                  <th className="py-2.5 px-4 w-1/4">Origin Block</th>
+                  <th className="py-2.5 px-4 w-1/2">Service Charge / Dispensed Pharmacy Item</th>
                   <th className="py-2.5 px-4 text-right w-1/4">Cost (KES)</th>
                   <th className="py-2.5 px-4 text-center w-10"></th>
                 </tr>
@@ -402,28 +500,38 @@ const PaymentPortal = () => {
                 {cart.length === 0 ? (
                   <tr>
                     <td colSpan="4" className="py-12 text-center text-slate-400 font-medium">
-                      {selectedPatient ? 'All station entries cleared.' : 'Select a patient above to generate the operational item ledger.'}
+                      {selectedPatient ? 'All clinical invoices cleared.' : 'Forward patient encounters from the Desk Queue to load pharmacy and procedural itemized logs.'}
                     </td>
                   </tr>
                 ) : (
-                  cart.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-50/40 transition-colors">
-                      <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded text-slate-700 text-[10px] font-semibold tracking-wide uppercase">
-                          {item.station}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 font-medium text-slate-900">{item.service}</td>
-                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
-                        {(parseFloat(item.price) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="py-3 px-4 text-center">
-                        <button type="button" onClick={() => handleRemoveService(item.id)} className="text-slate-300 hover:text-rose-500 p-1 transition-colors">
-                          <X size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  cart.map((item) => {
+                    const isPharmacy = (item.station || item.department || '').toUpperCase() === 'PHARMACY' || item.is_medication;
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-50/40 transition-colors">
+                        <td className="py-3 px-4">
+                          <span className={`px-2 py-0.5 border rounded text-[10px] font-semibold tracking-wide uppercase ${
+                            isPharmacy 
+                              ? 'bg-purple-50 text-purple-700 border-purple-200' 
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>
+                            {item.station || item.department || (isPharmacy ? 'PHARMACY' : 'SERVICE')}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-medium text-slate-900">
+                          {item.service || item.item_name || item.medication_name}
+                          {item.quantity && <span className="text-slate-400 ml-1.5 text-[11px]">x{item.quantity}</span>}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
+                          {(parseFloat(item.price || item.cost || 0) * (parseInt(item.quantity || 1, 10))).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <button type="button" onClick={() => handleRemoveService(item.id)} className="text-slate-300 hover:text-rose-500 p-1 transition-colors">
+                            <X size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -431,7 +539,6 @@ const PaymentPortal = () => {
 
           {cart.length > 0 && (
             <div className="p-3 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
-              {/* ✨ MODIFIED: Connects Draft Invoice Action to state reveal matrix */}
               <button 
                 type="button" 
                 onClick={() => setShowInvoiceModal(true)}
@@ -446,7 +553,7 @@ const PaymentPortal = () => {
           )}
         </div>
 
-        {/* PAYMENT OR CLEARING CONTROL PANEL */}
+        {/* PAYMENT SETTLEMENT AND CLEARING DASHBOARD PANEL */}
         <div className="lg:col-span-5">
           {billingMode === 'self_pay' ? (
             <div className="bg-[#020617] rounded-xl p-5 text-white shadow-sm border border-slate-800 space-y-4">
@@ -454,12 +561,12 @@ const PaymentPortal = () => {
                 <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Settlement Breakdowns</h3>
                 <div className="mt-3 space-y-1.5 text-xs">
                   <div className="flex justify-between text-slate-400">
-                    <span>Subtotal Charges</span>
+                    <span>Subtotal Consolidated Charges</span>
                     <span className="font-mono">KES {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                   <div className="h-px bg-slate-800 my-1"></div>
                   <div className="flex justify-between items-end">
-                    <span className="text-slate-300 font-medium">Net Payable</span>
+                    <span className="text-slate-300 font-medium">Net Payable Cost</span>
                     <span className="text-xl font-bold font-mono text-white tracking-tight">
                       <span className="text-xs text-emerald-400 font-normal mr-1">KES</span>
                       {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -481,19 +588,19 @@ const PaymentPortal = () => {
                     <CheckCircle2 size={20} />
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-white">Payment Confirmed</h4>
-                    <span className="text-[10px] font-mono text-slate-400 block mt-0.5">REF: SAL-STK-{Math.floor(Math.random()*90000+10000)}</span>
+                    <h4 className="text-xs font-bold text-white">Payment Confirmed Successfully</h4>
+                    <span className="text-[10px] font-mono text-slate-400 block mt-0.5">METRIC LOGGED & SYNCHRONIZED VIA {paymentMethod.toUpperCase()}</span>
                   </div>
-                  <button type="button" onClick={() => { setPaymentStatus('idle'); setSelectedPatient(null); setCart([]); setInvoiceId(null); setErrorMessage(''); }} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white py-2 rounded-lg text-xs font-bold transition-all">Clear Terminal</button>
+                  <button type="button" onClick={handleClearTerminal} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white py-2 rounded-lg text-xs font-bold transition-all">Clear Terminal</button>
                 </div>
               ) : paymentStatus === 'prompting' ? (
                 <div className="bg-slate-900 border border-emerald-500/20 p-4 rounded-lg text-center space-y-2">
                   <div className="flex items-center justify-center gap-2.5 text-emerald-400 font-bold text-xs uppercase tracking-wide">
                     <Loader2 className="animate-spin" size={14} />
-                    <span>Awaiting Patient PIN Input...</span>
+                    <span>Awaiting Handset STK Validation Pin...</span>
                   </div>
                   <p className="text-[11px] text-slate-400">
-                    STK push dispatched to <span className="text-white font-mono font-bold">{phoneNumber}</span>. Window expires in <span className="text-emerald-400 font-bold">{countdown}s</span>
+                    Dispatched payload to <span className="text-white font-mono font-bold">{phoneNumber}</span>. Window window closing in <span className="text-emerald-400 font-bold">{countdown}s</span>
                   </p>
                 </div>
               ) : (
@@ -511,11 +618,11 @@ const PaymentPortal = () => {
                       onClick={() => { setPaymentMethod('cash'); setErrorMessage(''); }}
                       className={`flex items-center justify-center gap-2 p-2.5 rounded-lg border text-xs font-semibold transition-all ${paymentMethod === 'cash' ? 'bg-emerald-600/10 border-emerald-500 text-emerald-400' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
                     >
-                      <CreditCard size={14} /> Cash Payments
+                      <CreditCard size={14} /> Cash Payment
                     </button>
                   </div>
 
-                  {paymentMethod === 'mpesa' && (
+                  {paymentMethod === 'mpesa' ? (
                     <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 space-y-1">
                       <label className="block text-[10px] font-semibold text-slate-400">Target M-Pesa Phone Number</label>
                       <input 
@@ -527,6 +634,17 @@ const PaymentPortal = () => {
                         disabled={isProcessing}
                       />
                     </div>
+                  ) : (
+                    <div className="bg-emerald-950/20 border border-emerald-800/40 p-3 rounded-lg text-xs space-y-2">
+                      <label className="flex items-start gap-2.5 text-slate-400 select-none cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          required
+                          className="mt-0.5 accent-emerald-500 h-3.5 w-3.5 rounded border-slate-800 bg-slate-900"
+                        />
+                        <span>Confirm Payment.</span>
+                      </label>
+                    </div>
                   )}
 
                   <button 
@@ -537,11 +655,11 @@ const PaymentPortal = () => {
                     {isProcessing ? (
                       <>
                         <Loader2 className="animate-spin" size={14} />
-                        <span>PROCESSING GATEWAY DISPATCH...</span>
+                        <span>PROCESSING PROTOCOL SYNC...</span>
                       </>
                     ) : (
                       <>
-                        <span>{paymentMethod === 'mpesa' ? 'Execute STK Push Request' : 'Execute Cash Transaction'}</span>
+                        <span>{paymentMethod === 'mpesa' ? 'Execute M-Pesa STK Request' : 'Settle & Mark Paid Via Cash'}</span>
                         <ArrowRight size={14} />
                       </>
                     )}
@@ -653,178 +771,154 @@ const PaymentPortal = () => {
       </div>
 
       {/* ========================================================================= */}
-      {/* ✨ NEW: INVOICE GENERATOR MODAL VIEW (AUTO-ISOLATED FOR PRINT & PDF)      */}
+      {/* ✨ INVOICE GENERATOR MODAL VIEW (AUTO-ISOLATED FOR PRINT & PDF)          */}
       {/* ========================================================================= */}
       {showInvoiceModal && selectedPatient && (
-  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto print:absolute print:inset-0 print:bg-white print:p-0 print:z-auto">
-    
-    <style>{`
-      @media print {
-        body * {
-          visibility: hidden !important;
-        }
-        #salama-invoice-printable, #salama-invoice-printable * {
-          visibility: visible !important;
-        }
-        #salama-invoice-printable {
-          position: absolute !important;
-          left: 0 !important;
-          top: 0 !important;
-          width: 100% !important;
-          background: white !important;
-          color: black !important;
-          padding: 0px !important;
-          margin: 0px !important;
-        }
-        @page {
-          size: auto;
-          margin: 15mm 20mm 15mm 20mm;
-        }
-      }
-    `}</style>
-
-    {/* Main Document Box */}
-    <div className="bg-white w-full max-w-3xl rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-slate-200 print:border-none print:shadow-none print:max-h-full print:w-full print:bg-white">
-      
-      {/* Control Bar (Hidden on print) */}
-      <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between print:hidden shrink-0">
-        <div className="flex items-center gap-2">
-          <Receipt size={16} className="text-slate-600" />
-          <span className="text-sm font-bold text-slate-800">Official Patient Invoice</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handlePrintInvoice}
-            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
-          >
-            <Printer size={14} /> Download / Print PDF
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowInvoiceModal(false)}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      </div>
-
-      {/* Print Content Wrapper */}
-      <div 
-        className="p-12 overflow-y-auto font-sans text-slate-800 print:overflow-visible print:p-0 bg-white" 
-        id="salama-invoice-printable"
-      >
-        
-        {/* 1. REPLICATED LAB HEADER: Centralized/Clean Brand Alignment with Contact Details */}
-        <div className="text-center border-b-2 border-slate-800 pb-4">
-          <div className="flex justify-center items-center gap-3 mb-1">
-            <img 
-              src={SalamaLogo} 
-              alt="Salama Cancer Centre" 
-              className="h-14 w-auto object-contain"
-            />
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-slate-900">SALAMA CANCER CENTRE</h1>
-              <p className="text-xs font-semibold text-emerald-600 tracking-wide -mt-0.5">Holistic Cancer and Palliative Care</p>
-            </div>
-          </div>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto print:absolute print:inset-0 print:bg-white print:p-0 print:z-auto">
           
-          <h2 className="text-sm font-bold text-slate-800 tracking-wider uppercase mt-2 bg-slate-100 py-1 print:bg-transparent">
-            OFFICIAL PATIENT INVOICE
-          </h2>
-          
-          <p className="text-[11px] text-slate-500 font-medium mt-1.5">
-            PO BOX 19619-40123, Kisumu, Kenya<br />
-            Tel: +254 756 364 419 | Email: scanccentre@gmail.com
-          </p>
-        </div>
+          <style>{`
+            @media print {
+              body * {
+                visibility: hidden !important;
+              }
+              #salama-invoice-printable, #salama-invoice-printable * {
+                visibility: visible !important;
+              }
+              #salama-invoice-printable {
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 100% !important;
+                background: white !important;
+                color: black !important;
+                padding: 0px !important;
+                margin: 0px !important;
+              }
+              @page {
+                size: auto;
+                margin: 15mm 20mm 15mm 20mm;
+              }
+            }
+          `}</style>
 
-        {/* Top Floating Metadata Row */}
-        <div className="flex justify-between items-center my-4 text-xs font-medium border-b border-slate-100 pb-3">
-          <p className="font-mono text-slate-600">
-            {/* 2. DYNAMIC FORMAT: Prefixed with INV- followed directly by the HRN string */}
-            Invoice No: <span className="text-slate-900 font-bold">INV-{selectedPatient.health_record_number || "SCC-XXXX/XX"}</span>
-          </p>
-          <p className="text-slate-600">
-            Date: <span className="text-slate-900 font-semibold">{new Date().toLocaleDateString('en-KE')}</span>
-          </p>
-          {/* 3. TERMS REMOVED: (Due on Presentation row is completely gone from here) */}
-        </div>
+          <div className="bg-white w-full max-w-3xl rounded-xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-slate-200 print:border-none print:shadow-none print:max-h-full print:w-full print:bg-white">
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between print:hidden shrink-0">
+              <div className="flex items-center gap-2">
+                <Receipt size={16} className="text-slate-600" />
+                <span className="text-sm font-bold text-slate-800">Official Patient Consolidated Invoice</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePrintInvoice}
+                  className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+                >
+                  <Printer size={14} /> Download / Print PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowInvoiceModal(false)}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
 
-        {/* 4. MODIFIED PATIENT AREA: Payment/Coverage Scheme column completely removed */}
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 my-6 text-xs print:bg-transparent print:border-none print:p-0">
-          <h4 className="font-bold text-[10px] text-slate-400 uppercase tracking-wider mb-2">Patient Details</h4>
-          <div className="grid grid-cols-2 gap-y-1.5 gap-x-4">
-            <p className="text-slate-600">Patient Full Name:</p>
-            <p className="font-bold text-slate-900">{selectedPatient.name}</p>
+            <div className="p-12 overflow-y-auto font-sans text-slate-800 print:overflow-visible print:p-0 bg-white" id="salama-invoice-printable">
+              <div className="text-center border-b-2 border-slate-800 pb-4">
+                <div className="flex justify-center items-center gap-3 mb-1">
+                  <img src={SalamaLogo} alt="Salama Cancer Centre" className="h-14 w-auto object-contain" />
+                  <div>
+                    <h1 className="text-xl font-bold tracking-tight text-slate-900">SALAMA CANCER CENTRE</h1>
+                    <p className="text-xs font-semibold text-emerald-600 tracking-wide -mt-0.5">Holistic Cancer and Palliative Care</p>
+                  </div>
+                </div>
+                <h2 className="text-sm font-bold text-slate-800 tracking-wider uppercase mt-2 bg-slate-100 py-1 print:bg-transparent">
+                  OFFICIAL CONSOLIDATED INVOICE
+                </h2>
+                <p className="text-[11px] text-slate-500 font-medium mt-1.5">
+                  PO BOX 19619-40123, Kisumu, Kenya<br />
+                  Tel: +254 756 364 419 | Email: scanccentre@gmail.com
+                </p>
+              </div>
 
-            <p className="text-slate-600">Health Record Number (HRN):</p>
-            <p className="font-mono font-bold text-slate-900">{selectedPatient.health_record_number}</p>
+              <div className="flex justify-between items-center my-4 text-xs font-medium border-b border-slate-100 pb-3">
+                <p className="font-mono text-slate-600">
+                  Invoice No: <span className="text-slate-900 font-bold">INV-{selectedPatient.health_record_number || "SCC-XXXX/XX"}</span>
+                </p>
+                <p className="text-slate-600">
+                  Date: <span className="text-slate-900 font-semibold">{new Date().toLocaleDateString('en-KE')}</span>
+                </p>
+              </div>
 
-            {phoneNumber && (
-              <>
-                <p className="text-slate-600">Phone Account:</p>
-                <p className="font-medium text-slate-900">{phoneNumber}</p>
-              </>
-            )}
+              <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 my-6 text-xs print:bg-transparent print:border-none print:p-0">
+                <h4 className="font-bold text-[10px] text-slate-400 uppercase tracking-wider mb-2">Patient Details</h4>
+                <div className="grid grid-cols-2 gap-y-1.5 gap-x-4">
+                  <p className="text-slate-600">Patient Full Name:</p>
+                  <p className="font-bold text-slate-900">{selectedPatient.name}</p>
+
+                  <p className="text-slate-600">Health Record Number (HRN):</p>
+                  <p className="font-mono font-bold text-slate-900">{selectedPatient.health_record_number}</p>
+
+                  <p className="text-slate-600">Mode of Payment:</p>
+                  <p className="font-bold text-slate-900 uppercase">{selectedPatient.scheme || 'CASH'}</p>
+                </div>
+              </div>
+
+              <div className="border border-slate-200 rounded-lg overflow-hidden my-6 print:border-slate-300">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider print:bg-transparent print:border-b-2 print:border-slate-800">
+                      <th className="py-3 px-4 w-1/3">Station</th>
+                      <th className="py-3 px-4 w-1/2">Service/Medication</th>
+                      <th className="py-3 px-4 text-right w-1/4">Cost (KES)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700 print:divide-slate-200">
+                    {cart.map((item) => (
+                      <tr key={item.id}>
+                        <td className="py-3 px-4 font-semibold text-slate-500 uppercase tracking-wide text-[10px]">
+                          {item.station || item.department || 'CLINIC ENTRY'}
+                        </td>
+                        <td className="py-3 px-4 text-slate-900 font-medium">
+                          {item.service || item.item_name || item.medication_name}
+                          {item.quantity && <span className="text-slate-400 ml-1">x{item.quantity}</span>}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
+                          {(parseFloat(item.price || item.cost || 0) * (parseInt(item.quantity || 1, 10))).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 flex justify-end">
+                <div className="w-72 bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-xs print:bg-transparent print:border-none print:p-0">
+                  <div className="flex justify-between text-slate-500">
+                    <span>Gross charges subtotal</span>
+                    <span className="font-mono font-semibold">KES {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="h-px bg-slate-200 my-1 print:bg-slate-400"></div>
+                  <div className="flex justify-between items-baseline pt-1">
+                    <span className="text-sm font-bold text-slate-900">Total Balance Due</span>
+                    <span className="text-xl font-bold font-mono text-slate-900 border-b-4 border-double border-slate-900 pb-0.5">
+                      <span className="text-xs font-normal mr-0.5">KES</span>
+                      {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-16 pt-6 border-t border-slate-200 text-center text-[10px] text-slate-400 font-medium space-y-1 print:mt-24">
+                <p className="text-slate-600 font-semibold">Thank you for choosing Salama Cancer Centre.</p>
+                <p className="font-mono text-[9px]">Report Generated Electronically - Salama HMS Billing Platform</p>
+              </div>
+            </div>
           </div>
         </div>
-
-        {/* Invoice Lines Table Matrix */}
-        <div className="border border-slate-200 rounded-lg overflow-hidden my-6 print:border-slate-300">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider print:bg-transparent print:border-b-2 print:border-slate-800">
-                <th className="py-3 px-4 w-1/3">Originating Department / Station</th>
-                <th className="py-3 px-4 w-1/2">Service / Procedure Rendered</th>
-                <th className="py-3 px-4 text-right w-1/4">Cost (KES)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700 print:divide-slate-200">
-              {cart.map((item) => (
-                <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
-                  <td className="py-3 px-4 font-semibold text-slate-500 uppercase tracking-wide text-[10px]">
-                    {item.station}
-                  </td>
-                  <td className="py-3 px-4 text-slate-900 font-medium">{item.service}</td>
-                  <td className="py-3 px-4 text-right font-mono font-bold text-slate-900">
-                    {(parseFloat(item.price) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Financial Summary Aggregations Block */}
-        <div className="mt-4 flex justify-end">
-          <div className="w-72 bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2 text-xs print:bg-transparent print:border-none print:p-0">
-            <div className="flex justify-between text-slate-500">
-              <span>Gross Charges Subtotal</span>
-              <span className="font-mono font-semibold">KES {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-            </div>
-            <div className="h-px bg-slate-200 my-1 print:bg-slate-400"></div>
-            <div className="flex justify-between items-baseline pt-1">
-              <span className="text-sm font-bold text-slate-900">Total Balance Due</span>
-              <span className="text-xl font-bold font-mono text-slate-900 border-b-4 border-double border-slate-900 pb-0.5">
-                <span className="text-xs font-normal mr-0.5">KES</span>
-                {total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer Declarations */}
-        <div className="mt-16 pt-6 border-t border-slate-200 text-center text-[10px] text-slate-400 font-medium space-y-1 print:mt-24">
-          <p className="text-slate-600 font-semibold">Thank you for choosing Salama Cancer Centre.</p>
-          <p className="font-mono text-[9px]">Report Generated Electronically - Salama HMS Billing Platform</p>
-        </div>
-
-      </div>
-    </div>
-  </div>
-)}
+      )}
 
     </div>
   );

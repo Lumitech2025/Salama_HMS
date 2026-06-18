@@ -1,25 +1,25 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
+    Home,
     LayoutDashboard, 
     FileSpreadsheet, 
     FileSearch, 
     WalletCards,
     Building2,
-    History,
-    Scale,
     LogOut
 } from 'lucide-react';
 
 const BillingOfficerSidebar = ({ activeTab, setActiveTab }) => {
     const navigate = useNavigate();
 
-    // Expanded menu items to encompass full hospital revenue cycle workflows
+    // Expanded menu items mapped with clean tracking keys for your modules
     const menuItems = [
+        { id: 'home', label: 'Home', icon: <Home size={18}/> },
         { id: 'overview', label: 'Registration', icon: <LayoutDashboard size={18} /> },
+        { id: 'billing', label: 'Billing & Payments', icon: <WalletCards size={20} /> },
         { id: 'clearance', label: 'Insurance Verification', icon: <FileSpreadsheet size={18} /> },
         { id: 'insurance-providers', label: 'Insurance Providers', icon: <Building2 size={18} /> },
-        { id: 'billing', label: 'Billing & Payments', icon: <WalletCards size={20} /> },
         { id: 'service-catalogue', label: 'Service Catalogue', icon: <FileSearch size={18} /> },
     ];
 
@@ -46,6 +46,7 @@ const BillingOfficerSidebar = ({ activeTab, setActiveTab }) => {
                 {menuItems.map((item) => (
                     <button
                         key={item.id}
+                        type="button"
                         onClick={() => setActiveTab?.(item.id)}
                         className={`w-full flex items-center justify-start px-6 py-4 rounded-2xl transition-all duration-300 ${
                             activeTab === item.id 
@@ -67,6 +68,7 @@ const BillingOfficerSidebar = ({ activeTab, setActiveTab }) => {
                     <p className="text-[9px] text-slate-600 font-mono">Version 1.0.0 (Salama Finance)</p>
                 </div>
                 <button 
+                    type="button"
                     onClick={handleLogout}
                     className="flex items-center justify-start space-x-4 px-6 py-4 text-rose-500 hover:bg-rose-500/5 rounded-2xl transition-all w-full"
                 >
