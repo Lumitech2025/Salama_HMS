@@ -4,20 +4,22 @@ import {
     LayoutDashboard, 
     FileSpreadsheet, 
     FileSearch, 
+    WalletCards,
     Building2,
     History,
     Scale,
     LogOut
 } from 'lucide-react';
 
-const BillingOfficerSidebar = ({ activeTab = 'overview', setActiveTab }) => {
+const BillingOfficerSidebar = ({ activeTab, setActiveTab }) => {
     const navigate = useNavigate();
 
     // Expanded menu items to encompass full hospital revenue cycle workflows
     const menuItems = [
-        { id: 'overview', label: 'Dashboard', icon: <LayoutDashboard size={18} /> },
+        { id: 'overview', label: 'Registration', icon: <LayoutDashboard size={18} /> },
         { id: 'clearance', label: 'Insurance Verification', icon: <FileSpreadsheet size={18} /> },
         { id: 'insurance-providers', label: 'Insurance Providers', icon: <Building2 size={18} /> },
+        { id: 'billing', label: 'Billing & Payments', icon: <WalletCards size={20} /> },
         { id: 'service-catalogue', label: 'Service Catalogue', icon: <FileSearch size={18} /> },
     ];
 

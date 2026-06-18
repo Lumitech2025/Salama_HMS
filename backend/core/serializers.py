@@ -332,6 +332,9 @@ class PrescriptionItemSerializer(serializers.ModelSerializer):
 class PrescriptionSerializer(serializers.ModelSerializer):
     items = PrescriptionItemSerializer(many=True, read_only=True)
 
+    patient = serializers.PrimaryKeyRelatedField(read_only=True)
+    visit = serializers.PrimaryKeyRelatedField(read_only=True)
+
     # Patient Profile / Demographics mappings
     patient_name = serializers.CharField(source='patient.name', read_only=True)
     patient_gender = serializers.CharField(source='patient.gender', read_only=True)

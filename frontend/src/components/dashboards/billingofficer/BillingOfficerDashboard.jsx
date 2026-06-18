@@ -4,11 +4,13 @@ import BillingOfficerSidebar from './BillingOfficerSidebar';
 import FinancialClearance from './modules/FinancialClearance'; 
 import InsuranceProviders from './modules/InsuranceProviders';
 import ServiceCatalogue from './modules/ServiceCatalogue';
+import PaymentPortal from '../receptionist/modules/PaymentPortal';
+
 
 import { 
   Bell, UserCircle, Save, Loader2, UserPlus, AlertCircle, 
   CheckCircle2, Users, Calendar, RefreshCw, AlertTriangle, 
-  FileText, ArrowRight, Activity, Layers
+  FileText, ArrowRight, Activity, Layers, Contact2
 } from 'lucide-react';
 
 const BillingOfficerDashboard = () => {
@@ -30,19 +32,24 @@ const BillingOfficerDashboard = () => {
       returning_today: 0
   });
 
-  // 🚀 ALIGNED: Keys updated to snake_case to match Django Serializer & Registration.jsx expectations
+  // 🚀 ALIGNED: Keys updated to match Django Serializer & Registration.jsx specifications
   const initialFormState = {
     first_name: '', 
+    middle_name: '',
     last_name: '', 
     id_number: '', 
     age: '', 
     gender: 'M', 
     phone: '', 
+    email: '',
     payment_mode: 'CASH',          
-    insurance_company_id: '',         
+    insurance_company_id: '',          
     insurance_number: '',
     is_urgent: false,
-    is_returning: false
+    is_returning: false,
+    next_of_kin_name: '',
+    next_of_kin_relationship: 'SPOUSE',
+    next_of_kin_phone: ''
   };
 
   const [formData, setFormData] = useState(initialFormState);
@@ -99,9 +106,11 @@ const BillingOfficerDashboard = () => {
     // 🚀 ALIGNED: Payload parameters mapping match Registration.jsx structures precisely
     const payload = {
       first_name: formData.first_name.trim(),
+      middle_name: formData.middle_name.trim(),
       last_name: formData.last_name.trim(),
       id_number: formData.id_number.trim(),
       phone: formData.phone.trim(),
+      email: formData.email.trim(),
       age: parseInt(formData.age, 10) || 0,
       gender: formData.gender,
       payment_mode: formData.payment_mode,
@@ -109,6 +118,9 @@ const BillingOfficerDashboard = () => {
       insurance_number: formData.payment_mode === 'INSURANCE' ? formData.insurance_number.trim() : '',
       is_urgent: formData.is_urgent,
       is_returning: formData.is_returning,
+      next_of_kin_name: formData.next_of_kin_name.trim(),
+      next_of_kin_relationship: formData.next_of_kin_relationship,
+      next_of_kin_phone: formData.next_of_kin_phone.trim(),
     };
 
     try {
@@ -156,6 +168,7 @@ const BillingOfficerDashboard = () => {
       
       case 'claims': return <ClaimsTracker />;
       case 'reconciliation': return <PharmacyReconciliation />;
+      case 'billing': return <PaymentPortal />;
       case 'insurance-providers': return <InsuranceProviders />;
       case 'service-catalogue': return <ServiceCatalogue />;
       
@@ -208,25 +221,37 @@ const BillingOfficerDashboard = () => {
           {/* Registration Form Controls Grid */}
           <form id="dashboard-registration-form" onSubmit={handleSubmit} className="space-y-6">
             <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-8">
+              
+              {/* Row 1: Identification & Names */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-8">
                 <FormInput label="National ID / Passport" name="id_number" value={formData.id_number} onChange={handleChange} required />
                 <FormInput label="First Name" name="first_name" value={formData.first_name} onChange={handleChange} required />
+                <FormInput label="Middle Name" name="middle_name" value={formData.middle_name} onChange={handleChange} />
                 <FormInput label="Last Name" name="last_name" value={formData.last_name} onChange={handleChange} required />
-                <FormInput label="Phone Number" name="phone" value={formData.phone} onChange={handleChange} required />
-                <FormInput label="Age" type="number" name="age" value={formData.age} onChange={handleChange} required />
+              </div>
 
+              {/* Row 2: Demographics & Contacts */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-8">
+                <FormInput label="Age" type="number" name="age" value={formData.age} onChange={handleChange} required />
+                
                 <div className="space-y-2">
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Gender</label>
-                  <select name="gender" value={formData.gender} onChange={handleChange} className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold outline-none appearance-none cursor-pointer">
+                  <select name="gender" value={formData.gender} onChange={handleChange} className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold outline-none appearance-none cursor-pointer text-slate-800">
                     <option value="M">Male</option>
                     <option value="F">Female</option>
                     <option value="O">Other</option>
                   </select>
                 </div>
 
+                <FormInput label="Phone Number" name="phone" value={formData.phone} onChange={handleChange} required />
+                <FormInput label="Email Address" type="email" name="email" value={formData.email} onChange={handleChange} />
+              </div>
+
+              {/* Row 3: Financial Framework & Operations */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-8">
                 <div className="space-y-2">
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Mode of Payment</label>
-                  <select name="payment_mode" value={formData.payment_mode} onChange={handleChange} className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold outline-none appearance-none cursor-pointer">
+                  <select name="payment_mode" value={formData.payment_mode} onChange={handleChange} className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold outline-none appearance-none cursor-pointer text-slate-800">
                     <option value="CASH">Cash Payment</option>
                     <option value="INSURANCE">Insurance Cover</option>
                   </select>
@@ -243,7 +268,7 @@ const BillingOfficerDashboard = () => {
                         value={formData.insurance_company_id} 
                         onChange={handleChange} 
                         required
-                        className="w-full bg-slate-50 border-2 border-teal-100 rounded-2xl p-4 text-sm font-bold outline-none cursor-pointer"
+                        className="w-full bg-slate-50 border-2 border-teal-100 rounded-2xl p-4 text-sm font-bold outline-none cursor-pointer text-slate-800"
                       >
                         <option value="">-- Choose Provider --</option>
                         {insuranceCompanies.map(company => (
@@ -265,6 +290,32 @@ const BillingOfficerDashboard = () => {
                 </div>
               </div>
 
+              {/* Row 4: Emergency Contacts & Next of Kin Integration */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-8 pt-4 border-t border-slate-50">
+                <FormInput label="Next of Kin Name" name="next_of_kin_name" value={formData.next_of_kin_name} onChange={handleChange} />
+                
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2 flex items-center gap-1.5">
+                    <Contact2 size={11} className="text-slate-400" /> Relationship
+                  </label>
+                  <select 
+                    name="next_of_kin_relationship" 
+                    value={formData.next_of_kin_relationship} 
+                    onChange={handleChange} 
+                    className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm font-bold outline-none appearance-none cursor-pointer text-slate-800"
+                  >
+                    <option value="SPOUSE">Spouse</option>
+                    <option value="CHILD">Child</option>
+                    <option value="PARENT">Parent</option>
+                    <option value="SIBLING">Sibling</option>
+                    <option value="GUARDIAN">Guardian</option>
+                  </select>
+                </div>
+
+                <FormInput label="Next of Kin Phone" name="next_of_kin_phone" value={formData.next_of_kin_phone} onChange={handleChange} />
+              </div>
+
+              {/* Patient Intake Priority Indicators */}
               <div className="flex items-center gap-8 pt-4 border-t border-slate-50">
                 <label className="flex items-center gap-3 cursor-pointer group select-none">
                   <input type="checkbox" name="is_returning" checked={formData.is_returning} onChange={handleChange} className="w-5 h-5 rounded-lg border-slate-200 text-teal-600 focus:ring-teal-500 accent-teal-600" />
@@ -278,7 +329,7 @@ const BillingOfficerDashboard = () => {
             </div>
           </form>
 
-          {/* 🚀 HIGHLIGHTED: Queue Worklist Table with precise background chip status accents */}
+          {/* Queue Worklist Table with precise background chip status accents */}
           <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
               <div className="flex items-center gap-2 text-slate-900 font-black uppercase text-xs tracking-wider italic">
@@ -333,7 +384,6 @@ const BillingOfficerDashboard = () => {
                             </span>
                           </td>
                           <td className="px-8 py-5">
-                            {/* 🚀 HIGHLIGHTED: Payment mode styles clear amber vs green-purple badges */}
                             <span className={`px-2.5 py-1 rounded-md text-[8px] font-black uppercase tracking-wider ${r.payment_mode === 'CASH' ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-purple-100 text-purple-700 border border-purple-200'}`}>
                               {r.payment_mode === 'CASH' ? 'CASH' : (r.insurance_company_name || 'INSURANCE')}
                             </span>
@@ -388,6 +438,7 @@ const BillingOfficerDashboard = () => {
           </div>
         </div>
 
+        {/* Content Render Outlet */}
         {renderContent()}
       </main>
     </div>
