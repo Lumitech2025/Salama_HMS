@@ -114,9 +114,9 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
       setErrorMessage('');
 
       // Aggregates matching dynamic bills, pharmacy prescription entries, and structural line charges
-      if (routedPatient.active_bill && Array.isArray(routedPatient.active_bill.items)) {
-        setCart(routedPatient.active_bill.items);
-        setInvoiceId(routedPatient.active_bill.id);
+      if (routedPatient.active_invoice && Array.isArray(routedPatient.active_invoice.items)) {
+        setCart(routedPatient.active_invoice.items);
+        setInvoiceId(routedPatient.active_invoice.id);
       } else if (routedPatient.items && Array.isArray(routedPatient.items)) {
         setCart(routedPatient.items);
         setInvoiceId(routedPatient.id || routedPatient.invoice_id);
@@ -210,9 +210,9 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
   // Reset/Initialize counter for this patient selection
   setInvoiceCounter(1); 
 
-  // Logic to process the cart and invoice ID
-  if (patientRecord.active_bill && Array.isArray(patientRecord.active_bill.items)) {
-    const dynamicallyPricedCart = patientRecord.active_bill.items.map(item => {
+  // 🌟 FIXED: Changed from patientRecord.active_bill to patientRecord.active_invoice
+  if (patientRecord.active_invoice && Array.isArray(patientRecord.active_invoice.items)) {
+    const dynamicallyPricedCart = patientRecord.active_invoice.items.map(item => {
       const fallbackPrice = parseFloat(item.price || 0);
       const dynamicMasterPrice = masterCatalog[item.sku || item.sku_code];
       
@@ -222,7 +222,8 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
       };
     });
     setCart(dynamicallyPricedCart);
-    setInvoiceId(patientRecord.active_bill.id);
+    // 🌟 FIXED: Map to the new serialized active_invoice ID
+    setInvoiceId(patientRecord.active_invoice.id);
   } else {
     setCart([]);
     setInvoiceId(null);

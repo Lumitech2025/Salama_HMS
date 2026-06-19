@@ -2402,61 +2402,117 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     queryset = Expense.objects.all()
     serializer_class = ExpenseSerializer
     
-    # Enable filtering capabilities matching frontend UI features
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    
-    # Exact category filtering for your left sidebar selection list
     filterset_fields = ['category', 'behavior']
-    
-    # Dynamic search matching your frontend search bar field
     search_fields = ['description', 'reference', 'id']
-    
-    # Default list ordering layout sorting by most recent entries first
     ordering_fields = ['date', 'amount', 'created_at']
     ordering = ['-date', '-created_at']
 
     def perform_create(self, serializer):
-        # Additional custom hooks can be appended here if you want to link the 
-        # voucher creator account instance directly (e.g., recorded_by=self.request.user)
         serializer.save()
 
+    # 🌟 NEW: Custom action route allowing rapid partial offsets/payments against an expense balance voucher
+    @action(detail=True, methods=['post'], url_path='offset-balance')
+    def offset_balance(self, request, pk=None):
+        expense = self.get_object()
+        offset_amount_str = request.data.get('amount_to_pay')
+
+        if not offset_amount_str:
+            return Response(
+                {"error": "Please define an explicit 'amount_to_pay' value parameter to execute offset transaction."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            with transaction.atomic():
+                offset_amount = Decimal(str(offset_amount_str))
+                
+                # Enforce logical verification checks (Assuming your model tracks structural outstanding balances)
+                # If your model stores dynamic payment balances, adjust these attributes accordingly:
+                if hasattr(expense, 'amount_paid'):
+                    expense.amount_paid += offset_amount
+                    if hasattr(expense, 'remaining_balance'):
+                        expense.remaining_balance = max(Decimal('0.00'), expense.amount - expense.amount_paid)
+                else:
+                    # Fallback approach: directly reduce the master liability volume record if keeping items lightweight
+                    expense.amount = max(Decimal('0.00'), expense.amount - offset_amount)
+                
+                expense.save()
+                
+                # Return the updated object state back to the frontend
+                serializer = self.get_serializer(expense)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to execute ledger offset pipeline safely: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 class FinancialRevenueAnalyticsView(APIView):
-    
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        # 1. Target the precise database status string 'PAID' across line items
-        paid_items_query = PatientBillableItem.objects.filter(
-            invoice__status='PAID'
-        )
-
-        # 2. Compute grand total revenue by aggregating multiplying values
-        total_revenue = paid_items_query.annotate(
+        current_year = timezone.now().year
+        
+        # ----------------------------------------------------
+        # 1. AGGREGATE PATIENT POINT-OF-SALE (POS) CASH REVENUE
+        # ----------------------------------------------------
+        paid_items_query = PatientBillableItem.objects.filter(invoice__status='PAID')
+        
+        total_pos_revenue = paid_items_query.annotate(
             item_total=F('unit_price') * F('quantity')
         ).aggregate(grand_total=Sum('item_total'))['grand_total'] or 0.00
 
-        # 3. Compute Monthly Revenue Breakdowns [Jan - Dec] for the current financial year
-        current_year = timezone.now().year
-        monthly_revenue_array = [0.00] * 12
-
-        # Filter lines matching the current active tracking year
-        yearly_items = paid_items_query.filter(
+        # Yearly filtering for POS tracking
+        yearly_pos_items = paid_items_query.filter(
             incurred_at__year=current_year
         ).annotate(
             item_total=F('unit_price') * F('quantity')
         )
 
-        for item in yearly_items:
-            # incurred_at is a datetime object, extract month (1-indexed)
+        # ----------------------------------------------------
+        # 2. 🌟 NEW: AGGREGATE CORPORATE INSURANCE REMITTANCES
+        # ----------------------------------------------------
+        total_insurance_revenue = RemittanceBatch.objects.aggregate(
+            grand_total=Sum('total_amount_received')
+        )['grand_total'] or 0.00
+
+        # Yearly filtering for Remittance tracking
+        yearly_remittances = RemittanceBatch.objects.filter(
+            date_received__year=current_year
+        )
+
+        # ----------------------------------------------------
+        # 3. COMPUTE COMBINED MONTHLY BASKETS [Jan - Dec]
+        # ----------------------------------------------------
+        monthly_pos_array = [0.00] * 12
+        monthly_insurance_array = [0.00] * 12
+        combined_monthly_revenue = [0.00] * 12
+
+        # Populate patient point-of-sale cash month array values
+        for item in yearly_pos_items:
             month_index = item.incurred_at.month - 1
             if 0 <= month_index < 12:
-                monthly_revenue_array[month_index] += float(item.item_total)
+                monthly_pos_array[month_index] += float(item.item_total)
 
-        # 4. Compute Month-over-Month Growth Rates based on your array values
+        # Populate insurance remittance collection month array values
+        for batch in yearly_remittances:
+            month_index = batch.date_received.month - 1
+            if 0 <= month_index < 12:
+                monthly_insurance_array[month_index] += float(batch.total_amount_received)
+
+        # Merge arrays to calculate true total monthly revenue vectors
+        for i in range(12):
+            combined_monthly_revenue[i] = monthly_pos_array[i] + monthly_insurance_array[i]
+
+        # ----------------------------------------------------
+        # 4. COMPUTE MONTH-OVER-MONTH COMBINED GROWTH RATES
+        # ----------------------------------------------------
         monthly_growth_array = [0.00] * 12
         for i in range(1, 12):
-            prev_month_rev = monthly_revenue_array[i - 1]
-            current_month_rev = monthly_revenue_array[i]
+            prev_month_rev = combined_monthly_revenue[i - 1]
+            current_month_rev = combined_monthly_revenue[i]
             
             if prev_month_rev > 0:
                 growth_rate = ((current_month_rev - prev_month_rev) / prev_month_rev) * 100
@@ -2464,8 +2520,13 @@ class FinancialRevenueAnalyticsView(APIView):
             else:
                 monthly_growth_array[i] = 0.00 if current_month_rev == 0 else 100.00
 
+        # Combined true gross financial yield
+        true_gross_revenue = float(total_pos_revenue) + float(total_insurance_revenue)
+
         return Response({
-            "total_revenue": float(total_revenue),
-            "monthly_revenue": [float(val) for val in monthly_revenue_array],
+            "total_revenue": true_gross_revenue,
+            "pos_cash_collections": float(total_pos_revenue),
+            "insurance_remittance_collections": float(total_insurance_revenue),
+            "monthly_revenue": combined_monthly_revenue,
             "monthly_growth": monthly_growth_array
         }, status=200)

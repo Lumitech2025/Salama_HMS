@@ -32,7 +32,7 @@ const EXPENSE_CATEGORIES = [
 
 const API_BASE_URL = '/api/expenses/';
 
-export default function ExpensesManagement() {
+export default function ExpensesManagement({ onExpenseModified }) {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('ALL');
@@ -118,7 +118,14 @@ export default function ExpensesManagement() {
         description: '', category: 'SALARIES', behavior: 'Fixed', 
         date: new Date().toISOString().split('T')[0], amount: '', amount_paid: '0', reference: '', document: null, documentName: '' 
       });
-      fetchExpenses();
+      
+      // Refresh the local expense table data
+      await fetchExpenses();
+
+      // 🌟 AUTOMATIC REFLECTION: Tell the parent Finance Dashboard to update KPI blocks immediately
+      if (onExpenseModified) {
+        onExpenseModified();
+      }
     } catch (error) {
       alert(error.message);
     }
@@ -148,7 +155,14 @@ export default function ExpensesManagement() {
       if (!response.ok) throw new Error('Voucher modification failed.');
       
       setIsEditModalOpen(false);
-      fetchExpenses();
+      
+      // Refresh the local expense table data
+      await fetchExpenses();
+
+      // 🌟 AUTOMATIC REFLECTION: Update the parent dashboard's master ledger metrics instantly
+      if (onExpenseModified) {
+        onExpenseModified();
+      }
     } catch (error) {
       alert(error.message);
     }
