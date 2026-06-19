@@ -24,6 +24,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
   const [cart, setCart] = useState([]);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [invoiceId, setInvoiceId] = useState(null);
+  const [invoiceCounter, setInvoiceCounter] = useState(1);
   
   const [insuranceData, setInsuranceData] = useState({ company: '', policyNumber: '', preAuthCode: '' });
   const [verificationStatus, setVerificationStatus] = useState('unverified');
@@ -34,6 +35,16 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
   const [errorMessage, setErrorMessage] = useState('');
   const [countdown, setCountdown] = useState(60);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+
+  useEffect(() => {
+    // Clear any active background check intervals when the clerk leaves this screen
+    return () => {
+      if (window.mpesaIntervalId) {
+        clearInterval(window.mpesaIntervalId);
+        console.log("Background M-Pesa tracking loop dismantled safely.");
+      }
+    };
+  }, []);
 
   // Helper to retrieve the CSRF token from Django cookies
   const getCookie = (name) => {
@@ -55,6 +66,11 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
     const token = localStorage.getItem('access_token');
     return token ? { 'Authorization': `Bearer ${token}` } : {};
   };
+
+  const getInvoiceNumber = () => {
+  const pad = (num) => String(num).padStart(3, '0');
+  return `INV${pad(invoiceCounter)}-${selectedPatient?.health_record_number || "SCC-XXXX/XX"}`;
+};
 
   // M-Pesa STK Handset Countdown Monitor Logic
   useEffect(() => {
@@ -182,32 +198,36 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
   }, [searchPatient]);
 
   const handleSelectPatient = (patientRecord) => {
-    setSelectedPatient(patientRecord);
-    setPhoneNumber(patientRecord.phone || '');
-    setSearchPatient('');
-    setPatientQueryResults([]);
-    setHasSearched(false);
-    setVerificationStatus('unverified'); 
-    setPaymentStatus('idle');
-    setErrorMessage('');
-    
-    if (patientRecord.active_bill && Array.isArray(patientRecord.active_bill.items)) {
-      const dynamicallyPricedCart = patientRecord.active_bill.items.map(item => {
-        const fallbackPrice = parseFloat(item.price || 0);
-        const dynamicMasterPrice = masterCatalog[item.sku || item.sku_code];
-        
-        return {
-          ...item,
-          price: dynamicMasterPrice !== undefined ? dynamicMasterPrice : fallbackPrice
-        };
-      });
-      setCart(dynamicallyPricedCart);
-      setInvoiceId(patientRecord.active_bill.id);
-    } else {
-      setCart([]);
-      setInvoiceId(null);
-    }
-  };
+  setSelectedPatient(patientRecord);
+  setPhoneNumber(patientRecord.phone || '');
+  setSearchPatient('');
+  setPatientQueryResults([]);
+  setHasSearched(false);
+  setVerificationStatus('unverified'); 
+  setPaymentStatus('idle');
+  setErrorMessage('');
+
+  // Reset/Initialize counter for this patient selection
+  setInvoiceCounter(1); 
+
+  // Logic to process the cart and invoice ID
+  if (patientRecord.active_bill && Array.isArray(patientRecord.active_bill.items)) {
+    const dynamicallyPricedCart = patientRecord.active_bill.items.map(item => {
+      const fallbackPrice = parseFloat(item.price || 0);
+      const dynamicMasterPrice = masterCatalog[item.sku || item.sku_code];
+      
+      return {
+        ...item,
+        price: dynamicMasterPrice !== undefined ? dynamicMasterPrice : fallbackPrice
+      };
+    });
+    setCart(dynamicallyPricedCart);
+    setInvoiceId(patientRecord.active_bill.id);
+  } else {
+    setCart([]);
+    setInvoiceId(null);
+  }
+};
 
   const total = useMemo(() => {
     return cart.reduce((sum, item) => {
@@ -266,7 +286,8 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
       setPaymentStatus('prompting'); 
       setCountdown(60);             
 
-      const response = await fetch('/api/mpesa/trigger-push/', {
+      // 1. FIXED: Pointed to your actual backend view route trigger path
+      const response = await fetch('/api/mpesa-trigger/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -286,9 +307,14 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
         throw new Error(data.error || "Failed to initiate M-Pesa payment.");
       }
 
+      // 2. FIXED: Turned off processing state here so the overlay doesn't block the screen, 
+      // allowing the prompting/countdown UI states to display correctly
+      setIsProcessing(false);
+
       const pollInterval = setInterval(async () => {
         try {
-          const statusResponse = await fetch(`/api/mpesa/check-status/${invoiceId}/`, {
+          // 3. FIXED: Pointed to your exact lightweight backend status tracking path
+          const statusResponse = await fetch(`/api/check-invoice-status/${invoiceId}/`, {
             headers: getAuthHeaders()
           });
           const statusData = await statusResponse.json();
@@ -296,7 +322,16 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
           if (statusData.status === 'PAID') {
             clearInterval(pollInterval);
             setPaymentStatus('success');
-          } else if (statusData.status === 'UNPAID') {
+            
+            // Immediately inform the user and attach receipt data
+            alert(`Payment Confirmed Successfully! M-Pesa Receipt: ${statusData.receipt_number || 'N/A'}`);
+            
+            // Advance the Queue Tracker to clear them from Billing instantly
+            if (typeof onClearRoute === 'function') {
+              onClearRoute();
+            }
+          } 
+          else if (statusData.status === 'FAILED') {
             clearInterval(pollInterval);
             setPaymentStatus('failed');
             alert("Transaction was cancelled or rejected on the handset.");
@@ -304,13 +339,14 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
         } catch (pollError) {
           console.error("Error during background status check:", pollError);
         }
-      }, 3000);
+      }, 2500); // Polls every 2.5 seconds
 
+      // 4. Safety backup window loop clearing timeout
       setTimeout(() => {
         clearInterval(pollInterval);
         setPaymentStatus((currentStatus) => {
           if (currentStatus === 'prompting') {
-            alert("M-Pesa payment validation timed out. Please check your phone or try again.");
+            alert("M-Pesa payment validation timed out. Please check your phone network or try again.");
             return 'failed';
           }
           return currentStatus;
@@ -321,7 +357,6 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
       console.error("Payment initiation failed:", error);
       alert(error.message || "An unexpected error occurred.");
       setPaymentStatus('idle'); 
-    } finally {
       setIsProcessing(false);
     }
   };
@@ -589,7 +624,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
                   </div>
                   <div>
                     <h4 className="text-xs font-bold text-white">Payment Confirmed Successfully</h4>
-                    <span className="text-[10px] font-mono text-slate-400 block mt-0.5">METRIC LOGGED & SYNCHRONIZED VIA {paymentMethod.toUpperCase()}</span>
+                    
                   </div>
                   <button type="button" onClick={handleClearTerminal} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white py-2 rounded-lg text-xs font-bold transition-all">Clear Terminal</button>
                 </div>
@@ -845,7 +880,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
 
               <div className="flex justify-between items-center my-4 text-xs font-medium border-b border-slate-100 pb-3">
                 <p className="font-mono text-slate-600">
-                  Invoice No: <span className="text-slate-900 font-bold">INV-{selectedPatient.health_record_number || "SCC-XXXX/XX"}</span>
+                  Invoice No: <span className="text-slate-900 font-bold">{getInvoiceNumber()}</span>
                 </p>
                 <p className="text-slate-600">
                   Date: <span className="text-slate-900 font-semibold">{new Date().toLocaleDateString('en-KE')}</span>

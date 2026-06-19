@@ -1,8 +1,11 @@
 # E:\Salama_HMS\backend\core\mpesa.py
 import requests
 import base64
+import logging
 from datetime import datetime
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 class MpesaClient:
     def __init__(self):
@@ -26,7 +29,7 @@ class MpesaClient:
                 return response.json().get("access_token")
             raise Exception(f"OAuth token fetch failed: {response.text}")
         except Exception as e:
-            print(f"M-Pesa Auth Error: {str(e)}")
+            logger.error(f"M-Pesa Auth Error: {str(e)}")
             return None
 
     def format_phone_number(self, phone):
@@ -56,12 +59,16 @@ class MpesaClient:
             "Content-Type": "application/json"
         }
 
+        # FIXED: Round the amount to an integer safely without losing values 
+        # or passing broken decimal point strings to the API gateway.
+        final_amount = int(round(float(amount)))
+
         payload = {
             "BusinessShortCode": self.shortcode,
             "Password": password,
             "Timestamp": timestamp,
             "TransactionType": "CustomerPayBillOnline",
-            "Amount": int(float(amount)),
+            "Amount": final_amount,
             "PartyA": formatted_phone,
             "PartyB": self.shortcode,
             "PhoneNumber": formatted_phone,
@@ -81,6 +88,9 @@ class MpesaClient:
                     "status": "success", 
                     "checkout_request_id": response_data.get("CheckoutRequestID")
                 }
-            return {"status": "failed", "message": response_data.get("CustomerMessage", "STK push rejected.")}
+            
+            logger.warning(f"Mpesa STK Gateway Refusal: {response_data}")
+            return {"status": "failed", "message": response_data.get("CustomerMessage", "STK push rejected by operator.")}
         except Exception as e:
+            logger.error(f"Mpesa Client Request Exception: {str(e)}")
             return {"status": "failed", "message": str(e)}

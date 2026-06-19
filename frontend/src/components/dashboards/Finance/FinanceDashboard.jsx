@@ -27,8 +27,8 @@ const FinanceDashboard = ({ setActiveTab }) => {
   // CORE METRICS STATE (Fully Dynamic - Zero Hardcoding)
   const [totalAssets, setTotalAssets] = useState(0); 
   const [totalLiabilities, setTotalLiabilities] = useState(0); 
-  const [totalRevenue, setTotalRevenue] = useState(9400000); // Wire up to billing ledger when ready
-  const [totalExpenses, setTotalExpenses] = useState(0); 
+  const [totalRevenue, setTotalRevenue] = useState(0); 
+  const [totalExpenses, setTotalExpenses] = useState(0);
 
   // Liability Formula Component Breakdowns for Granular Audit Tracking
   const [unpaidExpensesPart, setUnpaidExpensesPart] = useState(0);
@@ -43,10 +43,9 @@ const FinanceDashboard = ({ setActiveTab }) => {
     ADMIN: 0
   });
 
-  // Data Arrays [Jan - Dec]
-  const [monthlyExpenses, setMonthlyExpenses] = useState(Array(12).fill(0));
-  const [monthlyRevenue, setMonthlyRevenue] = useState([1200000, 1500000, 1400000, 1800000, 2100000, 2400000, 0, 0, 0, 0, 0, 0]);
-  const [monthlyGrowth, setMonthlyGrowth] = useState([4.2, 25.0, -6.6, 28.5, 16.6, 14.2, 0, 0, 0, 0, 0, 0]);
+const [monthlyExpenses, setMonthlyExpenses] = useState(Array(12).fill(0));
+const [monthlyRevenue, setMonthlyRevenue] = useState(Array(12).fill(0));
+const [monthlyGrowth, setMonthlyGrowth] = useState(Array(12).fill(0));
 
   const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
@@ -91,6 +90,14 @@ const FinanceDashboard = ({ setActiveTab }) => {
 
           setTotalAssets(aggregateAssetsValue);
           setDeptAssets(trackingDeptTotals);
+        }
+
+        const revenueResponse = await fetch('/api/finance/revenue-analytics/', { headers });
+        if (revenueResponse.ok) {
+          const revData = await revenueResponse.json();
+          setTotalRevenue(revData.total_revenue);
+          setMonthlyRevenue(revData.monthly_revenue);
+          setMonthlyGrowth(revData.monthly_growth);
         }
 
         // 2. PARALLEL ECOSYSTEM DISPATCH FOR LIABILITIES & EXPENDITURES

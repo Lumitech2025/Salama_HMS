@@ -40,8 +40,8 @@ ALLOWED_HOSTS = [
     '127.0.0.1', 
     'detra-unjapanned-ashton.ngrok-free.dev',  
     'detra-unjapanned-ashton.ngrok-free.app',  
-    '.ngrok-free.dev', 
-    '.ngrok-free.app'
+    '.ngrok-free.app', 
+    '.ngrok-free.dev'
 ]
 
 
@@ -196,12 +196,6 @@ SIMPLE_JWT = {
     'SIGNING_KEY': SECRET_KEY,                      
     'AUTH_HEADER_TYPES': ('Bearer',),                
 }
-
-
-
-# ==========================================
-# SALAMA HMS NOTIFICATION GATEWAY CONFIG
-# ==========================================
 
 env_path = BASE_DIR / '.env'
 

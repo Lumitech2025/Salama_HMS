@@ -1684,6 +1684,7 @@ class InsuranceScheme(models.Model):
 class InsuranceClaim(models.Model):
     """
     Individual treatment claims submitted for payment.
+    Links directly to a unique PatientInvoice to capture line items.
     """
     CLAIM_STATUS = [
         ('DRAFT', 'Drafting'),
@@ -1694,15 +1695,36 @@ class InsuranceClaim(models.Model):
         ('PARTIALLY_REMITTED', 'Partially Settled / Shortfall'),
     ]
     
-    insurance_company = models.ForeignKey(InsuranceCompany, on_delete=models.CASCADE)
+    insurance_company = models.ForeignKey('InsuranceCompany', on_delete=models.CASCADE)
     patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='insurance_claims')
     
+    # 🌟 NEW LINK: Connects the billing ledger row directly to this claim.
+    # Can be Null/Blank if drafting a manual claim, but ideal for clinical pipeline auto-generation.
+    patient_invoice = models.OneToOneField(
+        'PatientInvoice',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='insurance_claim',
+        help_text="The source patient invoice invoice tracking session data."
+    )
+    
+    # 🌟 NEW LINK: Several individual claims map back up to a single outbound dispatch batch
+    dispatch_batch = models.ForeignKey(
+        'ClaimDispatchBatch',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='claims',
+        help_text="The batch envelope containing this claim when sent to the insurer."
+    )
+
     claim_number = models.CharField(max_length=100, unique=True)
     pre_auth_code = models.CharField(max_length=100, blank=True, null=True)
     pre_auth_approved_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     
     # Financial Breakdown
-    total_amount_billed = models.DecimalField(max_digits=12, decimal_places=2, default=0.00,help_text="Original invoice value sent to insurer")
+    total_amount_billed = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Original invoice value sent to insurer")
     amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Amount actually remitted")
     shortfall_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Deductions or disallowed amounts")
     
@@ -1710,12 +1732,21 @@ class InsuranceClaim(models.Model):
     status = models.CharField(max_length=20, choices=CLAIM_STATUS, default='DRAFT')
     
     rejection_reason = models.TextField(blank=True)
+    # Links claim processing transactions back to a bulk remittance collection file container
+    remittance_batch = models.ForeignKey(
+        'RemittanceBatch',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reconciled_claims'
+    )
     remittance_reference = models.CharField(max_length=100, blank=True, null=True, help_text="EFT transaction / Cheque code from batch upload")
     reconciled_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return f"CLAIM-{self.claim_number} ({self.patient.name})"
- 
+        return f"CLAIM-{self.claim_number} | Inv: {self.patient_invoice.invoice_number if self.patient_invoice else 'N/A'} ({self.patient.name})"
+
+
 class ClaimDispatchBatch(models.Model):
     """Tracks a bundle of multiple patients' claims compiled and mailed to an insurer."""
     batch_reference = models.CharField(max_length=50, unique=True)
@@ -1726,7 +1757,47 @@ class ClaimDispatchBatch(models.Model):
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
 
     def __str__(self):
-        return f"Dispatch Batch {self.batch_reference} -> {self.insurance_company.name}"
+        return f"Dispatch Batch {self.batch_reference} -> {self.insurance_company.name} (Value: {self.total_batch_value})"
+
+    def recalculate_batch_value(self):
+        """
+        Dynamically aggregates the billed sum of all claims packed into this dispatch run.
+        """
+        total = self.claims.aggregate(total=models.Sum('total_amount_billed'))['total'] or 0.00
+        self.total_batch_value = total
+        self.save(update_fields=['total_batch_value'])
+
+class ClaimAttachment(models.Model):
+    """
+    Holds individual file uploads (Pre-auths, Biopsies, Nursing Charts) 
+    required to back up an insurance claim submission.
+    """
+    DOCUMENT_TYPES = [
+        ('PRE_AUTH', 'Pre-Authorization Form'),
+        ('BIOPSY', 'Histopathology / Biopsy Report'),
+        ('IMAGING', 'Radiology Report (CT/PET/MRI)'),
+        ('TREATMENT_PLAN', 'Oncologist Treatment Protocol Summary'),
+        ('NURSING_CHART', 'Signed Chemotherapy Administration Log'),
+        ('INVOICE', 'Itemized Detailed Ledger Statement'),
+        ('OTHER', 'Supporting Lab/Clinical Document'),
+    ]
+
+    claim = models.ForeignKey(
+        InsuranceClaim, 
+        on_delete=models.CASCADE, 
+        related_name='attachments'
+    )
+    document_type = models.CharField(max_length=30, choices=DOCUMENT_TYPES)
+    file = models.FileField(
+        upload_to='claim_attachments/%Y/%m/%d/',
+        help_text="Upload scanned PDF or Image of the document"
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    description = models.CharField(max_length=255, blank=True, help_text="e.g. Biopsy report from Lancet Log")
+
+    def __str__(self):
+        return f"{self.get_document_type_display()} for {self.claim.claim_number}"
+    
 
 class RemittanceBatch(models.Model):
     """
@@ -1758,12 +1829,6 @@ class RemittanceBatch(models.Model):
 
     def __str__(self):
         return f"REMIT-{self.payment_reference} ({self.insurance_company.name})"
-    
-
-from django.db import models, transaction
-from django.utils import timezone
-
-
     
 
     
@@ -2199,22 +2264,24 @@ class PatientInvoice(models.Model):
 
         # Generate invoice tracker identifier sequences safely if completely empty
         if not self.invoice_number:
-            # 1. Fetch the absolute, unchangeable health record number from the patient profile
-            # e.g., 'SCC-015'
-            hr_number = self.patient.health_record_number if self.patient else "UNKNOWN"
+            # 1. Fetch the health record number safely from the patient's registration logs
+            hr_number = "UNKNOWN"
+            if self.patient:
+                # Get the most recent registration record for this patient
+                last_registration = self.patient.registrations.order_by('id').last()
+                if last_registration:
+                    hr_number = last_registration.health_record_number
             
             # 2. Get current trailing 2-digit financial tracking year, e.g., '26'
             current_year = timezone.now().strftime('%y')
             
             # 3. Dynamic Patient Scope Check: Count pre-existing invoices recorded for this specific patient profile
-            # We exclude self.id just in case a partial save was called elsewhere
-            prior_invoice_count = type(self).objects.filter(patient=self.patient).exclude(id=self.id).count()
-            
-            # 4. Increment the historical ledger row depth by 1 and pad with zeros (e.g., 0 -> '001', 1 -> '002')
-            sequence_string = str(prior_invoice_count + 1).zfill(3)
-            
-            # 5. Assemble exact requested format block: INV001-SCC-015/26
-            self.invoice_number = f"INV{sequence_string}-{hr_number}/{current_year}"
+            # Added +1 dynamically here so the sequence auto-increments cleanly per patient record
+            patient_invoice_count = PatientInvoice.objects.filter(patient=self.patient).exclude(id=self.id).count()
+            next_sequence = str(patient_invoice_count + 1).zfill(3)
+
+            # Assemble your new requested layout format: INV001-SCC-015/26
+            self.invoice_number = f"INV{next_sequence}-{hr_number}"
             
             # 6. Push explicit updates into database rows without entering recursive save loops
             type(self).objects.filter(id=self.id).update(invoice_number=self.invoice_number)

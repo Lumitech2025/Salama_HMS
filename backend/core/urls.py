@@ -22,7 +22,8 @@ from .views import (
     GoodsReceivedNoteViewSet, PurchaseInvoiceViewSet, PaymentVoucherViewSet,
     ICD10DiagnosisViewSet, PatientBillingSearchViewSet, PatientInvoiceViewSet,
     ImagingOrderViewSet, ImagingResultViewSet, MpesaPaymentTriggerView,
-    StockTakeViewSet, ExpenseViewSet,
+    StockTakeViewSet, ExpenseViewSet, FinancialRevenueAnalyticsView,
+    CompileClaimDispatchBatchView,
     mpesa_callback_webhook, check_invoice_status,
 )
 
@@ -74,6 +75,8 @@ router.register(r'lab-registry', LabTestRegistryViewSet, basename='lab-registry'
 router.register(r'lab-references', LabReferenceViewSet, basename='lab-reference')
 router.register(r'bills', BillViewSet, basename='bill')
 
+path('finance/claims/compile-batch/', CompileClaimDispatchBatchView.as_view(), name='compile-claim-batch'),
+
 # --- 7. Support & Psychology Units ---
 router.register(r'psychology-enrollments', PsychologyEnrollmentViewSet, basename='psychology-enrollment')
 router.register(r'session-logs', SessionLogViewSet, basename='session-log')
@@ -113,14 +116,21 @@ urlpatterns = [
     path('token/', SalamaTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
-    # Financial Integrations (Explicit Clean Namespacing)
-    path('mpesa/trigger-push/', MpesaPaymentTriggerView.as_view(), name='mpesa_trigger_push'),
-    path('mpesa/callback/', mpesa_callback_webhook, name='mpesa_callback_webhook'),
-    path('mpesa/check-status/<int:invoice_id>/', check_invoice_status, name='check_invoice_status'),
+    # Financial Integrations (FIXED: Explicit Clean Namespacing to match PaymentPortal.jsx)
+    path('mpesa-trigger/', MpesaPaymentTriggerView.as_view(), name='mpesa_trigger_push'),
+    path('api/mpesa-trigger/', MpesaPaymentTriggerView.as_view(), name='api_mpesa_trigger_push'), # Fallback catch
+
+    path('mpesa-callback/', mpesa_callback_webhook, name='mpesa_callback_webhook'),
+    path('api/mpesa-callback/', mpesa_callback_webhook, name='api_mpesa_callback_webhook'), # Fallback catch for Ngrok webhook
+
+    path('check-invoice-status/<int:invoice_id>/', check_invoice_status, name='check_invoice_status'),
+    path('api/check-invoice-status/<int:invoice_id>/', check_invoice_status, name='api_check_invoice_status'), # Fallback catch
+
+    path('finance/revenue-analytics/', FinancialRevenueAnalyticsView.as_view(), name='finance-revenue-analytics'),
     
     # Core Lookups and Proxy Routes
     path('patients/lookup/', patient_lookup, name='patient-lookup'),
-    path('api/patients/lookup/', patient_lookup, name='api-patient-lookup'), # Fallback catch for API matching prefix paths
+    path('api/patients/lookup/', patient_lookup, name='api-patient-lookup'),
     path('icd11/token/', ICD11TokenProxyView.as_view(), name='icd11-token'),
 
     # Viewset Namespace Bindings - Resolves the frontend /api prefix breakdown safely

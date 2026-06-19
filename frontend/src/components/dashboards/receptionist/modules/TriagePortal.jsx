@@ -208,7 +208,7 @@ const TriagePortal = () => {
                             <div className="bg-rose-50 p-6 rounded-[2rem] border border-rose-100 flex items-center gap-5 text-rose-700 animate-pulse">
                                 <div className="bg-rose-500 p-2 rounded-lg text-white"><AlertCircle size={18} /></div>
                                 <div>
-                                    <p className="text-xs font-black uppercase italic">Urgent Case Warning</p>
+                                    <p className="text-xs font-black uppercase italic">Urgent Case</p>
                                 </div>
                             </div>
                         )}

@@ -20,7 +20,7 @@ from .models import (
     PurchaseInvoice, PaymentVoucher,
     PatientInvoice, PatientBillableItem,
     ImagingOrder, ImagingResult,
-    NurseServiceOrder, Expense
+    NurseServiceOrder, Expense, ClaimAttachment
 
 )
 import os
@@ -1597,12 +1597,21 @@ class InsuranceCompanySerializer(serializers.ModelSerializer):
         return instance
 
 
+class ClaimAttachmentSerializer(serializers.ModelSerializer):
+    """
+    Nested read-only serializer to display attached biopsy reports, 
+    pre-auth letters, and nursing charts on the React dashboard.
+    """
+    document_type_display = serializers.CharField(source='get_document_type_display', read_only=True)
+
+    class Meta:
+        model = ClaimAttachment
+        fields = ['id', 'document_type', 'document_type_display', 'file', 'description', 'uploaded_at']
+
+
 class RemittanceBatchSerializer(serializers.ModelSerializer):
-    # Read-only field expansions to provide readable labels to React tables without extra queries
     insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
     reconciled_by_username = serializers.CharField(source='reconciled_by.username', read_only=True)
-    
-    # Explicitly enforce handling for file downloads and uploads
     remittance_file = serializers.FileField(required=False, allow_null=True)
 
     class Meta:
@@ -1615,7 +1624,6 @@ class RemittanceBatchSerializer(serializers.ModelSerializer):
         read_only_fields = ['reconciled_by', 'created_at']
 
     def create(self, validated_data):
-        # Automatically bind the active logged-in endpoint user as the auditor who logged the batch
         request = self.context.get('request')
         if request and request.user and request.user.is_authenticated:
             validated_data['reconciled_by'] = request.user
@@ -1623,48 +1631,80 @@ class RemittanceBatchSerializer(serializers.ModelSerializer):
 
 
 class InsuranceClaimSerializer(serializers.ModelSerializer):
-    # String representation expansions for easier rendering on the front-end data table columns
+    """
+    FIXED: Resolved the patient_name structural model crash and linked 
+    the related source patient invoice fields cleanly.
+    """
     insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
+    patient_display_name = serializers.SerializerMethodField()
+    invoice_number = serializers.CharField(source='patient_invoice.invoice_number', read_only=True)
 
     class Meta:
         model = InsuranceClaim
         fields = [
-            'id', 'claim_number', 'patient_name', 'insurance_company', 
-            'insurance_company_name', 'pre_auth_code', 'total_amount_billed', 
-            'shortfall_amount', 'status', 'date_submitted'
+            'id', 'claim_number', 'patient', 'patient_display_name', 'patient_invoice', 'invoice_number',
+            'insurance_company', 'insurance_company_name', 'pre_auth_code', 'pre_auth_approved_amount',
+            'total_amount_billed', 'amount_paid', 'shortfall_amount', 'status', 'date_submitted', 
+            'rejection_reason', 'remittance_reference'
         ]
 
+    def get_patient_display_name(self, obj):
+        # Gracefully safe guard fallbacks for standard name rendering
+        if obj.patient:
+            if hasattr(obj.patient, 'name') and obj.patient.name:
+                return obj.patient.name
+            return f"{getattr(obj.patient, 'first_name', '')} {getattr(obj.patient, 'last_name', '')}".strip() or "Unnamed Patient"
+        return "Unknown Patient"
+
+
 class ClaimDispatchBatchSerializer(serializers.ModelSerializer):
+    """
+    Refactored to cleanly expose summary items needed for bulk shipping lines.
+    """
     insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
     claims_count = serializers.IntegerField(source='claims.count', read_only=True)
     sender_username = serializers.CharField(source='created_by.username', read_only=True)
 
     class Meta:
         model = ClaimDispatchBatch
-        fields = '__all__'
+        fields = [
+            'id', 'batch_reference', 'insurance_company', 'insurance_company_name',
+            'date_dispatched', 'total_batch_value', 'is_acknowledged', 
+            'created_by', 'sender_username', 'claims_count'
+        ]
+        read_only_fields = ['batch_reference', 'total_batch_value', 'created_by']
 
 
 class DetailedPatientClaimSerializer(serializers.ModelSerializer):
-    """Serializer explicitly tuned to handle the multi-column patient registry matrix."""
+    """
+    Serializer explicitly tuned to handle the multi-column oncology registry matrix,
+    now featuring deep nested loading of required clinical attachments.
+    """
     insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
     dispatch_batch_reference = serializers.CharField(source='dispatch_batch.batch_reference', read_only=True)
+    invoice_number = serializers.CharField(source='patient_invoice.invoice_number', read_only=True)
+    patient_policy_number = serializers.CharField(source='patient.policy_number', default="N/A", read_only=True) 
     
-    # Extract structural patient values dynamically to resolve frontend column variables cleanly
     patient_display_name = serializers.SerializerMethodField()
-    patient_policy_number = serializers.CharField(source='patient.policy_number', read_only=True) 
+    
+    # 🌟 NEW ATTACHMENT PORT: Nested access to check loaded oncology items (Biopsies, Pre-auths)
+    attachments = ClaimAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = InsuranceClaim
         fields = [
             'id', 'claim_number', 'patient_display_name', 'patient_policy_number',
-            'insurance_company', 'insurance_company_name', 'pre_auth_code', 
-            'total_amount_billed', 'shortfall_amount', 'status', 'date_submitted',
-            'dispatch_batch', 'dispatch_batch_reference'
+            'patient_invoice', 'invoice_number', 'insurance_company', 'insurance_company_name', 
+            'pre_auth_code', 'pre_auth_approved_amount', 'total_amount_billed', 'amount_paid',
+            'shortfall_amount', 'status', 'date_submitted', 'dispatch_batch', 
+            'dispatch_batch_reference', 'attachments', 'rejection_reason'
         ]
 
     def get_patient_display_name(self, obj):
         if obj.patient:
-            return f"{obj.patient.first_name} {obj.patient.last_name}"
+            if hasattr(obj.patient, 'name') and obj.patient.name:
+                return obj.patient.name
+            return f"{getattr(obj.patient, 'first_name', '')} {getattr(obj.patient, 'last_name', '')}".strip() or "Unnamed Patient"
         return "Unknown Patient"
     
 

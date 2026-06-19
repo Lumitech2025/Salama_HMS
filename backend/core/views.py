@@ -33,6 +33,10 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from appointments.utils import dispatch_async_notifications
 
 # Import local models and serializers
@@ -51,7 +55,7 @@ from .models import (
     Supplier,
     PurchaseOrder, GoodsReceivedNote, 
     PurchaseInvoice, PaymentVoucher,
-    NurseServiceOrder, FixedAsset, Expense
+    NurseServiceOrder, FixedAsset, Expense, ClaimAttachment
     
 )
 
@@ -67,7 +71,8 @@ from .serializers import (
     QueueSerializer, PrescriptionSerializer, ClinicalNoteSerializer, ImagingRecordSerializer, RegistrationRecordSerializer, InventoryItemSerializer, PsychologyEnrollmentSerializer, 
     SessionLogSerializer, 
     BereavementLogSerializer, OutreachCampaignSerializer, ReferralPartnerSerializer, SocialMediaPostSerializer,RequisitionSerializer, MarketingRequisitionSerializer, LabTestRegistrySerializer, ProtocolMasterSerializer,
-    InsuranceCompanySerializer, InsuranceClaimSerializer, RemittanceBatchSerializer, DetailedPatientClaimSerializer, ClaimDispatchBatchSerializer, InsuranceSchemeSerializer,
+    InsuranceCompanySerializer, InsuranceClaimSerializer, 
+    ClaimAttachmentSerializer,RemittanceBatchSerializer, DetailedPatientClaimSerializer, ClaimDispatchBatchSerializer, InsuranceSchemeSerializer,
     ServiceSerializer, PatientBillingLookupSerializer, ActiveInvoiceSerializer, PatientBillableItemSerializer,
     ICD10DiagnosisSerializer, PatientDiagnosisSerializer,
     SupplierSerializer,
@@ -1604,11 +1609,14 @@ class InsuranceSchemeViewSet(viewsets.ModelViewSet):
 class RemittanceBatchViewSet(viewsets.ModelViewSet):
     """
     ViewSet for managing physical bulk bank remittance deposit statements.
-    Accommodates multipart form data streams for attached spreadsheet binary uploads.
+    Accommodates multipart form data streams for attached spreadsheet or PDF binary uploads.
     """
-    queryset = RemittanceBatch.objects.all().order_by('-date_received', '-id')
+    queryset = RemittanceBatch.objects.all().select_related('insurance_company', 'reconciled_by').order_by('-date_received', '-id')
     serializer_class = RemittanceBatchSerializer
     permission_classes = [IsAuthenticated]
+    
+    # 🌟 FIXED: Add explicit parsers to safely allow React to upload File / Document attachments
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['insurance_company']
@@ -1616,49 +1624,162 @@ class RemittanceBatchViewSet(viewsets.ModelViewSet):
     ordering_fields = ['date_received', 'total_amount_received', 'created_at']
 
     def perform_create(self, serializer):
-        # Passes the active request context down to the serializer save method
-        # so that 'reconciled_by' defaults to the authenticated user automatically.
         serializer.save(reconciled_by=self.request.user)
 
 
-class InsuranceClaimViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet to manage the individual patient hospital treatment invoices routed to insurers.
-    """
-    queryset = InsuranceClaim.objects.all().order_by('-date_submitted')
-    serializer_class = InsuranceClaimSerializer
-    permission_classes = [IsAuthenticated]
-
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    # Allow quick database filtering states by matching processing workflows or payer accounts
-    filterset_fields = ['status', 'insurance_company']
-    search_fields = ['claim_number', 'patient_name', 'pre_auth_code', 'insurance_company__name']
-    ordering_fields = ['total_amount_billed', 'shortfall_amount', 'date_submitted']
-
-
-
 class InsuranceClaimFilter(django_filters.FilterSet):
-    # Enable filtering exactly by target bundle index numbers or explicit patient references
     patient_id = django_filters.NumberFilter(field_name="patient__id")
     dispatch_batch_id = django_filters.NumberFilter(field_name="dispatch_batch__id")
+    invoice_id = django_filters.NumberFilter(field_name="patient_invoice__id")
 
     class Meta:
         model = InsuranceClaim
-        fields = ['status', 'insurance_company', 'patient_id', 'dispatch_batch_id']
+        fields = ['status', 'insurance_company', 'patient_id', 'dispatch_batch_id', 'invoice_id']
 
 
 class InsuranceClaimViewSet(viewsets.ModelViewSet):
-    queryset = InsuranceClaim.objects.all().select_related('patient', 'insurance_company', 'dispatch_batch')
-    serializer_class = DetailedPatientClaimSerializer
+    """
+    MERGED & FIXED: Consolidates both definitions into a single robust viewset.
+    Optimized via select_related and prefetch_related to load oncology claims with attachments efficiently.
+    """
+    queryset = InsuranceClaim.objects.all().select_related(
+        'patient', 'insurance_company', 'dispatch_batch', 'patient_invoice'
+    ).prefetch_related('attachments').order_by('-date_submitted')
+    
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = InsuranceClaimFilter
-    search_fields = ['claim_number', 'patient__first_name', 'patient__last_name', 'pre_auth_code']
+    ordering_fields = ['total_amount_billed', 'shortfall_amount', 'date_submitted']
+    
+    # 🌟 FIXED: Replaced non-existent 'patient_name' with structured text path lookups
+    search_fields = [
+        'claim_number', 
+        'patient__name', 
+        'patient__first_name', 
+        'patient__last_name', 
+        'pre_auth_code', 
+        'insurance_company__name',
+        'patient_invoice__invoice_number'
+    ]
+
+    def get_serializer_class(self):
+        """
+        Dynamically toggle serializing rules. Use a high-performance simple list 
+        on broad matrices, and unpack complete deeply nested records for detail actions.
+        """
+        if self.action in ['retrieve', 'update', 'partial_update']:
+            return DetailedPatientClaimSerializer
+        return InsuranceClaimSerializer
 
 
 class ClaimDispatchBatchViewSet(viewsets.ModelViewSet):
-    queryset = ClaimDispatchBatch.objects.all().order_by('-date_dispatched')
+    """
+    ViewSet to manage consolidated envelopes submitted directly to health payers like SHA.
+    """
+    queryset = ClaimDispatchBatch.objects.all().select_related('insurance_company', 'created_by').order_by('-date_dispatched')
     serializer_class = ClaimDispatchBatchSerializer
+    permission_classes = [IsAuthenticated]
+    
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['insurance_company', 'is_acknowledged']
-    search_fields = ['batch_reference']
+    search_fields = ['batch_reference', 'insurance_company__name']
+    ordering_fields = ['date_dispatched', 'total_batch_value']
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def acknowledge_receipt(self, request, pk=None):
+        """
+        Custom action endpoint enabling the accounting desk to check off 
+        an entire batch once SHA/Insurer issues receipt confirmation documents.
+        """
+        batch = self.get_object()
+        batch.is_acknowledged = True
+        batch.save(update_fields=['is_acknowledged'])
+        return Response({"status": f"Batch {batch.batch_reference} acknowledged successfully."}, status=status.HTTP_200_OK)
+
+
+class ClaimAttachmentViewSet(viewsets.ModelViewSet):
+    """
+    🌟 NEW: Managed routing port allowing rapid uploads of clinical evidence 
+    documents directly from the Oncology treatment or triage modules.
+    """
+    queryset = ClaimAttachment.objects.all()
+    serializer_class = ClaimAttachmentSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+    filterset_fields = ['claim']
+
+
+class CompileClaimDispatchBatchView(APIView):
+    """
+    API endpoint that accepts an array of claim IDs and compiles them 
+    into a structured ClaimDispatchBatch envelope for the designated payer.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        claim_ids = request.data.get('claim_ids', [])
+        insurance_company_id = request.data.get('insurance_company_id')
+        
+        if not claim_ids or not insurance_company_id:
+            return Response(
+                {"error": "Please provide an array of 'claim_ids' and a target 'insurance_company_id'."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        try:
+            with transaction.atomic():
+                # 1. Fetch claims matching the target company criteria that are still in 'DRAFT' status
+                claims_to_batch = InsuranceClaim.objects.filter(
+                    id__in=claim_ids,
+                    insurance_company_id=insurance_company_id,
+                    status='DRAFT'
+                ).select_for_update()
+
+                if not claims_to_batch.exists():
+                    return Response(
+                        {"error": "No valid pending draft claims were found matching the provided configuration selection criteria."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # 2. Build unique custom tracking reference tag layout (e.g., DISP-SHA-20260618-001)
+                timestamp = timezone.now().strftime('%Y%m%d')
+                existing_batches_count = ClaimDispatchBatch.objects.filter(date_dispatched=timezone.now().date()).count()
+                sequence = str(existing_batches_count + 1).zfill(3)
+                batch_ref = f"DISP-{insurance_company_id}-{timestamp}-{sequence}"
+
+                # 3. Initialize the dispatch batch instance container
+                batch = ClaimDispatchBatch.objects.create(
+                    batch_reference=batch_ref,
+                    insurance_company_id=insurance_company_id,
+                    created_by=request.user,
+                    total_batch_value=0.00
+                )
+
+                # 4. Attach claims to the batch and update their workflow tracking flags
+                running_total_billed = 0
+                for claim in claims_to_batch:
+                    claim.dispatch_batch = batch
+                    claim.status = 'SUBMITTED'
+                    claim.save(update_fields=['dispatch_batch', 'status'])
+                    running_total_billed += claim.total_amount_billed
+
+                # 5. Commit final calculated financial aggregation column data rows
+                batch.total_batch_value = running_total_billed
+                batch.save(update_fields=['total_batch_value'])
+
+                return Response({
+                    "message": "Dispatch batch generated successfully.",
+                    "batch_id": batch.id,
+                    "batch_reference": batch.batch_reference,
+                    "total_claims_bundled": claims_to_batch.count(),
+                    "total_batch_value": float(batch.total_batch_value)
+                }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({"error": f"Batch transaction initialization pipeline failure: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ServiceViewSet(viewsets.ModelViewSet):
     """
@@ -2168,7 +2289,10 @@ class MpesaPaymentTriggerView(APIView):
             if total_amount <= 0:
                 return Response({"error": "Cannot bill an empty invoice ledger"}, status=400)
 
-            from entrypoint_or_mpesa_module import MpesaClient 
+            # 2. FIXED: Replace this placeholder import with your project's actual working client path!
+            # Example: from core.mpesa_utils import MpesaClient
+            from core.mpesa import MpesaClient
+            
             client = MpesaClient()
             result = client.send_stk_push(phone_number, total_amount, invoice.id)
             
@@ -2184,6 +2308,7 @@ class MpesaPaymentTriggerView(APIView):
             return Response({"error": result.get("message", "STK Request rejected by operator")}, status=400)
             
         except Exception as e:
+            # This line will now log clean telemetry traces instead of crashing the thread!
             logger.error(f"Mpesa STK trigger system failure: {str(e)}")
             return Response({"error": f"Internal Server Error: {str(e)}"}, status=500)
 
@@ -2294,3 +2419,53 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         # Additional custom hooks can be appended here if you want to link the 
         # voucher creator account instance directly (e.g., recorded_by=self.request.user)
         serializer.save()
+
+class FinancialRevenueAnalyticsView(APIView):
+    
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        # 1. Target the precise database status string 'PAID' across line items
+        paid_items_query = PatientBillableItem.objects.filter(
+            invoice__status='PAID'
+        )
+
+        # 2. Compute grand total revenue by aggregating multiplying values
+        total_revenue = paid_items_query.annotate(
+            item_total=F('unit_price') * F('quantity')
+        ).aggregate(grand_total=Sum('item_total'))['grand_total'] or 0.00
+
+        # 3. Compute Monthly Revenue Breakdowns [Jan - Dec] for the current financial year
+        current_year = timezone.now().year
+        monthly_revenue_array = [0.00] * 12
+
+        # Filter lines matching the current active tracking year
+        yearly_items = paid_items_query.filter(
+            incurred_at__year=current_year
+        ).annotate(
+            item_total=F('unit_price') * F('quantity')
+        )
+
+        for item in yearly_items:
+            # incurred_at is a datetime object, extract month (1-indexed)
+            month_index = item.incurred_at.month - 1
+            if 0 <= month_index < 12:
+                monthly_revenue_array[month_index] += float(item.item_total)
+
+        # 4. Compute Month-over-Month Growth Rates based on your array values
+        monthly_growth_array = [0.00] * 12
+        for i in range(1, 12):
+            prev_month_rev = monthly_revenue_array[i - 1]
+            current_month_rev = monthly_revenue_array[i]
+            
+            if prev_month_rev > 0:
+                growth_rate = ((current_month_rev - prev_month_rev) / prev_month_rev) * 100
+                monthly_growth_array[i] = round(growth_rate, 1)
+            else:
+                monthly_growth_array[i] = 0.00 if current_month_rev == 0 else 100.00
+
+        return Response({
+            "total_revenue": float(total_revenue),
+            "monthly_revenue": [float(val) for val in monthly_revenue_array],
+            "monthly_growth": monthly_growth_array
+        }, status=200)
