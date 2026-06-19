@@ -231,8 +231,14 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
 
   const total = useMemo(() => {
     return cart.reduce((sum, item) => {
-      const itemPrice = item.price !== undefined && item.price !== null ? item.price : 0;
-      return sum + (parseFloat(itemPrice) || 0);
+      // Safely extract the unit price metric
+      const itemPrice = item.price !== undefined && item.price !== null ? Number(item.price) : 0;
+      
+      // Safely extract the quantity metric (defaulting cleanly to 1 if missing or undefined)
+      const itemQuantity = item.quantity !== undefined && item.quantity !== null ? Number(item.quantity) : 1;
+      
+      // Calculate line total and accumulate into the subtotal sum
+      return sum + (itemPrice * itemQuantity);
     }, 0);
   }, [cart]);
 

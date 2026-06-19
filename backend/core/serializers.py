@@ -2042,19 +2042,15 @@ class PaymentVoucherSerializer(serializers.ModelSerializer):
             
         return voucher
     
-
 class PatientBillableItemSerializer(serializers.ModelSerializer):
     """
     Serializes individual line items to match the columns on the React frontend:
     Station, Service/Procedure, Unit Price, and Quantity metrics.
     """
-    # Directly pull the raw choice code ('Pharmacy', 'Laboratory', etc.) for stable frontend matching
     station = serializers.CharField() 
-    # Map the stored historical string name to the expected 'service' property key
     service = serializers.CharField(source='name')
-    # Return the explicit base unit price to avoid double-multiplication errors in React
-    price = serializers.FloatField(source='unit_price')
-    # Expose the item quantity field
+    # Use DecimalField instead of FloatField to prevent floating point rendering drift
+    price = serializers.DecimalField(source='unit_price', max_digits=12, decimal_places=2)
     quantity = serializers.IntegerField()
 
     class Meta:
@@ -2067,11 +2063,12 @@ class ActiveInvoiceSerializer(serializers.ModelSerializer):
     Serializes the complete billing profile for the selected patient transaction.
     """
     items = PatientBillableItemSerializer(many=True, read_only=True)
-    total_payable = serializers.FloatField(read_only=True)
+    # Fixed: Force DecimalField to protect financial precision on React tables
+    total_payable = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model = PatientInvoice
-        fields = ['id', 'status', 'total_payable', 'items']
+        fields = ['id', 'invoice_number', 'status', 'total_payable', 'items']
 
 
 class PatientBillingLookupSerializer(serializers.ModelSerializer):
@@ -2081,19 +2078,20 @@ class PatientBillingLookupSerializer(serializers.ModelSerializer):
     """
     name = serializers.CharField(source='full_name', read_only=True)
     scheme = serializers.SerializerMethodField()
-    active_bill = serializers.SerializerMethodField()
+    
+    active_invoice = serializers.SerializerMethodField()
 
     class Meta:
         model = RegistrationRecord
-        fields = ['id', 'queue_id', 'health_record_number', 'name', 'phone', 'payment_mode', 'scheme', 'active_bill']
+        fields = ['id', 'queue_id', 'health_record_number', 'name', 'phone', 'payment_mode', 'scheme', 'active_invoice']
 
     def get_scheme(self, obj):
-        """Returns corporate insurer details or plain self-pay text"""
         if obj.payment_mode == 'INSURANCE' and obj.insurance_company:
             return f"{obj.insurance_company.name} - ({obj.insurance_number})"
         return "Self Pay (Cash/M-Pesa)"
 
-    def get_active_bill(self, obj):
+    # 🌟 FIXED: Renamed method to map identically to the 'active_invoice' key
+    def get_active_invoice(self, obj):
         """
         Resolves an active open invoice context. Auto-instantiates 
         the row safely if it doesn't exist yet to secure station connectivity.
@@ -2119,11 +2117,11 @@ class PatientBillingLookupSerializer(serializers.ModelSerializer):
             
         return {
             "id": None,
+            "invoice_number": None,
             "status": "UNPAID",
-            "total_payable": 0.0,
+            "total_payable": "0.00",
             "items": []
         }
-    
 
 
 class FixedAssetSerializer(serializers.ModelSerializer):
