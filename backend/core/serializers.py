@@ -85,7 +85,6 @@ class AppointmentSerializer(serializers.ModelSerializer):
 # 3. REGISTRATION & ANALYTICS
 # ─────────────────────────────────────────────────────────────────────────────
 class RegistrationRecordSerializer(serializers.ModelSerializer):
-    # REMOVED write_only=True so fields are serialized in GET responses
     first_name = serializers.CharField()
     middle_name = serializers.CharField(required=False, allow_blank=True, default='')
     last_name = serializers.CharField()
@@ -95,15 +94,11 @@ class RegistrationRecordSerializer(serializers.ModelSerializer):
     gender = serializers.CharField(required=False, default='M')
     age = serializers.IntegerField()
     
-    # Next of Kin captured payload fields (made readable)
     next_of_kin_name = serializers.CharField()
     next_of_kin_relationship = serializers.CharField()
     next_of_kin_phone = serializers.CharField()
     
-    # Keep this write_only as it's only an incoming ID pointer link
-    insurance_company_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
-    
-    # Dynamic read representation for frontend rendering
+    insurance_company_id = serializers.IntegerField(write_only=True, required=False, allow_null=True, default=None)
     insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
     name = serializers.CharField(source='full_name', read_only=True)
 
@@ -130,24 +125,23 @@ class RegistrationRecordSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        # Using .get() or .pop() with safe defaults so fields remain for create block execution
-        id_num = validated_data.pop('id_number')
-        f_name = validated_data.pop('first_name')
-        m_name = validated_data.pop('middle_name', '')
-        l_name = validated_data.pop('last_name')
-        phone_num = validated_data.pop('phone', '')
-        email_val = validated_data.pop('email', None)
-        gender_choice = validated_data.pop('gender', 'M')
+        # 1. Pop fields that do not map directly to RegistrationRecord
         insurance_co_id = validated_data.pop('insurance_company_id', None)
         
-        nok_name = validated_data.pop('next_of_kin_name')
-        nok_rel = validated_data.pop('next_of_kin_relationship')
-        nok_phone = validated_data.pop('next_of_kin_phone')
-
+        # Keep fields for Patient profile parsing
+        id_num = validated_data.get('id_number')
+        f_name = validated_data.get('first_name')
+        m_name = validated_data.get('middle_name', '')
+        l_name = validated_data.get('last_name')
+        phone_num = validated_data.get('phone', '')
+        email_val = validated_data.get('email', None)
+        gender_choice = validated_data.get('gender', 'M')
         is_returning = validated_data.get('is_returning', False)
+        
         full_name = f"{f_name} {m_name} {l_name}".replace("  ", " ").strip()
 
         with transaction.atomic():
+            # 2. Handle Master Patient Resolution cleanly here
             patient, created = Patient.objects.get_or_create(
                 registry_no=id_num,
                 defaults={
@@ -168,30 +162,24 @@ class RegistrationRecordSerializer(serializers.ModelSerializer):
 
             patient.refresh_from_db()
 
+            # 3. Connect Insurance Foreign Key Instance
             insurance_instance = None
             if validated_data.get('payment_mode') == 'INSURANCE' and insurance_co_id:
                 try:
                     insurance_instance = InsuranceCompany.objects.get(id=insurance_co_id)
                 except InsuranceCompany.DoesNotExist:
                     raise serializers.ValidationError({
-                        "insurance_company_id": "Selected insurance provider does not exist in the database."
+                        "insurance_company_id": "Selected insurance provider does not exist."
                     })
 
+            # 4. Save Registration entry safely via standard creation unpacked payload mappings
             registration = RegistrationRecord.objects.create(
                 patient=patient,
-                first_name=f_name,
-                middle_name=m_name if m_name else None,
-                last_name=l_name,
-                phone=phone_num,
-                email=email_val if email_val else None,
-                gender=gender_choice,
                 insurance_company=insurance_instance,
-                next_of_kin_name=nok_name,
-                next_of_kin_relationship=nok_rel,
-                next_of_kin_phone=nok_phone,
                 **validated_data
             )
             
+            # 5. Route to Triage Queue
             Queue.objects.create(
                 patient=patient,
                 visit=registration,
@@ -201,7 +189,6 @@ class RegistrationRecordSerializer(serializers.ModelSerializer):
                 priority='EMERGENCY' if registration.is_urgent else 'NORMAL'
             )
             
-            registration.refresh_from_db()
             return registration
 
 

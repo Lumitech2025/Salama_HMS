@@ -1,271 +1,399 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  Clock, CheckCircle, User, ShieldCheck, Search, 
-  Loader2, Play
+  User, Phone, Mail, ShieldAlert, HeartHandshake, 
+  Search, CheckCircle2, UserCheck, AlertCircle, Loader2 
 } from 'lucide-react';
 import API from '@/api/api';
 
-const BillingHome = ({ onRouteToPayment }) => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [queue, setQueue] = useState([]);
-  
-  // Patient-centric operational metrics
-  const [stats, setStats] = useState({
-    patientsOnQueue: 0,
-    patientsAttended: 0,
-    patientsPayingViaCash: 0,
-    patientsPayingViaInsurance: 0
+const BillingRegistrationForm = ({ onSuccess, onCancel }) => {
+  const [isReturning, setIsReturning] = useState(false);
+  const [idSearchLoading, setIdSearchLoading] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [insuranceCompanies, setInsuranceCompanies] = useState([]);
+
+  // Registration Payload State
+  const [formData, setFormData] = useState({
+    id_number: '',
+    first_name: '',
+    middle_name: '',
+    last_name: '',
+    phone: '',
+    email: '',
+    age: '',
+    gender: 'M',
+    payment_mode: 'CASH',
+    insurance_company_id: '',
+    insurance_number: '',
+    is_urgent: false,
+    next_of_kin_name: '',
+    next_of_kin_relationship: 'SPOUSE',
+    next_of_kin_phone: ''
   });
 
-  // Comprehensive synchronization with the Salama HMS data stream targeting the BILLING station
-  const fetchBillingDashboardData = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      // 1. Fetch live queue allocations restricted to the BILLING service station boundary
-      const resQueue = await API.get('/queue?current_station=BILLING').catch(() => ({ data: [] }));
-      const rawQueue = resQueue.data?.results || resQueue.data || [];
-      
-      // Filter out completed records to focus strictly on those waiting or actively being handled at this station
-      const activeQueue = rawQueue.filter(item => item.status === 'WAITING' || item.status === 'TRIAGED' || !item.status);
-      setQueue(activeQueue);
-
-      // 2. Fetch global master registry containing all RegistrationRecords in the system
-      const resRegistrations = await API.get('/registrations/').catch(() => ({ data: [] }));
-      
-      // Extract array safely dealing with DRF paginated wrappers (.results) vs plain lists
-      const rawRegistrations = resRegistrations.data?.results || (Array.isArray(resRegistrations.data) ? resRegistrations.data : []);
-
-      // 3. Directly calculate counts by scanning all RegistrationRecords saved in the database
-      const globalCashCount = rawRegistrations.filter(record => {
-        const mode = record.payment_mode || '';
-        return mode.toUpperCase() === 'CASH';
-      }).length;
-
-      const globalInsuranceCount = rawRegistrations.filter(record => {
-        const mode = record.payment_mode || '';
-        return mode.toUpperCase() === 'INSURANCE';
-      }).length;
-
-      // Update the component states directly using the global registrations array
-      setStats({
-        patientsOnQueue: activeQueue.length,
-        patientsAttended: rawQueue.filter(p => p.status === 'COMPLETED').length,
-        patientsPayingViaCash: globalCashCount,
-        patientsPayingViaInsurance: globalInsuranceCount
-      });
-
-    } catch (err) {
-      console.error("Critical error sync failure inside Billing Desk ledger:", err);
-    } finally {
-      setIsLoading(false);
-    }
+  // Fetch insurance options for dropdown selection
+  useEffect(() => {
+    API.get('/insurance-companies/')
+      .then(res => setInsuranceCompanies(res.data?.results || res.data || []))
+      .catch(err => console.error("Failed loading insurance data matrix", err));
   }, []);
 
+  // 🌟 Real-time lookup loop tracking the ID field when 'isReturning' is active
   useEffect(() => {
-    fetchBillingDashboardData();
-    const liveHeartbeat = setInterval(fetchBillingDashboardData, 15000); // 15s clinical sync cycle
-    return () => clearInterval(liveHeartbeat);
-  }, [fetchBillingDashboardData]);
+    if (!isReturning || formData.id_number.trim().length < 4) return;
 
-  // Client-side text filter implementations matching DoctorHome logic fields
-  const filteredQueue = useMemo(() => {
-    return queue.filter(p => {
-      const name = p.patient_name || p.full_name || "";
-      const idNo = p.patient_id_no || p.phone || "";
-      const token = p.token_id || p.queue_id || "";
-      const recordNum = p.health_record_number || "";
-      return name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-             idNo.toLowerCase().includes(searchQuery.toLowerCase()) ||
-             token.toLowerCase().includes(searchQuery.toLowerCase()) ||
-             recordNum.toLowerCase().includes(searchQuery.toLowerCase());
-    });
-  }, [queue, searchQuery]);
+    const delayDebounceFn = setTimeout(async () => {
+      setIdSearchLoading(true);
+      setFormError('');
+      try {
+        const response = await API.get(`/registrations/lookup/?search=${formData.id_number.trim()}`);
+        const masterProfile = response.data;
+
+        if (masterProfile) {
+          // Autofill profile datasets & guarantee fields match historical parameters
+          setFormData(prev => ({
+            ...prev,
+            first_name: masterProfile.first_name || '',
+            middle_name: masterProfile.middle_name || '',
+            last_name: masterProfile.last_name || '',
+            phone: masterProfile.phone || '',
+            email: masterProfile.email || '',
+            age: masterProfile.age || '',
+            gender: masterProfile.gender || 'M',
+            payment_mode: masterProfile.payment_mode || 'CASH',
+            insurance_company_id: masterProfile.insurance_company_id || '',
+            insurance_number: masterProfile.insurance_number || '',
+            next_of_kin_name: masterProfile.next_of_kin_name || '',
+            next_of_kin_relationship: masterProfile.next_of_kin_relationship || 'SPOUSE',
+            next_of_kin_phone: masterProfile.next_of_kin_phone || ''
+          }));
+          setSuccessMsg(`Linked to existing profile! HRN: ${masterProfile.health_record_number}`);
+        }
+      } catch (err) {
+        // Fallback error safely handling 404 profiles
+        if (err.response?.status === 404) {
+          setFormError("No existing patient matches this ID. Consider creating a new file profile.");
+        } else {
+          setFormError("Network profile verification failed.");
+        }
+      } finally {
+        setIdSearchLoading(false);
+      }
+    }, 800); // 800ms debounce buffer to limit heavy database queries while typing
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [formData.id_number, isReturning]);
+
+  const handleInputChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleSubmitRegistration = async (e) => {
+    e.preventDefault();
+    setFormError('');
+    setSuccessMsg('');
+    setSubmitting(true);
+
+    // Assemble clean structural JSON payload
+    const postPayload = {
+      ...formData,
+      is_returning: isReturning,
+      // Convert blank parameters or zeros to true null references for relational validation
+      insurance_company_id: formData.payment_mode === 'INSURANCE' && formData.insurance_company_id 
+        ? parseInt(formData.insurance_company_id, 10) 
+        : null,
+      insurance_number: formData.payment_mode === 'INSURANCE' ? formData.insurance_number : '',
+      email: formData.email.trim() || null,
+      middle_name: formData.middle_name.trim() || ''
+    };
+
+    try {
+      await API.post('/registrations/', postPayload);
+      if (onSuccess) onSuccess();
+    } catch (err) {
+      const errData = err.response?.data;
+      if (errData && typeof errData === 'object') {
+        // Flatten backend nested structural exception responses
+        const serverMessages = Object.entries(errData)
+          .map(([key, val]) => `${key.toUpperCase()}: ${Array.isArray(val) ? val.join(' ') : val}`)
+          .join(' | ');
+        setFormError(serverMessages);
+      } else {
+        setFormError('An unhandled system registration failure occurred.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-700 font-['Inter'] antialiased">
+    <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-2xl p-8 max-w-4xl mx-auto font-['Inter']">
       
-      {/* HEADER SECTION (Verbatim to DoctorHome.jsx styling) */}
-      <div className="flex flex-col gap-1">
-        <span className="text-[10px] font-black tracking-widest uppercase text-slate-400 font-mono">
-          SALAMA HMS / BILLING HUB
-        </span>
-        <h1 className="text-3xl font-serif text-slate-900 font-black tracking-tight">
-          Command Center
-        </h1>
+      {/* Title Header */}
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <span className="text-[10px] font-black tracking-widest uppercase text-slate-400 font-mono">SALAMA HMS / COUNTER REGISTRY</span>
+          <h2 className="text-2xl font-serif text-slate-900 font-black tracking-tight">Onboard Patient Encounter</h2>
+        </div>
       </div>
 
-      {/* 4-CARD PATIENT KPI TIER - Sized and designed matching DoctorHome exactly */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard 
-          label="Patients on Queue" 
-          value={stats.patientsOnQueue} 
-          icon={<Clock className="text-blue-600"/>} 
-        />
-        <KPICard 
-          label="Patients Attended" 
-          value={stats.patientsAttended} 
-          icon={<CheckCircle className="text-green-600"/>} 
-        />
-        <KPICard 
-          label="Patients paying via Cash" 
-          value={stats.patientsPayingViaCash} 
-          icon={<User className="text-amber-600"/>} 
-        />
-        <KPICard 
-          label="Patients paying via Insurance" 
-          value={stats.patientsPayingViaInsurance} 
-          icon={<ShieldCheck className="text-purple-600"/>} 
-        />
-      </div>
-
-      {/* CONTROL BAR WITH INTEGRATED SEARCH DESK BLOCK */}
-      <div className="w-full flex items-center justify-between pt-2">
-        <h3 className="text-sm font-black uppercase tracking-widest text-slate-400 font-mono flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-          Active Station Queue Registry
-        </h3>
-        <div className="relative w-full max-w-md">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+      {/* 🌟 1. THE RETURNING PATIENT STATUS CHECK (Sits prominently at the top) */}
+      <div className={`p-5 rounded-2xl border mb-6 transition-all flex items-center justify-between ${
+        isReturning ? 'bg-blue-50/50 border-blue-200' : 'bg-slate-50/50 border-slate-100'
+      }`}>
+        <div className="flex items-center gap-3">
+          <div className={`p-2.5 rounded-xl ${isReturning ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-500'}`}>
+            <UserCheck size={20} />
+          </div>
+          <div>
+            <p className="text-sm font-black text-slate-900 uppercase tracking-tight">Returning Salama Patient?</p>
+            <p className="text-xs text-slate-400 font-medium">Toggle this to automatically pull history using National ID or Passport numbers.</p>
+          </div>
+        </div>
+        <label className="relative inline-flex items-center cursor-pointer select-none">
           <input 
-            type="text" 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search active billing queue..." 
-            className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all shadow-sm text-sm font-medium" 
+            type="checkbox" 
+            checked={isReturning}
+            onChange={(e) => {
+              setIsReturning(e.target.checked);
+              setFormError('');
+              setSuccessMsg('');
+            }}
+            className="sr-only peer"
+          />
+          <div className="w-14 h-8 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600"></div>
+        </label>
+      </div>
+
+      <form onSubmit={handleSubmitRegistration} className="space-y-6">
+        
+        {/* Alerts Center */}
+        {formError && (
+          <div className="p-4 bg-red-50 border border-red-100 text-red-700 rounded-xl text-xs font-bold uppercase tracking-wide flex items-center gap-2">
+            <AlertCircle size={16} /> {formError}
+          </div>
+        )}
+        {successMsg && (
+          <div className="p-4 bg-green-50 border border-green-100 text-green-700 rounded-xl text-xs font-bold uppercase tracking-wide flex items-center gap-2">
+            <CheckCircle2 size={16} /> {successMsg}
+          </div>
+        )}
+
+        {/* Section A: Primary Identity Identification Keys */}
+        <div className="bg-slate-50/50 border border-slate-100 p-6 rounded-2xl space-y-4">
+          <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 font-mono flex items-center gap-2">
+            Identification Details
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="relative">
+              <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">National ID / Passport Number</label>
+              <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input 
+                  type="text"
+                  name="id_number"
+                  required
+                  value={formData.id_number}
+                  onChange={handleInputChange}
+                  placeholder="Enter identification document number..."
+                  className="w-full pl-11 pr-10 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-medium uppercase"
+                />
+                {idSearchLoading && (
+                  <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" size={16} />
+                )}
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Priority Intake Workflow</label>
+              <div className="flex gap-4 mt-1">
+                <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer">
+                  <input 
+                    type="checkbox"
+                    name="is_urgent"
+                    checked={formData.is_urgent}
+                    onChange={handleInputChange}
+                    className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
+                  />
+                  Mark as Emergency / Urgent Case
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Section B: Demographics */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">First Name</label>
+            <input 
+              type="text" required name="first_name" value={formData.first_name} onChange={handleInputChange}
+              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-medium"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Middle Name (Optional)</label>
+            <input 
+              type="text" name="middle_name" value={formData.middle_name} onChange={handleInputChange}
+              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-medium"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Last Name</label>
+            <input 
+              type="text" required name="last_name" value={formData.last_name} onChange={handleInputChange}
+              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-medium"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="md:col-span-2">
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Phone Number</label>
+            <input 
+              type="text" name="phone" required value={formData.phone} onChange={handleInputChange}
+              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-medium"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Age</label>
+            <input 
+              type="number" name="age" required value={formData.age} onChange={handleInputChange}
+              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-medium"
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Gender Identity</label>
+            <select 
+              name="gender" value={formData.gender} onChange={handleInputChange}
+              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-bold"
+            >
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+              <option value="O">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Email Address (Optional)</label>
+          <input 
+            type="email" name="email" value={formData.email} onChange={handleInputChange}
+            className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-medium"
+            placeholder="patient@domain.com"
           />
         </div>
-      </div>
 
-      {/* DATATABLE LIVE QUEUE SHELF CONTAINER */}
-      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden min-h-[450px]">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-slate-50/50 border-b border-slate-100">
-              <tr className="text-[11px] font-black text-slate-400 uppercase tracking-widest">
-                <th className="p-10">Incoming Patient</th>
-                <th className="p-10">Record Number</th>
-                <th className="p-10 text-center">Token ID</th>
-                <th className="p-10 text-center">Payment Classification</th>
-                <th className="p-10 text-right pr-16">Workflow Desk Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {isLoading && filteredQueue.length === 0 ? (
-                <tr>
-                  <td colSpan="5" className="py-40 text-center">
-                    <div className="flex flex-col items-center justify-center gap-3 text-slate-400 font-black uppercase tracking-widest text-xs">
-                      <Loader2 className="animate-spin text-blue-500" size={24} />
-                      Syncing Billing Station Records...
-                    </div>
-                  </td>
-                </tr>
-              ) : filteredQueue.length > 0 ? filteredQueue.map((pat) => {
-                const isCash = (pat.payment_mode || pat.payment_method || '').toUpperCase() === 'CASH';
-                const displayName = pat.patient_name || pat.full_name || "UNREGISTERED ENCOUNTER";
-                
-                return (
-                  <tr key={pat.id} className="hover:bg-blue-50/20 transition-all group">
-                    {/* Patient Demographics */}
-                    <td className="px-10 py-8">
-                      <p className="font-black text-slate-900 text-lg uppercase tracking-tight">{displayName}</p>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest italic font-mono mt-0.5">
-                        {pat.patient_id_no || pat.phone || 'NO PHONE LINKED'}
-                      </p>
-                    </td>
-                    
-                    {/* Medical Record Code Tag */}
-                    <td className="px-10 py-8">
-                      <span className="text-sm font-bold font-mono text-blue-600 bg-blue-50/50 border border-blue-100/70 px-3 py-1.5 rounded-lg">
-                        {pat.health_record_number || `HRN-${String(pat.id).padStart(4, '0')}`}
-                      </span>
-                    </td>
-                    
-                    {/* Active Token Value */}
-                    <td className="px-10 py-8 text-center">
-                      <span className="bg-slate-900 text-white px-4 py-2 rounded-xl font-mono font-bold shadow-lg group-hover:bg-blue-600 transition-colors">
-                        {pat.token_id || pat.queue_id || `T-${pat.id}`}
-                      </span>
-                    </td>
-                    
-                    {/* Payment Mode Badges */}
-                    <td className="px-10 py-8 text-center">
-                      <span className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-widest border italic ${
-                        isCash 
-                          ? 'bg-amber-50 text-amber-700 border-amber-100' 
-                          : 'bg-purple-50 text-purple-700 border-purple-100'
-                      }`}>
-                        {pat.payment_mode || pat.payment_method || 'CASH'}
-                      </span>
-                    </td>
-                    
-                    {/* Universal Redirect Action directly routing to the PaymentPortal layout tab */}
-                    <td className="px-10 py-8 text-right pr-16">
-                      <button 
-                        type="button"
-                        onClick={() => onRouteToPayment(pat)} 
-                        className="bg-blue-50 text-slate-900 border border-blue-100 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-3 ml-auto hover:bg-blue-600 hover:text-white transition-all shadow-xl"
-                      >
-                        Make Payment<Play size={14} fill="currentColor"/>
-                      </button>
-                    </td>
-                  </tr>
-                );
-              }) : (
-                <tr>
-                  <td colSpan="5" className="py-40 text-center text-slate-300 italic font-black uppercase tracking-widest text-xs">
-                    {searchQuery ? "No patients match your search filter" : "No pending patients in active billing queue"}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        {/* Section C: Financial & Billing Setup */}
+        <div className="bg-slate-50/50 border border-slate-100 p-6 rounded-2xl space-y-4">
+          <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 font-mono flex items-center gap-2">
+            Financial & Payment Information
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Payment Method Mode</label>
+              <select 
+                name="payment_mode" value={formData.payment_mode} onChange={handleInputChange}
+                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-bold"
+              >
+                <option value="CASH">Cash Settlement</option>
+                <option value="INSURANCE">Insurance Underwriting</option>
+              </select>
+            </div>
+
+            {formData.payment_mode === 'INSURANCE' && (
+              <>
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Insurance Provider</label>
+                  <select 
+                    name="insurance_company_id" required value={formData.insurance_company_id} onChange={handleInputChange}
+                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-bold"
+                  >
+                    <option value="">-- Choose Provider --</option>
+                    {insuranceCompanies.map(co => (
+                      <option key={co.id} value={co.id}>{co.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Policy / Card Number</label>
+                  <input 
+                    type="text" name="insurance_number" required value={formData.insurance_number} onChange={handleInputChange}
+                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-medium"
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
-    </div>
-  );
-};
 
-// Reusable KPI Architecture matching DoctorHome Exactly
-const KPICard = ({ label, value, icon, sub, color }) => {
-  const borderColors = {
-    blue: 'hover:border-blue-500',
-    green: 'hover:border-green-500',
-    amber: 'hover:border-amber-500',
-    purple: 'hover:border-purple-500'
-  };
-
-  const textColors = {
-    blue: 'text-blue-600',
-    green: 'text-green-600',
-    amber: 'text-amber-600',
-    purple: 'text-purple-600'
-  };
-
-  const pulseColors = {
-    blue: 'bg-blue-500',
-    green: 'bg-green-500',
-    amber: 'bg-amber-500',
-    purple: 'bg-purple-500'
-  };
-
-  return (
-    <div className={`bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm group transition-all ${borderColors[color] || 'hover:border-slate-500'}`}>
-      <div className="flex justify-between items-start mb-4">
-        <div className="p-3 bg-slate-50 rounded-xl group-hover:scale-110 transition-transform">
-          {icon}
+        {/* Section D: Next of Kin */}
+        <div className="bg-slate-50/50 border border-slate-100 p-6 rounded-2xl space-y-4">
+          <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 font-mono flex items-center gap-2">
+            Next of Kin Emergency Contact
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Full Name</label>
+              <input 
+                type="text" name="next_of_kin_name" required value={formData.next_of_kin_name} onChange={handleInputChange}
+                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-medium"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Relationship</label>
+              <select 
+                name="next_of_kin_relationship" value={formData.next_of_kin_relationship} onChange={handleInputChange}
+                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-bold"
+              >
+                <option value="SPOUSE">Spouse</option>
+                <option value="PARENT">Parent</option>
+                <option value="CHILD">Child</option>
+                <option value="SIBLING">Sibling</option>
+                <option value="GUARDIAN">Legal Guardian</option>
+                <option value="DEPENDENT">Dependent</option>
+                <option value="OTHER">Other Relative</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Phone Number</label>
+              <input 
+                type="text" name="next_of_kin_phone" required value={formData.next_of_kin_phone} onChange={handleInputChange}
+                className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-sm font-medium"
+              />
+            </div>
+          </div>
         </div>
-      </div>
-      <h4 className="text-4xl font-black text-slate-950 tracking-tighter italic">
-        {value}
-      </h4>
-      <p className="text-[10px] font-bold text-slate-500 uppercase mt-1 tracking-widest">
-        {label}
-      </p>
-      <p className={`text-[9px] font-black uppercase mt-3 flex items-center gap-2 ${textColors[color] || 'text-slate-600'}`}>
-        <span className={`w-1 h-1 rounded-full animate-pulse ${pulseColors[color] || 'bg-slate-500'}`} /> 
-        {sub}
-      </p>
+
+        {/* Action Controls */}
+        <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+          <button 
+            type="button" 
+            onClick={onCancel}
+            disabled={submitting}
+            className="px-6 py-3 border border-slate-200 text-slate-700 text-xs font-black uppercase tracking-widest rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button 
+            type="submit"
+            disabled={submitting || idSearchLoading}
+            className="px-8 py-3 bg-blue-600 text-white text-xs font-black uppercase tracking-widest rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/10 flex items-center gap-2 disabled:opacity-50"
+          >
+            {submitting ? (
+              <>Saving File Record <Loader2 className="animate-spin" size={14} /></>
+            ) : (
+              'Complete Onboarding'
+            )}
+          </button>
+        </div>
+
+      </form>
     </div>
   );
 };

@@ -1183,60 +1183,58 @@ class RegimenViewSet(viewsets.ReadOnlyModelViewSet):
             'drugs': drug_serializer.data
         })
 
-
+@method_decorator(csrf_exempt, name='dispatch')
 class RegistrationRecordViewSet(viewsets.ModelViewSet):
     queryset = RegistrationRecord.objects.all().order_by('-registered_at')
     serializer_class = RegistrationRecordSerializer
+    
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['id_number', 'health_record_number']
+    search_fields = ['first_name', 'last_name', 'id_number', 'health_record_number']
 
     def create(self, request, *args, **kwargs):
+        # 1. Initialize data validation matrices
         serializer = self.get_serializer(data=request.data)
-        if serializer.is_valid():
-            # 🚀 FIXED & EXPANDED: Capture explicit segment data elements safely before popping
-            f_name = request.data.get('first_name', '').strip()
-            m_name = request.data.get('middle_name', '').strip()
-            l_name = request.data.get('last_name', '').strip()
-            
-            # Combine split components intelligently while removing hanging spaces
-            full_name = f"{f_name} {m_name} {l_name}".replace("  ", " ").strip() or "Valued Patient"
-            
-            patient_phone = request.data.get('phone', None)
-            patient_email = request.data.get('email', None)
+        serializer.is_valid(raise_exception=True)
+        
+        # 2. Perform the atomic creation operations defined inside the serializer
+        registration_item = serializer.save()
+        
+        # 3. Pull post-save database updates (like queue_id, health_record_number)
+        response_serializer = self.get_serializer(registration_item)
 
-            # Process transaction database save routines
-            registration_item = serializer.save()
+        # 4. Extract details safely to compile communication payloads
+        full_name = registration_item.full_name
+        patient_phone = registration_item.phone
+        patient_email = registration_item.email
+        real_hrn = registration_item.health_record_number
 
-            real_hrn = getattr(registration_item, 'health_record_number', 'PENDING')
+        subject = "Registration Successful - Salama Cancer Care"
+        message_body = (
+            f"Hello {full_name},\n\n"
+            f"Thank you for registering at Salama Cancer Care. We are pleased to serve you.\n\n"
+            f"Your health record number is: {real_hrn}\n\n"
+            f"Please proceed to the triage station to have your vitals checked.\n\n"
+            f"Best regards,\nSalama Medical Team"
+        )
 
-            subject = "Registration Successful - Salama Cancer Care"
-            message_body = (
-                f"Hello {full_name},\n\n"
-                f"Thank you for registering at Salama Cancer Care. We are pleased to serve you.\n\n"
-                f"Your health record number is: {real_hrn}\n\n"
-                f"Please proceed to the triage station to have your vitals checked.\n\n"
-                f"Best regards,\nSalama Medical Team"
-            )
+        if patient_phone or patient_email:
+            try:
+                dispatch_async_notifications(
+                    phone=patient_phone,
+                    email=patient_email,
+                    message_body=message_body,
+                    subject=subject
+                )
+            except Exception as e:
+                print(f"⚠️ NOTIFICATION WORKER ERROR: {str(e)}")
 
-            if patient_phone or patient_email:
-                try:
-                    # Assuming dispatch_async_notifications is imported globally
-                    dispatch_async_notifications(
-                        phone=patient_phone,
-                        email=patient_email,
-                        message_body=message_body,
-                        subject=subject
-                    )
-                except Exception as e:
-                    print(f"⚠️ NOTIFICATION WORKER ERROR: {str(e)}")
-
-            headers = self.get_success_headers(serializer.data)
-            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+        headers = self.get_success_headers(response_serializer.data)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        
     @action(detail=False, methods=['get'])
     def analytics(self, request):
         today = timezone.now().date()
-        
         total_count = RegistrationRecord.objects.count()
         today_qs = RegistrationRecord.objects.filter(registered_at__date=today).order_by()
         
@@ -1249,11 +1247,9 @@ class RegistrationRecordViewSet(viewsets.ModelViewSet):
         gender_data = today_qs.values('gender').annotate(count=Count('gender'))
         gender_map = {item['gender']: item['count'] for item in gender_data}
 
-        # Aggregate by payment_mode (CASH vs INSURANCE)
         payment_mode_data = today_qs.values('payment_mode').annotate(count=Count('payment_mode'))
         payment_mode_map = {item['payment_mode']: item['count'] for item in payment_mode_data}
 
-        # Break down the actual insurance company numbers for today's intake
         insurance_breakdown = today_qs.filter(payment_mode='INSURANCE')\
                                       .values('insurance_company__name')\
                                       .annotate(count=Count('insurance_company'))
@@ -1277,47 +1273,48 @@ class RegistrationRecordViewSet(viewsets.ModelViewSet):
             "payment_mode_distribution": payment_mode_map, 
             "insurance_distribution": insurance_map        
         })
-    
-@api_view(['GET'])
-# Keep AllowAny if it's public, or remove if you've implemented the header authorization tokens successfully
-@permission_classes([AllowAny]) 
-def patient_lookup(request):
-    # Get the raw string parameter (e.g., "SCC-001/26" or "556677883")
-    search_query = request.query_params.get('search', '').strip()
-    
-    if not search_query:
-        return Response(
-            {"detail": "Search query parameter is required."}, 
-            status=status.HTTP_400_BAD_REQUEST
-        )
 
-    try:
-        # We look up matching rows where the query hits either ID number or HRN
-        record = RegistrationRecord.objects.filter(
-            Q(health_record_number__iexact=search_query) | 
-            Q(id_number__icontains=search_query)
-        ).latest('registered_at') # Grabs their most recent active registration desk record
+    @action(detail=False, methods=['get'], permission_classes=[AllowAny], url_path='lookup')
+    def patient_lookup(self, request):
+        search_query = request.query_params.get('search', '').strip()
+        if not search_query:
+            return Response(
+                {"detail": "Search query parameter is required."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        # Structure the payload exactly how your React front-end extracts it
-        payload = {
-            "id": record.id,
-            "health_record_number": record.health_record_number,
-            "queue_id": record.queue_id,
-            "full_name": record.full_name, # Leveraging your model's helper property
-            "id_number": record.id_number,
-            "payment_mode": record.payment_mode,
-            "insurance_number": record.insurance_number,
-            "age": record.age,
-            "gender": record.gender
-        }
-        return Response(payload, status=status.HTTP_200_OK)
+        try:
+            record = RegistrationRecord.objects.filter(
+                Q(health_record_number__iexact=search_query) | 
+                Q(id_number__iexact=search_query)
+            ).latest('registered_at')
 
-    except RegistrationRecord.DoesNotExist:
-        return Response(
-            {"detail": "No matching active record found."}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
-    
+            payload = {
+                "id": record.id,
+                "health_record_number": record.health_record_number,
+                "queue_id": record.queue_id,
+                "id_number": record.id_number or search_query,
+                "first_name": record.first_name,
+                "middle_name": record.middle_name or "",
+                "last_name": record.last_name,
+                "phone": record.phone,
+                "email": record.email or "",
+                "payment_mode": record.payment_mode,
+                "insurance_company_id": record.insurance_company_id or "",
+                "insurance_number": record.insurance_number or "",
+                "age": record.age,
+                "gender": record.gender,
+                "next_of_kin_name": record.next_of_kin_name,
+                "next_of_kin_relationship": record.next_of_kin_relationship,
+                "next_of_kin_phone": record.next_of_kin_phone,
+            }
+            return Response(payload, status=status.HTTP_200_OK)
+
+        except RegistrationRecord.DoesNotExist:
+            return Response(
+                {"detail": "No matching active record found."}, 
+                status=status.HTTP_404_NOT_FOUND
+            )   
 class InventoryItemViewSet(viewsets.ModelViewSet):
     queryset = InventoryItem.objects.all().order_by('-added_at')
     serializer_class = InventoryItemSerializer

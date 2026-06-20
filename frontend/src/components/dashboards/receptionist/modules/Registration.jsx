@@ -3,7 +3,7 @@ import API from '@/api/api';
 import { 
   Save, Loader2, UserPlus, AlertCircle, CheckCircle2, 
   Users, Calendar, RefreshCw, AlertTriangle, FileText, Layers,
-  Contact2
+  Contact2, Search
 } from 'lucide-react';
 
 const Registration = () => {
@@ -12,6 +12,8 @@ const Registration = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [latestRegistrations, setLatestRegistrations] = useState([]);
   const [insuranceCompanies, setInsuranceCompanies] = useState([]);
+  const [isSearchingPatient, setIsSearchingPatient] = useState(false);
+  const [lookupMessage, setLookupMessage] = useState({ type: '', text: '' });
   const [analytics, setAnalytics] = useState({
       total_patients: 0,
       todays_registrations: 0,
@@ -33,6 +35,7 @@ const Registration = () => {
     insurance_number: '',
     is_urgent: false,
     is_returning: false,
+    health_record_number: '',
     next_of_kin_name: '',
     next_of_kin_relationship: 'SPOUSE',
     next_of_kin_phone: ''
@@ -67,6 +70,68 @@ const Registration = () => {
     fetchData(); 
   }, [fetchData]);
 
+  // 🌟 FIXED & ROBUST: Polymorphic Patient Lookup Adapter
+  const handlePatientLookup = async (idNum) => {
+    if (!idNum || idNum.trim().length < 4) return;
+    
+    setIsSearchingPatient(true);
+    setLookupMessage({ type: '', text: '' });
+    
+    try {
+      const response = await API.get(`/registrations/lookup/?search=${encodeURIComponent(idNum.trim())}`);
+      const matchedPatient = response.data;
+
+      if (matchedPatient && matchedPatient.id) {
+        // 🌟 FIX: Preserving id_number by keeping prev.id_number or explicitly applying idNum
+        setFormData(prev => ({
+          ...prev,
+          id_number: idNum.trim(), // Keep the typed search ID safe here
+          first_name: matchedPatient.first_name || '',
+          middle_name: matchedPatient.middle_name || '',
+          last_name: matchedPatient.last_name || '',
+          age: matchedPatient.age || '',
+          gender: matchedPatient.gender || 'M',
+          phone: matchedPatient.phone || '',
+          email: matchedPatient.email || '',
+          payment_mode: matchedPatient.payment_mode || 'CASH',
+          insurance_company_id: matchedPatient.insurance_company_id || '',
+          insurance_number: matchedPatient.insurance_number || '',
+          health_record_number: matchedPatient.health_record_number || '',
+          next_of_kin_name: matchedPatient.next_of_kin_name || '',
+          next_of_kin_relationship: matchedPatient.next_of_kin_relationship || 'SPOUSE',
+          next_of_kin_phone: matchedPatient.next_of_kin_phone || ''
+        }));
+        
+        setLookupMessage({ 
+          type: 'success', 
+          text: `Patient profile mapped! Found master entry for ${matchedPatient.first_name} ${matchedPatient.last_name}.` 
+        });
+      } else {
+        setLookupMessage({ 
+          type: 'info', 
+          text: 'No matching recorded patient matches this parameter. Proceeding as fresh profile entries.' 
+        });
+      }
+    } catch (err) {
+      console.error("Critical Registry Lookup Fault", err);
+      
+      if (err.response && err.response.status === 404) {
+        setLookupMessage({ 
+          type: 'info', 
+          text: 'No matching recorded patient found. Proceeding as a new patient profile entry.' 
+        });
+      } else {
+        setLookupMessage({ 
+          type: 'error', 
+          text: 'Unable to communicate with the registry lookup database.' 
+        });
+      }
+    } finally {
+      setIsSearchingPatient(false);
+    }
+  };
+
+  // 🌟 Standard Input Value Trackers
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData(prev => {
@@ -75,9 +140,23 @@ const Registration = () => {
         updated.insurance_company_id = '';
         updated.insurance_number = '';
       }
+      if (name === 'is_returning' && !checked) {
+        setLookupMessage({ type: '', text: '' });
+      }
       return updated;
     });
   };
+
+  // 🌟 Debounce Hook Lifecycle Handler
+  useEffect(() => {
+    if (formData.is_returning && formData.id_number.trim().length >= 4) {
+      const delayDebounceFn = setTimeout(() => {
+        handlePatientLookup(formData.id_number);
+      }, 600); 
+
+      return () => clearTimeout(delayDebounceFn); 
+    }
+  }, [formData.id_number, formData.is_returning]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -85,11 +164,20 @@ const Registration = () => {
     setRegStatus('idle');
     setErrorMessage('');
     
+    const targetIdNumber = formData.id_number ? String(formData.id_number).trim() : '';
+
+    if (!targetIdNumber) {
+      setRegStatus('error');
+      setErrorMessage("National ID / Passport number field is required to process registry records.");
+      setIsSubmitting(false);
+      return;
+    }
+
     const payload = {
       first_name: formData.first_name.trim(),
       middle_name: formData.middle_name.trim(),
       last_name: formData.last_name.trim(),
-      id_number: formData.id_number.trim(),
+      id_number: targetIdNumber, 
       phone: formData.phone.trim(),
       email: formData.email.trim() || null, 
       age: parseInt(formData.age, 10) || 0,
@@ -99,6 +187,7 @@ const Registration = () => {
       insurance_number: formData.payment_mode === 'INSURANCE' ? formData.insurance_number.trim() : '',
       is_urgent: formData.is_urgent,
       is_returning: formData.is_returning,
+      health_record_number: formData.is_returning ? formData.health_record_number : null,
       next_of_kin_name: formData.next_of_kin_name.trim(),
       next_of_kin_relationship: formData.next_of_kin_relationship,
       next_of_kin_phone: formData.next_of_kin_phone.trim()
@@ -109,6 +198,7 @@ const Registration = () => {
       if (response.status === 201 || response.status === 200) {
         setRegStatus('success');
         setFormData(initialFormState); 
+        setLookupMessage({ type: '', text: '' });
         await fetchData(); 
       }
     } catch (error) {
@@ -149,7 +239,7 @@ const Registration = () => {
           <StatCard label="Returning Patients" value={analytics.returning_today} icon={<RefreshCw className="text-amber-500"/>} color="amber" />
       </div>
 
-      {/* FIXED: Standard Static Page Header Header (No longer floating/sticky) */}
+      {/* Page Header */}
       <div className="flex justify-between items-center mb-8 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
         <div>
           <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3 uppercase italic">
@@ -170,11 +260,48 @@ const Registration = () => {
 
       <form id="registration-form" onSubmit={handleSubmit} className="space-y-8 mb-12">
         
-        {/* BLOCK 1: PRIMARY DEMOGRAPHICS (With HRN incorporated under identification) */}
+        {/* BLOCK 1: ADMISSIONS STATUS RADAR (Top Configuration) */}
+        <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-4 bg-gradient-to-r from-slate-50/50 to-white">
+          <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2">
+            <RefreshCw size={14} className="text-slate-400 animation-delay" /> 1. Intake Profile Context
+          </h3>
+          <div className="flex items-center gap-8 py-2">
+            <label className="flex items-center gap-3 cursor-pointer group select-none bg-white border border-slate-200 rounded-2xl px-5 py-3 shadow-sm hover:border-teal-500 transition-colors">
+              <input type="checkbox" name="is_returning" checked={formData.is_returning} onChange={handleChange} className="w-5 h-5 rounded-lg border-slate-200 text-teal-600 focus:ring-teal-500 accent-teal-600" />
+              <span className="text-[10px] font-black text-slate-600 group-hover:text-slate-900 uppercase tracking-wider">Returning Patient</span>
+            </label>
+            <label className="flex items-center gap-3 cursor-pointer group select-none bg-white border border-slate-200 rounded-2xl px-5 py-3 shadow-sm hover:border-rose-500 transition-colors">
+              <input type="checkbox" name="is_urgent" checked={formData.is_urgent} onChange={handleChange} className="w-5 h-5 rounded-lg border-slate-200 text-rose-600 focus:ring-rose-500 accent-rose-600" />
+              <span className="text-[10px] font-black text-slate-600 group-hover:text-rose-700 uppercase tracking-wider">Urgent Case</span>
+            </label>
+          </div>
+
+          {/* Dynamic Autofill Feedback Badge */}
+          {formData.is_returning && lookupMessage.text && (
+            <div className={`p-3.5 rounded-xl border text-xs font-bold flex items-center gap-2.5 transition-all ${
+              lookupMessage.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
+              lookupMessage.type === 'info' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-amber-50 border-amber-200 text-amber-700'
+            }`}>
+              {isSearchingPatient ? <Loader2 className="animate-spin text-slate-400" size={16} /> : <Search size={16} />}
+              <span>{lookupMessage.text}</span>
+            </div>
+          )}
+        </div>
+        
+        {/* BLOCK 2: PRIMARY DEMOGRAPHICS */}
         <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
-          
+          <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2">
+            <UserPlus size={14} className="text-slate-400" /> 2. Personal Demographics
+          </h3>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-6">
-            <FormInput label="National ID / Passport" name="id_number" value={formData.id_number} onChange={handleChange} required />
+            <div className="relative">
+              <FormInput label="National ID / Passport" name="id_number" value={formData.id_number} onChange={handleChange} required />
+              {isSearchingPatient && (
+                <div className="absolute right-4 bottom-4">
+                  <Loader2 className="animate-spin text-teal-600" size={16} />
+                </div>
+              )}
+            </div>
             <FormInput label="First Name" name="first_name" value={formData.first_name} onChange={handleChange} required />
             <FormInput label="Middle Name (Optional)" name="middle_name" value={formData.middle_name} onChange={handleChange} />
             <FormInput label="Last Name" name="last_name" value={formData.last_name} onChange={handleChange} required />
@@ -192,29 +319,29 @@ const Registration = () => {
               </select>
             </div>
 
-            {/* FIXED: Live Preview HRN relocated immediately to the bottom row of Core Identifications */}
             <div className="space-y-2 md:col-span-4 border-t border-slate-50 pt-4 grid grid-cols-1 md:grid-cols-4">
               <div className="space-y-2 md:col-span-1">
                 <label className="text-[9px] font-black text-teal-600 uppercase tracking-widest ml-2 flex items-center gap-1.5">
-                  <FileText size={10} /> Live Preview HRN
+                  <FileText size={10} /> {formData.is_returning ? 'PERMANENT PATIENT HRN' : 'LIVE PREVIEW HRN'}
                 </label>
-                <div className="w-full bg-teal-50/60 border border-teal-100/50 text-teal-700 rounded-2xl p-4 text-sm font-mono font-bold tracking-wider text-center md:text-left">
-                  {getLiveHrnPreview()}
+                <div className={`w-full border rounded-2xl p-4 text-sm font-mono font-bold tracking-wider text-center md:text-left ${
+                  formData.is_returning ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-teal-50/60 border-teal-100/50 text-teal-700'
+                }`}>
+                  {formData.is_returning && formData.health_record_number ? formData.health_record_number : getLiveHrnPreview()}
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* BLOCK 2: NEXT OF KIN RELATIONAL DATA */}
+        {/* BLOCK 3: NEXT OF KIN RELATIONAL DATA */}
         <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
           <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2 mb-2">
-            <Contact2 size={14} className="text-slate-400" /> 2. Next of Kin
+            <Contact2 size={14} className="text-slate-400" /> 3. Next of Kin
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <FormInput label="Next of Kin Full Name" name="next_of_kin_name" value={formData.next_of_kin_name} onChange={handleChange} required />
             
-            {/* FIXED: Modified from text field to select component dropdown options */}
             <div className="space-y-2">
               <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-2">Relationship</label>
               <select 
@@ -237,9 +364,11 @@ const Registration = () => {
           </div>
         </div>
 
-        {/* BLOCK 3: FINANCIAL COVER */}
+        {/* BLOCK 4: FINANCIAL COVER */}
         <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
-          
+          <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2 mb-2">
+            <Layers size={14} className="text-slate-400" /> 4. Insurance & Billing Configuration
+          </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="space-y-2">
               <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest ml-2">Mode of Payment</label>
@@ -271,17 +400,6 @@ const Registration = () => {
                 <FormInput label="Insurance Card No." name="insurance_number" value={formData.insurance_number} onChange={handleChange} required />
               </>
             )}
-          </div>
-
-          <div className="flex items-center gap-8 pt-4 border-t border-slate-50">
-            <label className="flex items-center gap-3 cursor-pointer group select-none">
-              <input type="checkbox" name="is_returning" checked={formData.is_returning} onChange={handleChange} className="w-5 h-5 rounded-lg border-slate-200 text-teal-600 focus:ring-teal-500 accent-teal-600" />
-              <span className="text-[10px] font-black text-slate-500 group-hover:text-slate-800 uppercase tracking-wider">Returning Patient</span>
-            </label>
-            <label className="flex items-center gap-3 cursor-pointer group select-none">
-              <input type="checkbox" name="is_urgent" checked={formData.is_urgent} onChange={handleChange} className="w-5 h-5 rounded-lg border-slate-200 text-rose-600 focus:ring-rose-500 accent-rose-600" />
-              <span className="text-[10px] font-black text-slate-500 group-hover:text-rose-700 uppercase tracking-wider">Urgent Case</span>
-            </label>
           </div>
         </div>
 

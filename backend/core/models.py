@@ -20,6 +20,74 @@ from authentication.models import User
 
 # --- Clinical Models ---
 
+
+
+
+class RegistrationRecord(models.Model):
+    GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
+    PAYMENT_MODE_CHOICES = [('CASH', 'Cash'), ('INSURANCE', 'Insurance')]
+    RELATIONSHIP_CHOICES = [
+        ('SPOUSE', 'Spouse'), ('PARENT', 'Parent'), ('CHILD', 'Child'),
+        ('SIBLING', 'Sibling'), ('GUARDIAN', 'Legal Guardian'),
+        ('DEPENDENT', 'Dependent'), ('OTHER', 'Other Relative'),
+    ]
+    
+    first_name = models.CharField(max_length=100)
+    middle_name = models.CharField(max_length=100, blank=True, null=True)
+    last_name = models.CharField(max_length=100)
+    id_number = models.CharField(max_length=50) 
+    phone = models.CharField(max_length=20)
+    email = models.EmailField(blank=True, null=True) 
+    age = models.PositiveIntegerField()
+    gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
+    
+    payment_mode = models.CharField(max_length=15, choices=PAYMENT_MODE_CHOICES, default="CASH")
+    insurance_company = models.ForeignKey(
+        'InsuranceCompany', on_delete=models.SET_NULL, blank=True, null=True, related_name='registrations'
+    )
+    insurance_number = models.CharField(max_length=100, blank=True, null=True)
+    
+    is_urgent = models.BooleanField(default=False)
+    is_returning = models.BooleanField(default=False)
+
+    # Master Data Relations
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='registrations')
+    
+    # System Managed Identifiers (Note: health_record_number does NOT have unique=True)
+    queue_id = models.CharField(max_length=15, unique=True, editable=False)
+    health_record_number = models.CharField(max_length=30, editable=False, db_index=True)
+    registered_at = models.DateTimeField(auto_now_add=True)
+
+    # Next of Kin
+    next_of_kin_name = models.CharField(max_length=255)
+    next_of_kin_relationship = models.CharField(max_length=20, choices=RELATIONSHIP_CHOICES, default='SPOUSE')
+    next_of_kin_phone = models.CharField(max_length=20)
+
+    @property
+    def full_name(self):
+        if self.middle_name:
+            return f"{self.first_name} {self.middle_name} {self.last_name}"
+        return f"{self.first_name} {self.last_name}"
+
+    def save(self, *args, **kwargs):
+        short_year = str(timezone.now().year)[-2:] 
+
+        # 1. Guarantee the visit log mirrors the underlying Patient HRN completely
+        if self.patient:
+            self.health_record_number = self.patient.health_record_number
+
+        # 2. Safely auto-generate a rolling daily or overall Queue ID
+        if not self.queue_id:
+            with transaction.atomic():
+                max_record = RegistrationRecord.objects.select_for_update().order_by('-id').first()
+                next_q_id = (max_record.id + 1) if max_record else 1
+                self.queue_id = f"Q{short_year}-{str(next_q_id).zfill(3)}"
+            
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.queue_id} - {self.health_record_number} - {self.full_name}"
+    
 class Patient(models.Model):
     GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
     BLOOD_GROUPS = [
@@ -28,7 +96,8 @@ class Patient(models.Model):
     ]
     
     name = models.CharField(max_length=255, db_index=True) 
-    registry_no = models.CharField(max_length=100, blank=True, null=True)
+    registry_no = models.CharField(max_length=100, blank=True, null=True, unique=True) # ID/Passport must be unique
+    health_record_number = models.CharField(max_length=30, unique=True, editable=False, null=True, blank=True) # Permanent unique clinic ID
     dob = models.DateField(verbose_name="Date of Birth", null=True, blank=True)
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
     blood_group = models.CharField(max_length=3, choices=BLOOD_GROUPS, blank=True)
@@ -51,115 +120,20 @@ class Patient(models.Model):
     emergency_contact = models.CharField(max_length=255, blank=True) 
     created_at = models.DateTimeField(auto_now_add=True)
 
-    
-class RegistrationRecord(models.Model):
-    GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
-    PAYMENT_MODE_CHOICES = [('CASH', 'Cash'), ('INSURANCE', 'Insurance')]
-    
-    RELATIONSHIP_CHOICES = [
-        ('SPOUSE', 'Spouse'),
-        ('PARENT', 'Parent'),
-        ('CHILD', 'Child'),
-        ('SIBLING', 'Sibling'),
-        ('GUARDIAN', 'Legal Guardian'),
-        ('DEPENDENT', 'Dependent'),
-        ('OTHER', 'Other Relative'),
-    ]
-    
-    first_name = models.CharField(max_length=100)
-    middle_name = models.CharField(max_length=100, blank=True, null=True)
-    last_name = models.CharField(max_length=100)
-    id_number = models.CharField(max_length=50) 
-    phone = models.CharField(max_length=20)
-    email = models.EmailField(blank=True, null=True) 
-    
-    age = models.PositiveIntegerField()
-    gender = models.CharField(max_length=1, choices=GENDER_CHOICES)
-    
-    payment_mode = models.CharField(max_length=15, choices=PAYMENT_MODE_CHOICES, default="CASH")
-    insurance_company = models.ForeignKey(
-        'InsuranceCompany', 
-        on_delete=models.SET_NULL, 
-        blank=True, 
-        null=True, 
-        related_name='registrations'
-    )
-    insurance_number = models.CharField(max_length=100, blank=True, null=True)
-    
-    # Status Flags
-    is_urgent = models.BooleanField(default=False)
-    is_returning = models.BooleanField(default=False)
-
-    # Master Data Relations
-    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='registrations')
-    
-    # System Managed Identifiers
-    queue_id = models.CharField(max_length=15, unique=True, editable=False)
-    health_record_number = models.CharField(max_length=30, unique=True, editable=False)
-    
-    registered_at = models.DateTimeField(auto_now_add=True)
-
-    # Next of Kin / Relational Context
-    next_of_kin_name = models.CharField(max_length=255)
-    next_of_kin_relationship = models.CharField(max_length=20, choices=RELATIONSHIP_CHOICES, default='SPOUSE')
-    next_of_kin_phone = models.CharField(max_length=20)
-
-    @property
-    def full_name(self):
-        if self.middle_name:
-            return f"{self.first_name} {self.middle_name} {self.last_name}"
-        return f"{self.first_name} {self.last_name}"
-
     def save(self, *args, **kwargs):
-        now_dt = timezone.now()
-        short_year = str(now_dt.year)[-2:] 
-
-        if self.patient:
-            if not self.first_name:
-                
-                self.first_name = getattr(self.patient, 'first_name', '')
-                self.middle_name = getattr(self.patient, 'middle_name', '')
-                self.last_name = getattr(self.patient, 'last_name', '')
-            if not self.phone:
-                self.phone = self.patient.phone
-            if not self.gender:
-                self.gender = self.patient.gender
-
-        
-        if not self.queue_id or not self.health_record_number:
+        # Auto-generate HRN only if it doesn't exist yet (New Patients)
+        if not self.health_record_number:
+            short_year = str(timezone.now().year)[-2:]
             with transaction.atomic():
-                last_record = RegistrationRecord.objects.select_for_update().order_by('id').last()
-                
-                # Assign Queue ID
-                if not self.queue_id:
-                    if not last_record or not last_record.queue_id:
-                        self.queue_id = f"Q{short_year}-001"
-                    else:
-                        try:
-                            last_sequence_part = last_record.queue_id.split('-')[-1]
-                            next_id = int(last_sequence_part) + 1
-                        except (ValueError, IndexError):
-                            next_id = RegistrationRecord.objects.count() + 1
-                        self.queue_id = f"Q{short_year}-{str(next_id).zfill(3)}"
-
-                # Assign Health Record Number
-                if not self.health_record_number:
-                    if not last_record or not last_record.health_record_number:
-                        next_sequence = "001"
-                    else:
-                        try:
-                            last_sequence_part = last_record.health_record_number.split('-')[1].split('/')[0]
-                            next_sequence = str(int(last_sequence_part) + 1).zfill(3)
-                        except (ValueError, IndexError):
-                            next_sequence = str(RegistrationRecord.objects.count() + 1).zfill(3)
-                    
-                    self.health_record_number = f"SCC-{next_sequence}/{short_year}"
-            
+                # Find the maximum ID value currently in use safely
+                max_patient = Patient.objects.select_for_update().order_by('-id').first()
+                next_id = (max_patient.id + 1) if max_patient else 1
+                self.health_record_number = f"SCC-{str(next_id).zfill(3)}/{short_year}"
+        
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.queue_id} - {self.health_record_number} - {self.first_name} {self.last_name}"
-    
+        return f"{self.health_record_number or 'NO HRN'} - {self.name}"
 
 class Appointment(models.Model):
     VISIT_TYPE_CHOICES = [('NEW', 'New Visit'), ('SUBSEQUENT', 'Subsequent Visit')]
@@ -1681,155 +1655,6 @@ class InsuranceScheme(models.Model):
         return f"{self.company.name} - {self.name}"
 
 
-class InsuranceClaim(models.Model):
-    """
-    Individual treatment claims submitted for payment.
-    Links directly to a unique PatientInvoice to capture line items.
-    """
-    CLAIM_STATUS = [
-        ('DRAFT', 'Drafting'),
-        ('SUBMITTED', 'Submitted to Payer'),
-        ('ADJUDICATION', 'Under Review/In Process'),
-        ('DISPUTED', 'Disputed/Rejected'),
-        ('REMITTED', 'Paid/Remitted'),
-        ('PARTIALLY_REMITTED', 'Partially Settled / Shortfall'),
-    ]
-    
-    insurance_company = models.ForeignKey('InsuranceCompany', on_delete=models.CASCADE)
-    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='insurance_claims')
-    
-    # 🌟 NEW LINK: Connects the billing ledger row directly to this claim.
-    # Can be Null/Blank if drafting a manual claim, but ideal for clinical pipeline auto-generation.
-    patient_invoice = models.OneToOneField(
-        'PatientInvoice',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='insurance_claim',
-        help_text="The source patient invoice invoice tracking session data."
-    )
-    
-    # 🌟 NEW LINK: Several individual claims map back up to a single outbound dispatch batch
-    dispatch_batch = models.ForeignKey(
-        'ClaimDispatchBatch',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='claims',
-        help_text="The batch envelope containing this claim when sent to the insurer."
-    )
-
-    claim_number = models.CharField(max_length=100, unique=True)
-    pre_auth_code = models.CharField(max_length=100, blank=True, null=True)
-    pre_auth_approved_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    
-    # Financial Breakdown
-    total_amount_billed = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Original invoice value sent to insurer")
-    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Amount actually remitted")
-    shortfall_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Deductions or disallowed amounts")
-    
-    date_submitted = models.DateField(auto_now_add=True)
-    status = models.CharField(max_length=20, choices=CLAIM_STATUS, default='DRAFT')
-    
-    rejection_reason = models.TextField(blank=True)
-    # Links claim processing transactions back to a bulk remittance collection file container
-    remittance_batch = models.ForeignKey(
-        'RemittanceBatch',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='reconciled_claims'
-    )
-    remittance_reference = models.CharField(max_length=100, blank=True, null=True, help_text="EFT transaction / Cheque code from batch upload")
-    reconciled_at = models.DateTimeField(null=True, blank=True)
-
-    def __str__(self):
-        return f"CLAIM-{self.claim_number} | Inv: {self.patient_invoice.invoice_number if self.patient_invoice else 'N/A'} ({self.patient.name})"
-
-
-class ClaimDispatchBatch(models.Model):
-    """Tracks a bundle of multiple patients' claims compiled and mailed to an insurer."""
-    batch_reference = models.CharField(max_length=50, unique=True)
-    insurance_company = models.ForeignKey('InsuranceCompany', on_delete=models.CASCADE)
-    date_dispatched = models.DateField(auto_now_add=True)
-    total_batch_value = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-    is_acknowledged = models.BooleanField(default=False)
-    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-
-    def __str__(self):
-        return f"Dispatch Batch {self.batch_reference} -> {self.insurance_company.name} (Value: {self.total_batch_value})"
-
-    def recalculate_batch_value(self):
-        """
-        Dynamically aggregates the billed sum of all claims packed into this dispatch run.
-        """
-        total = self.claims.aggregate(total=models.Sum('total_amount_billed'))['total'] or 0.00
-        self.total_batch_value = total
-        self.save(update_fields=['total_batch_value'])
-
-class ClaimAttachment(models.Model):
-    """
-    Holds individual file uploads (Pre-auths, Biopsies, Nursing Charts) 
-    required to back up an insurance claim submission.
-    """
-    DOCUMENT_TYPES = [
-        ('PRE_AUTH', 'Pre-Authorization Form'),
-        ('BIOPSY', 'Histopathology / Biopsy Report'),
-        ('IMAGING', 'Radiology Report (CT/PET/MRI)'),
-        ('TREATMENT_PLAN', 'Oncologist Treatment Protocol Summary'),
-        ('NURSING_CHART', 'Signed Chemotherapy Administration Log'),
-        ('INVOICE', 'Itemized Detailed Ledger Statement'),
-        ('OTHER', 'Supporting Lab/Clinical Document'),
-    ]
-
-    claim = models.ForeignKey(
-        InsuranceClaim, 
-        on_delete=models.CASCADE, 
-        related_name='attachments'
-    )
-    document_type = models.CharField(max_length=30, choices=DOCUMENT_TYPES)
-    file = models.FileField(
-        upload_to='claim_attachments/%Y/%m/%d/',
-        help_text="Upload scanned PDF or Image of the document"
-    )
-    uploaded_at = models.DateTimeField(auto_now_add=True)
-    description = models.CharField(max_length=255, blank=True, help_text="e.g. Biopsy report from Lancet Log")
-
-    def __str__(self):
-        return f"{self.get_document_type_display()} for {self.claim.claim_number}"
-    
-
-class RemittanceBatch(models.Model):
-    """
-    Container for bulk payments received from insurers.
-    """
-    insurance_company = models.ForeignKey(InsuranceCompany, on_delete=models.CASCADE)
-    payment_reference = models.CharField(
-        max_length=100, 
-        unique=True, 
-        help_text="EFT Number, Cheque No, or Bank Transfer ID"
-    )
-    total_amount_received = models.DecimalField(max_digits=15, decimal_places=2)
-    date_received = models.DateField()
-    
-    # The formal document upload
-    remittance_file = models.FileField(
-        upload_to='remittances/', 
-        null=True, 
-        blank=True, 
-        help_text="Upload the PDF/Excel advice provided by the insurer"
-    )
-    
-    # Meta
-    reconciled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        verbose_name_plural = "Remittance Batches"
-
-    def __str__(self):
-        return f"REMIT-{self.payment_reference} ({self.insurance_company.name})"
-    
 
     
 class StockTake(models.Model):
@@ -2241,6 +2066,7 @@ class PatientInvoice(models.Model):
     def total_payable(self):
         """Aggregates all related line item costs dynamically for the frontend total"""
         return sum(item.total_cost for item in self.items.all())
+        
 
     @classmethod
     def get_or_create_active_invoice(cls, registration_record):
@@ -2381,6 +2207,157 @@ class PatientBillableItem(models.Model):
 
     def __str__(self):
         return f"{self.station} -> {self.name} ({self.quantity}x KES {self.unit_price})"
+
+
+class InsuranceClaim(models.Model):
+    """
+    Individual treatment claims submitted for payment.
+    Links directly to a unique PatientInvoice to capture line items.
+    """
+    CLAIM_STATUS = [
+        ('DRAFT', 'Drafting'),
+        ('SUBMITTED', 'Submitted to Payer'),
+        ('ADJUDICATION', 'Under Review/In Process'),
+        ('DISPUTED', 'Disputed/Rejected'),
+        ('REMITTED', 'Paid/Remitted'),
+        ('PARTIALLY_REMITTED', 'Partially Settled / Shortfall'),
+    ]
+    
+    insurance_company = models.ForeignKey('InsuranceCompany', on_delete=models.CASCADE)
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='insurance_claims')
+    
+    # 🌟 NEW LINK: Connects the billing ledger row directly to this claim.
+    # Can be Null/Blank if drafting a manual claim, but ideal for clinical pipeline auto-generation.
+    patient_invoice = models.OneToOneField(
+        'PatientInvoice',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='insurance_claim',
+        help_text="The source patient invoice invoice tracking session data."
+    )
+    
+    # 🌟 NEW LINK: Several individual claims map back up to a single outbound dispatch batch
+    dispatch_batch = models.ForeignKey(
+        'ClaimDispatchBatch',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='claims',
+        help_text="The batch envelope containing this claim when sent to the insurer."
+    )
+
+    claim_number = models.CharField(max_length=100, unique=True)
+    pre_auth_code = models.CharField(max_length=100, blank=True, null=True)
+    pre_auth_approved_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    
+    # Financial Breakdown
+    total_amount_billed = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Original invoice value sent to insurer")
+    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Amount actually remitted")
+    shortfall_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, help_text="Deductions or disallowed amounts")
+    
+    date_submitted = models.DateField(auto_now_add=True)
+    status = models.CharField(max_length=20, choices=CLAIM_STATUS, default='DRAFT')
+    
+    rejection_reason = models.TextField(blank=True)
+    # Links claim processing transactions back to a bulk remittance collection file container
+    remittance_batch = models.ForeignKey(
+        'RemittanceBatch',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reconciled_claims'
+    )
+    remittance_reference = models.CharField(max_length=100, blank=True, null=True, help_text="EFT transaction / Cheque code from batch upload")
+    reconciled_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"CLAIM-{self.claim_number} | Inv: {self.patient_invoice.invoice_number if self.patient_invoice else 'N/A'} ({self.patient.name})"
+
+
+class ClaimDispatchBatch(models.Model):
+    """Tracks a bundle of multiple patients' claims compiled and mailed to an insurer."""
+    batch_reference = models.CharField(max_length=50, unique=True)
+    insurance_company = models.ForeignKey('InsuranceCompany', on_delete=models.CASCADE)
+    date_dispatched = models.DateField(auto_now_add=True)
+    total_batch_value = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    is_acknowledged = models.BooleanField(default=False)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+
+    def __str__(self):
+        return f"Dispatch Batch {self.batch_reference} -> {self.insurance_company.name} (Value: {self.total_batch_value})"
+
+    def recalculate_batch_value(self):
+        """
+        Dynamically aggregates the billed sum of all claims packed into this dispatch run.
+        """
+        total = self.claims.aggregate(total=models.Sum('total_amount_billed'))['total'] or 0.00
+        self.total_batch_value = total
+        self.save(update_fields=['total_batch_value'])
+
+class ClaimAttachment(models.Model):
+    """
+    Holds individual file uploads (Pre-auths, Biopsies, Nursing Charts) 
+    required to back up an insurance claim submission.
+    """
+    DOCUMENT_TYPES = [
+        ('PRE_AUTH', 'Pre-Authorization Form'),
+        ('BIOPSY', 'Histopathology / Biopsy Report'),
+        ('IMAGING', 'Radiology Report (CT/PET/MRI)'),
+        ('TREATMENT_PLAN', 'Oncologist Treatment Protocol Summary'),
+        ('NURSING_CHART', 'Signed Chemotherapy Administration Log'),
+        ('INVOICE', 'Itemized Detailed Ledger Statement'),
+        ('OTHER', 'Supporting Lab/Clinical Document'),
+    ]
+
+    claim = models.ForeignKey(
+        InsuranceClaim, 
+        on_delete=models.CASCADE, 
+        related_name='attachments'
+    )
+    document_type = models.CharField(max_length=30, choices=DOCUMENT_TYPES)
+    file = models.FileField(
+        upload_to='claim_attachments/%Y/%m/%d/',
+        help_text="Upload scanned PDF or Image of the document"
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    description = models.CharField(max_length=255, blank=True, help_text="e.g. Biopsy report from Lancet Log")
+
+    def __str__(self):
+        return f"{self.get_document_type_display()} for {self.claim.claim_number}"
+    
+
+class RemittanceBatch(models.Model):
+    """
+    Container for bulk payments received from insurers.
+    """
+    insurance_company = models.ForeignKey(InsuranceCompany, on_delete=models.CASCADE)
+    payment_reference = models.CharField(
+        max_length=100, 
+        unique=True, 
+        help_text="EFT Number, Cheque No, or Bank Transfer ID"
+    )
+    total_amount_received = models.DecimalField(max_digits=15, decimal_places=2)
+    date_received = models.DateField()
+    
+    # The formal document upload
+    remittance_file = models.FileField(
+        upload_to='remittances/', 
+        null=True, 
+        blank=True, 
+        help_text="Upload the PDF/Excel advice provided by the insurer"
+    )
+    
+    # Meta
+    reconciled_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name_plural = "Remittance Batches"
+
+    def __str__(self):
+        return f"REMIT-{self.payment_reference} ({self.insurance_company.name})"
+    
 
 
 class FixedAsset(models.Model):

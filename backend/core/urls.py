@@ -17,7 +17,7 @@ from .views import (
     SalamaTokenObtainPairView, RegistrationRecordViewSet, PsychologyEnrollmentViewSet,
     SessionLogViewSet, BereavementLogViewSet, OutreachCampaignViewSet, 
     ReferralPartnerViewSet, SocialMediaPostViewSet, ProtocolMasterViewSet,
-    ServiceViewSet, PatientBillableItemViewSet, patient_lookup,
+    ServiceViewSet, PatientBillableItemViewSet,
     PatientDiagnosisViewSet, SupplierViewSet, PurchaseOrderViewSet, 
     GoodsReceivedNoteViewSet, PurchaseInvoiceViewSet, PaymentVoucherViewSet,
     ICD10DiagnosisViewSet, PatientBillingSearchViewSet, PatientInvoiceViewSet,
@@ -129,8 +129,8 @@ urlpatterns = [
     path('finance/revenue-analytics/', FinancialRevenueAnalyticsView.as_view(), name='finance-revenue-analytics'),
     
     # Core Lookups and Proxy Routes
-    path('patients/lookup/', patient_lookup, name='patient-lookup'),
-    path('api/patients/lookup/', patient_lookup, name='api-patient-lookup'),
+    path('patients/lookup/', RegistrationRecordViewSet.as_view({'get': 'patient_lookup'}), name='patient-lookup'),
+    path('api/patients/lookup/', RegistrationRecordViewSet.as_view({'get': 'patient_lookup'}), name='api-patient-lookup'),
     path('icd11/token/', ICD11TokenProxyView.as_view(), name='icd11-token'),
 
     # Viewset Namespace Bindings - Resolves the frontend /api prefix breakdown safely
