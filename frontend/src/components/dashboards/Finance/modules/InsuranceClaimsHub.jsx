@@ -114,72 +114,50 @@ const InsuranceClaimsHub = () => {
   // Fetch available unsubmitted claims from the REST backend custom action
   const fetchUnsubmittedClaimsForInsurer = async (insurerId) => {
     setSelectedInsurerId(insurerId);
-    setSelectedClaimIds([]);
-    
     if (!insurerId) {
       setUnbatchedClaims([]);
       return;
     }
-
     try {
-      const response = await fetch(`/api/claim-dispatch-batches/unbatched-claims/?insurance_company_id=${insurerId}`, {
+      setIsLoading(true);
+      const res = await fetch(`/api/corporate-claims/?payer_id=${insurerId}&is_batched=false`, {
         headers: getAuthHeaders()
       });
-      if (response.ok) {
-        const data = await response.json();
+      if (res.ok) {
+        const data = await res.json();
         setUnbatchedClaims(data);
+      } else {
+        console.error("Failed fetching unsubmitted claims archive data panel");
       }
     } catch (err) {
-      console.error("Failed fetching outstanding medical claims inventory.", err);
+      console.error("Error connecting to claims endpoint tracking stream:", err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Toggle item selections inside the multi-select modal list array
-  const toggleClaimCheckboxSelection = (id) => {
-    setSelectedClaimIds(prev => 
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+  // 2. Multi-select check/uncheck claim toggler
+  const toggleClaimCheckboxSelection = (claimId) => {
+    setSelectedClaimIds(prev =>
+      prev.includes(claimId)
+        ? prev.filter(id => id !== claimId)
+        : [...prev, claimId]
     );
   };
 
-  // Compute live sums within the client viewport
+  // 3. Dynamic summary math calculator
   const calculateRunningBatchValueTotal = () => {
+    if (!unbatchedClaims || !selectedClaimIds) return 0;
     return unbatchedClaims
-      .filter(c => selectedClaimIds.includes(c.id))
-      .reduce((sum, c) => sum + c.billed_value, 0);
+      .filter(claim => claim && selectedClaimIds.includes(claim.id))
+      .reduce((sum, claim) => {
+        // Fallbacks to handle both claim.billed_value and backend nested variants safely
+        const value = claim.billed_value ?? claim.total_amount_billed ?? 0;
+        return sum + Number(value);
+      }, 0);
   };
 
-  // Live File Attachment Streamer linked to ClaimAttachment models
-  const handleFileUpload = async (claimId, documentTypeCode, fileObject) => {
-    try {
-      const formData = new FormData();
-      formData.append('claim', claimId);
-      formData.append('document_type', documentTypeCode);
-      formData.append('file', fileObject);
-      formData.append('description', `Uploaded via Claims Registry Console for ${documentTypeCode}`);
-
-      const authHeaders = getAuthHeaders(true);
-
-      const response = await fetch('/api/claim-attachments/', {
-        method: 'POST',
-        headers: {
-          'Authorization': authHeaders['Authorization'] || ''
-        },
-        body: formData
-      });
-
-      if (response.ok) {
-        await fetchBaseData(); 
-      } else {
-        const errText = await response.text();
-        console.error("Server rejected document transmission workflow rules:", errText);
-        alert("Failed to save document.");
-      }
-    } catch (error) {
-      console.error("Error staging claim documentation upload:", error);
-    }
-  };
-
-  // FIXED: Consolidated variables to resolve the execution reference errors
+  // 4. API Submission Post Handler
   const handleConfirmAndStampDispatch = async () => {
     if (!selectedInsurerId) return alert("Please select a target Insurance Company.");
     if (selectedClaimIds.length === 0) return alert("Please select at least one unpaid invoice to batch out.");
@@ -200,7 +178,7 @@ const InsuranceClaimsHub = () => {
         setIsDispatchModalOpen(false);
         setSelectedInsurerId('');
         setSelectedClaimIds([]);
-        fetchBaseData();
+        fetchBaseData(); 
       } else {
         const errData = await res.json();
         alert(`Batch generation failed: ${errData.error || JSON.stringify(errData)}`);
@@ -210,6 +188,7 @@ const InsuranceClaimsHub = () => {
     }
   };
 
+  // Flow transitions immediately to Remittance selection hooks without repeating the items above
   const handleBatchSelectionChange = (batchId) => {
     setRemitBatchId(batchId);
     if (!batchId) {
@@ -653,6 +632,7 @@ const InsuranceClaimsHub = () => {
                 ) : (
                   <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-48 overflow-y-auto shadow-inner">
                     {unbatchedClaims.map((claim) => {
+                      if (!claim) return null;
                       const isChecked = selectedClaimIds.includes(claim.id);
                       return (
                         <label 
@@ -667,12 +647,17 @@ const InsuranceClaimsHub = () => {
                               className="w-4 h-4 rounded border-slate-300 text-slate-950 focus:ring-slate-950 cursor-pointer"
                             />
                             <div>
-                              <span className="font-bold text-slate-900 block">{claim.patient_name}</span>
-                              <span className="font-mono text-[10px] text-slate-400">{claim.invoice_number}</span>
+                              {/* Added safe optional chain properties */}
+                              <span className="font-bold text-slate-900 block">
+                                {claim.patient_name || claim.patient_invoice?.patient_name || "Unknown Patient"}
+                              </span>
+                              <span className="font-mono text-[10px] text-slate-400">
+                                {claim.invoice_number || claim.patient_invoice?.invoice_number || "—"}
+                              </span>
                             </div>
                           </div>
                           <span className="font-mono font-black text-slate-900">
-                            KES {claim.billed_value.toLocaleString()}
+                            KES {Number(claim.billed_value ?? claim.total_amount_billed ?? 0).toLocaleString()}
                           </span>
                         </label>
                       );
