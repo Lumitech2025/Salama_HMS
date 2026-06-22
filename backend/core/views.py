@@ -1,5 +1,4 @@
 from django.http import JsonResponse
-
 from rest_framework import viewsets, filters, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -32,7 +31,7 @@ import logging
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import get_object_or_404
-
+from django.http import JsonResponse, Http404 
 import logging
 
 logger = logging.getLogger(__name__)
@@ -269,12 +268,34 @@ class ImagingRecordViewSet(viewsets.ModelViewSet):
     filterset_fields = ['patient']
 
 # --- 5. PRESCRIPTIONS & PHARMACY ---
+class PrescriptionFilter(django_filters.FilterSet):
+    # NumberFilter stops automatic database choice checking for foreign keys
+    patient = django_filters.NumberFilter()
+    pharmacy_status = django_filters.CharFilter()
+    visit = django_filters.NumberFilter(method='filter_by_smart_visit')
 
+    class Meta:
+        model = Prescription
+        fields = ['patient', 'visit', 'pharmacy_status']
+
+    def filter_by_smart_visit(self, queryset, name, value):
+        """
+        Smart filter that matches the lookup parameter value against either:
+        1. A direct Queue ID relationship (visit_id)
+        2. The underlying RegistrationRecord ID relationship (visit__visit_id)
+        """
+        return queryset.filter(
+            Q(visit_id=value) | 
+            Q(visit__visit_id=value)
+        )
+    
 class PrescriptionViewSet(viewsets.ModelViewSet):
     serializer_class = PrescriptionSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['patient', 'visit', 'pharmacy_status']
+    
+    # Swapped from filterset_fields to use our bypass filter set class
+    filterset_class = PrescriptionFilter
 
     def get_queryset(self):
         """
@@ -295,28 +316,48 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
     
     def get_object(self):
         """
-        SMART LOOKUP OVERRIDE: 
-        If the primary key sent by the frontend doesn't directly find a prescription,
-        fallback to searching for a prescription associated with that Visit ID / Queue tracking node.
+        SMART LOOKUP OVERRIDE
+        Handles direct PK lookup and falls back to searching via alternate 
+        routing contexts (Queue ID / Shared Registration Record).
         """
-        queryset = self.filter_queryset(self.get_queryset())
+        queryset = self.get_queryset()
+        
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field or 'pk'
         lookup_value = self.kwargs[lookup_url_kwarg]
 
-        try:
-            return super().get_object()
-        except Exception:
-            prescription = queryset.filter(visit_id=lookup_value).first()
-            if prescription:
-                return prescription
-                
-            queue_item = Queue.objects.filter(id=lookup_value).first()
-            if queue_item and queue_item.visit:
-                prescription = queryset.filter(visit=queue_item.visit).first()
-                if prescription:
-                    return prescription
+        # 1. Try fetching standard Prescription by its own Primary Key directly
+        lookup_field = self.lookup_field or 'pk'
+        prescription = queryset.filter(**{lookup_field: lookup_value}).first()
+        
+        if prescription:
+            self.check_object_permissions(self.request, prescription)
+            return prescription
+
+        # 2. Fallback 1: Check if lookup_value is matching a direct visit_id
+        prescription = queryset.filter(visit_id=lookup_value).first()
+        if prescription: 
+            self.check_object_permissions(self.request, prescription)
+            return prescription
             
-            raise Http404("No Prescription matches the given query parameters.")
+        # 3. Fallback 2: Check if lookup_value belongs to a Queue Tracking Node
+        from core.models import Queue  
+        queue_item = Queue.objects.filter(id=lookup_value).first()
+        if queue_item:
+            # Check if a prescription exists directly for this exact Queue node
+            prescription = queryset.filter(visit=queue_item).first()
+            if prescription: 
+                self.check_object_permissions(self.request, prescription)
+                return prescription
+            
+            # Check across the relationship chain if any prescription shares 
+            # the same underlying RegistrationRecord (visit__visit)
+            if queue_item.visit:
+                prescription = queryset.filter(visit__visit=queue_item.visit).first()
+                if prescription: 
+                    self.check_object_permissions(self.request, prescription)
+                    return prescription
+        
+        raise Http404("No Prescription matches the given query parameters.")
 
     def _get_deduction_qty(self, item):
         """Standardized fallback logic for oncology inventory depletion if raw metrics missing."""
@@ -327,7 +368,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_create(self, serializer):
-        from core.models import Queue, RegistrationRecord  # Adjust model import paths if needed
+        from core.models import Queue, RegistrationRecord  
         
         practitioner = self.request.user.get_full_name() or self.request.user.username
         diagnosis_obj = serializer.validated_data.get('diagnosis')
@@ -339,31 +380,33 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
         if raw_visit_val:
             try:
-                # Scenario A: The value sent is actually a direct primary key to a Queue record
-                if Queue.objects.filter(id=int(raw_visit_val)).exists():
-                    queue_instance = Queue.objects.get(id=int(raw_visit_val))
+                val_as_int = int(raw_visit_val)
+                
+                # Scenario A: The value sent is a direct primary key to a Queue record
+                queue_instance = Queue.objects.filter(id=val_as_int).first()
+                if queue_instance:
                     if not patient_obj:
-                        # Grab patient from the queue's registration record relationship cascade
-                        queue_reg = getattr(queue_instance, 'registration', None) or getattr(queue_instance, 'visit', None)
-                        patient_obj = getattr(queue_reg, 'patient', None)
+                        queue_reg = queue_instance.visit  # This is your RegistrationRecord
+                        if queue_reg:
+                            patient_obj = queue_reg.patient
                 
                 # Scenario B: The value sent is a RegistrationRecord ID (Oncology Portal pathway)
-                elif RegistrationRecord.objects.filter(id=int(raw_visit_val)).exists():
-                    registration_record = RegistrationRecord.objects.get(id=int(raw_visit_val))
-                    if not patient_obj:
-                        patient_obj = registration_record.patient
-                    
-                    # Track down the active Queue record associated with this specific registration node
-                    # prioritizing the active PHARMACY station route tracker.
-                    queue_instance = Queue.objects.filter(
-                        registration=registration_record
-                    ).first() or Queue.objects.filter(
-                        visit=registration_record
-                    ).first()
+                else:
+                    registration_record = RegistrationRecord.objects.filter(id=val_as_int).first()
+                    if registration_record:
+                        if not patient_obj:
+                            patient_obj = registration_record.patient
+                        
+                        queue_instance = Queue.objects.filter(
+                            visit=registration_record,
+                            current_station='PHARMACY'
+                        ).first() or Queue.objects.filter(
+                            visit=registration_record
+                        ).first()
+
             except (ValueError, TypeError):
                 pass
 
-        # Fallback to standard serializer validation extraction rules if above custom routing misses
         if not queue_instance:
             queue_instance = serializer.validated_data.get('visit')
             if queue_instance and not patient_obj:
@@ -372,16 +415,15 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
         # 2. Dynamic Diagnosis snapshot capture adjustments
         if not diagnosis_obj and queue_instance:
-            # Safely traverse the queue relations structure to locate the first listed clinical diagnosis
             reg_context = getattr(queue_instance, 'registration', None) or getattr(queue_instance, 'visit', None)
             underlying_clinic_visit = getattr(reg_context, 'visit', None) if reg_context else None
             if underlying_clinic_visit and hasattr(underlying_clinic_visit, 'diagnoses'):
                 diagnosis_obj = underlying_clinic_visit.diagnoses.first()
 
-        # 3. Save the master envelope with correct, explicitly resolved type models
+        # 3. Save master record
         prescription = serializer.save(
-            visit=queue_instance,   # This will now successfully receive a verified Queue instance
-            patient=patient_obj,    # Bypasses the strict NOT NULL constraint crash
+            visit=queue_instance,   
+            patient=patient_obj,    
             prescribed_by=practitioner,
             diagnosis=diagnosis_obj,
             pharmacy_status='PENDING'
@@ -477,10 +519,6 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='dispense')
     def dispense(self, request, pk=None):
-        """
-        Explicit POST router action endpoint mapping targeting:
-        POST /api/prescriptions/{id}/dispense/
-        """
         prescription = self.get_object()
         return self._dispense_prescription(request, prescription)
 
@@ -494,34 +532,32 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         from decimal import Decimal
 
         try:
-            # --- MULTI-PATHWAY REGISTRATION CONTEXT RESOLUTION ---
-            registration_context = None
-
-            if hasattr(prescription, 'registration') and prescription.registration:
-                registration_context = prescription.registration
-            elif hasattr(prescription, 'visit') and prescription.visit:
-                # Look up registration context from the associated Queue model
-                registration_context = getattr(prescription.visit, 'registration', None) or getattr(prescription.visit, 'visit', None) or prescription.visit
-
-            if not registration_context:
+            # 1. Target the Queue instance directly from the prescription record
+            queue_instance = prescription.visit
+            if not queue_instance:
                 return Response(
-                    {"error": "No active registration record context found for billing."}, 
+                    {"error": "No active queue ticket context found attached to this prescription."}, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
                 
-            # 1. Fetch or initialize the active open billing invoice ledger linked to the resolved context
-            # Fallback handling to pull the raw concrete entity id reference
-            concrete_visit = getattr(registration_context, 'visit', None) or registration_context
+            # 2. Extract the underlying registration record node safely using dual-attribute fallbacks
+            registration_record = getattr(queue_instance, 'visit', None) or getattr(queue_instance, 'registration', None)
+            if not registration_record:
+                return Response(
+                    {"error": "No clinical registration encounter found linked to this queue ticket."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
+            # 3. 🟢 FIXED: Pass registration_record here to satisfy the PatientInvoice ForeignKey relation mapping constraint.
             invoice, _ = PatientInvoice.objects.get_or_create(
-                visit=concrete_visit,
+                visit=registration_record,
                 patient=prescription.patient,
                 defaults={'status': 'UNPAID'}
             )
 
             fallback_pharmacy_service = Service.objects.filter(dept='PHA', active=True).first()
 
-            # 2. Extract item summaries provided directly by our frontend component
+            # 4. Extract item summaries provided directly by our frontend component
             meta_extensions = request.data.get('meta_extensions', {})
             frontend_items = meta_extensions.get('dispensation_summary', [])
 
@@ -533,7 +569,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                     if d_id:
                         frontend_items_map[int(d_id)] = fi
 
-            # 3. Process items within single transaction scope with row-level locks
+            # 5. Process items within single transaction scope with row-level locks
             for item in prescription.items.all():
                 if not item.drug:
                     continue
@@ -581,22 +617,21 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                         is_paid=False
                     )
 
-            # 4. Save structural status variables onto the master record envelope
+            # 6. Save structural status variables onto the master record envelope
             prescription.pharmacy_status = 'DISPENSED'
             if isinstance(meta_extensions, dict) and meta_extensions:
                 prescription.meta_extensions = meta_extensions
             prescription.save(update_fields=['pharmacy_status', 'meta_extensions'])
             
-            # 5. Route Patient registration visitation records to Billing station queue safely
-            if registration_context and registration_context.__class__.__name__ == 'Queue':
-                registration_context.current_station = 'BILLING'
-                registration_context.status = 'COMPLETED'
-                registration_context.save(update_fields=['current_station', 'status'])
+            # 7. Route the current queue ticket to the BILLING line
+            queue_instance.current_station = 'BILLING'
+            queue_instance.status = 'COMPLETED'
+            queue_instance.save(update_fields=['current_station', 'status'])
 
-            # 6. FIXED: Use the correct 'visit' keyword field mapped onto the Queue model to trigger escalation
-            if registration_context:
+            # 8. Target secondary tracking rows via the correct field relation mapping
+            if registration_record:
                 active_tickets = Queue.objects.filter(
-                    visit=concrete_visit, 
+                    visit=registration_record, 
                     current_station='PHARMACY'
                 )
                 for ticket in active_tickets:
@@ -607,10 +642,8 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             return Response(self.get_serializer(prescription).data, status=status.HTTP_200_OK)
             
         except ValueError as e:
-            # Handles expected stock or expiration business logic check violations cleanly
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            # Catch unexpected server anomalies safely
             return Response({"error": f"Internal dispensation logging error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
 # --- 6. APPOINTMENTS & BILLING ---
@@ -1490,8 +1523,6 @@ class MarketingRequisitionViewSet(viewsets.ModelViewSet):
 class InsuranceCompanyViewSet(viewsets.ModelViewSet):
     serializer_class = InsuranceCompanySerializer
     permission_classes = [IsAuthenticated]
-    
-    # Enable API parsers to seamlessly switch between structured JSON and Multipart file streams
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -1501,7 +1532,7 @@ class InsuranceCompanyViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """
         Overrides the default queryset to isolate aggregates into decoupled SQL subqueries,
-        eliminating the Cartesian Product duplication trap and enabling performant server-side sorting.
+        eliminating Cartesian Product duplication traps and enabling performant server-side sorting.
         """
         # 1. Isolate historical claim billings subquery to prevent join explosion
         claims_subquery = InsuranceClaim.objects.filter(
@@ -1511,11 +1542,10 @@ class InsuranceCompanyViewSet(viewsets.ModelViewSet):
         ).values('total')
 
         # 2. Isolate remittance batch collections subquery 
-        # (Ensure RemittanceBatch model mapping matches your exact app placement)
         batches_subquery = InsuranceClaim.objects.filter(
             insurance_company=OuterRef('pk')
         ).values('insurance_company').annotate(
-            total=Sum('amount_paid') # Point to the appropriate remittance aggregate field
+            total=Sum('amount_paid')
         ).values('total')
 
         # 3. Assemble parent query executing clean, performance-isolated sub-selections
@@ -1534,7 +1564,6 @@ class InsuranceCompanyViewSet(viewsets.ModelViewSet):
                 )
             )\
             .annotate(
-                # 👇 FIXED: Injected database-level expression so sorting works seamlessly out-of-the-box
                 annotated_aging_debt=ExpressionWrapper(
                     F('annotated_total_billed') - F('annotated_total_remitted'),
                     output_field=DecimalField()
@@ -1548,22 +1577,19 @@ class InsuranceCompanyViewSet(viewsets.ModelViewSet):
         parser_classes=[MultiPartParser, FormParser]
     )
     def upload_sla(self, request, pk=None):
-        """
-        Stitches the React UI file handler component to the database file storage.
-        Catches the separate, secondary multi-part binary stream upload securely.
-        """
         company = self.get_object()
-        serializer = InsuranceCompanySLAUploadSerializer(company, data=request.data, partial=True)
+        # Use the primary corporate profile serializer here instead
+        serializer = InsuranceCompanySerializer(company, data=request.data, partial=True)
         
         if serializer.is_valid():
             serializer.save()
             return Response({
                 "status": "SLA Document synchronized successfully.",
-                "sla_document_url": company.sla_document.url
+                "sla_document_url": company.sla_document.url if company.sla_document else None
             }, status=status.HTTP_200_OK)
             
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+    
     def destroy(self, request, *args, **kwargs):
         """
         Safety Guardrail: Prevent hard-deleting an insurance provider if they have active 
@@ -1579,10 +1605,6 @@ class InsuranceCompanyViewSet(viewsets.ModelViewSet):
 
 
 class InsuranceSchemeViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for individual insurance sub-plans and benefit matrices.
-    Provides standalone lookup capabilities for triage check-ins and frontend dropdowns.
-    """
     queryset = InsuranceScheme.objects.all().order_by('name')
     serializer_class = InsuranceSchemeSerializer
     permission_classes = [IsAuthenticated]
@@ -1591,11 +1613,6 @@ class InsuranceSchemeViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'company__name', 'classification']
 
     def get_queryset(self):
-        """
-        Allows quick-filtering sub-schemes by their parent provider identifier 
-        via clean request query parameters.
-        Example lookup: /api/insurance-schemes/?company_id=2
-        """
         queryset = super().get_queryset()
         company_id = self.request.query_params.get('company_id') or self.request.query_params.get('company')
         if company_id:
@@ -1604,15 +1621,9 @@ class InsuranceSchemeViewSet(viewsets.ModelViewSet):
 
 
 class RemittanceBatchViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing physical bulk bank remittance deposit statements.
-    Accommodates multipart form data streams for attached spreadsheet or PDF binary uploads.
-    """
     queryset = RemittanceBatch.objects.all().select_related('insurance_company', 'reconciled_by').order_by('-date_received', '-id')
     serializer_class = RemittanceBatchSerializer
     permission_classes = [IsAuthenticated]
-    
-    # 🌟 FIXED: Add explicit parsers to safely allow React to upload File / Document attachments
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -1635,10 +1646,6 @@ class InsuranceClaimFilter(django_filters.FilterSet):
 
 
 class InsuranceClaimViewSet(viewsets.ModelViewSet):
-    """
-    MERGED & FIXED: Consolidates both definitions into a single robust viewset.
-    Optimized via select_related and prefetch_related to load oncology claims with attachments efficiently.
-    """
     queryset = InsuranceClaim.objects.all().select_related(
         'patient', 'insurance_company', 'dispatch_batch', 'patient_invoice'
     ).prefetch_related('attachments').order_by('-date_submitted')
@@ -1648,7 +1655,6 @@ class InsuranceClaimViewSet(viewsets.ModelViewSet):
     filterset_class = InsuranceClaimFilter
     ordering_fields = ['total_amount_billed', 'shortfall_amount', 'date_submitted']
     
-    # 🌟 FIXED: Replaced non-existent 'patient_name' with structured text path lookups
     search_fields = [
         'claim_number', 
         'patient__name', 
@@ -1660,37 +1666,32 @@ class InsuranceClaimViewSet(viewsets.ModelViewSet):
     ]
 
     def get_serializer_class(self):
-        """
-        Dynamically toggle serializing rules. Use a high-performance simple list 
-        on broad matrices, and unpack complete deeply nested records for detail actions.
-        """
         if self.action in ['retrieve', 'update', 'partial_update']:
             return DetailedPatientClaimSerializer
         return InsuranceClaimSerializer
 
 
 class ClaimDispatchBatchViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet to manage consolidated envelopes submitted directly to health payers like SHA.
-    """
-    queryset = ClaimDispatchBatch.objects.all().select_related('insurance_company', 'created_by').order_by('-date_dispatched')
+    # 👇 FIXED: Injected .annotate(claims_count=...) directly here to completely solve N+1 problems in list loops
+    queryset = ClaimDispatchBatch.objects.all().select_related(
+        'insurance_company', 'created_by'
+    ).annotate(
+        claims_count=Count('claims')
+    ).order_by('-date_dispatched')
+    
     serializer_class = ClaimDispatchBatchSerializer
     permission_classes = [IsAuthenticated]
     
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['insurance_company', 'is_acknowledged']
     search_fields = ['batch_reference', 'insurance_company__name']
-    ordering_fields = ['date_dispatched', 'total_batch_value']
+    ordering_fields = ['date_dispatched', 'total_batch_value', 'claims_count']
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
     @action(detail=True, methods=['post'])
     def acknowledge_receipt(self, request, pk=None):
-        """
-        Custom action endpoint enabling the accounting desk to check off 
-        an entire batch once SHA/Insurer issues receipt confirmation documents.
-        """
         batch = self.get_object()
         batch.is_acknowledged = True
         batch.save(update_fields=['is_acknowledged'])
@@ -1698,10 +1699,6 @@ class ClaimDispatchBatchViewSet(viewsets.ModelViewSet):
 
 
 class ClaimAttachmentViewSet(viewsets.ModelViewSet):
-    """
-    🌟 NEW: Managed routing port allowing rapid uploads of clinical evidence 
-    documents directly from the Oncology treatment or triage modules.
-    """
     queryset = ClaimAttachment.objects.all()
     serializer_class = ClaimAttachmentSerializer
     permission_classes = [IsAuthenticated]
@@ -1710,10 +1707,6 @@ class ClaimAttachmentViewSet(viewsets.ModelViewSet):
 
 
 class CompileClaimDispatchBatchView(APIView):
-    """
-    API endpoint that accepts an array of claim IDs and compiles them 
-    into a structured ClaimDispatchBatch envelope for the designated payer.
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -1728,7 +1721,8 @@ class CompileClaimDispatchBatchView(APIView):
             
         try:
             with transaction.atomic():
-                # 1. Fetch claims matching the target company criteria that are still in 'DRAFT' status
+                # 1. Fetch claims matching target company criteria that are still in 'DRAFT' status
+                # select_for_update protects entries from concurrent modifications
                 claims_to_batch = InsuranceClaim.objects.filter(
                     id__in=claim_ids,
                     insurance_company_id=insurance_company_id,
@@ -1741,7 +1735,7 @@ class CompileClaimDispatchBatchView(APIView):
                         status=status.HTTP_400_BAD_REQUEST
                     )
 
-                # 2. Build unique custom tracking reference tag layout (e.g., DISP-SHA-20260618-001)
+                # 2. Build unique custom tracking reference tag layout
                 timestamp = timezone.now().strftime('%Y%m%d')
                 existing_batches_count = ClaimDispatchBatch.objects.filter(date_dispatched=timezone.now().date()).count()
                 sequence = str(existing_batches_count + 1).zfill(3)
@@ -1755,13 +1749,15 @@ class CompileClaimDispatchBatchView(APIView):
                     total_batch_value=0.00
                 )
 
-                # 4. Attach claims to the batch and update their workflow tracking flags
+                # 4. Attach claims to the batch and update workflow tracking flags
                 running_total_billed = 0
+                claims_count = 0
                 for claim in claims_to_batch:
                     claim.dispatch_batch = batch
                     claim.status = 'SUBMITTED'
                     claim.save(update_fields=['dispatch_batch', 'status'])
                     running_total_billed += claim.total_amount_billed
+                    claims_count += 1
 
                 # 5. Commit final calculated financial aggregation column data rows
                 batch.total_batch_value = running_total_billed
@@ -1771,7 +1767,7 @@ class CompileClaimDispatchBatchView(APIView):
                     "message": "Dispatch batch generated successfully.",
                     "batch_id": batch.id,
                     "batch_reference": batch.batch_reference,
-                    "total_claims_bundled": claims_to_batch.count(),
+                    "total_claims_bundled": claims_count,
                     "total_batch_value": float(batch.total_batch_value)
                 }, status=status.HTTP_201_CREATED)
 
@@ -2408,11 +2404,13 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save()
 
-    # 🌟 NEW: Custom action route allowing rapid partial offsets/payments against an expense balance voucher
     @action(detail=True, methods=['post'], url_path='offset-balance')
     def offset_balance(self, request, pk=None):
         expense = self.get_object()
         offset_amount_str = request.data.get('amount_to_pay')
+        
+        new_reference = request.data.get('reference')
+        new_document = request.FILES.get('document') # Read directly from files wrapper
 
         if not offset_amount_str:
             return Response(
@@ -2424,16 +2422,20 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             with transaction.atomic():
                 offset_amount = Decimal(str(offset_amount_str))
                 
-                # Enforce logical verification checks (Assuming your model tracks structural outstanding balances)
-                # If your model stores dynamic payment balances, adjust these attributes accordingly:
                 if hasattr(expense, 'amount_paid'):
+                    # Accumulate the paid balances safely
                     expense.amount_paid += offset_amount
-                    if hasattr(expense, 'remaining_balance'):
-                        expense.remaining_balance = max(Decimal('0.00'), expense.amount - expense.amount_paid)
                 else:
-                    # Fallback approach: directly reduce the master liability volume record if keeping items lightweight
                     expense.amount = max(Decimal('0.00'), expense.amount - offset_amount)
                 
+                if new_reference:
+                    expense.reference = new_reference
+                    
+                # 🌟 Update the verification attachment if uploaded
+                if new_document:
+                    expense.document = new_document
+                
+                # Save triggers the model logic calculating unpaid vs partial vs full
                 expense.save()
                 
                 # Return the updated object state back to the frontend
@@ -2445,7 +2447,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
                 {"error": f"Failed to execute ledger offset pipeline safely: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
+        
 class FinancialRevenueAnalyticsView(APIView):
     permission_classes = [IsAuthenticated]
 

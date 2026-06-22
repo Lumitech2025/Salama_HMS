@@ -5,7 +5,8 @@ import FinancialClearance from './modules/FinancialClearance';
 import InsuranceProviders from './modules/InsuranceProviders';
 import ServiceCatalogue from './modules/ServiceCatalogue';
 import PaymentPortal from '../receptionist/modules/PaymentPortal';
-import BillingHome from './modules/BillingHome';
+import BillingHome from '../receptionist/modules/Registration';
+import BillingOverview from './modules/BillingOverview';
 
 
 import { 
@@ -162,7 +163,7 @@ const BillingOfficerDashboard = () => {
   switch (activeTab) {
     case 'home': 
       return (
-        <BillingHome 
+        <BillingOverview 
           // 💳 CASH PATIENTS ROUTING PATHWAY
           onRouteToPayment={(patient) => {
             // Transform registration record into a shape PaymentPortal understands if needed, or pass directly
@@ -445,25 +446,7 @@ const BillingOfficerDashboard = () => {
       
       <main className="flex-1 p-10 overflow-y-auto">
         {/* Top Navbar segment */}
-        <div className="flex justify-between items-center mb-10">
-          <div className="bg-white px-5 py-2 rounded-full border border-slate-100 shadow-sm flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Billing Desk</span>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <button className="relative p-2 text-slate-400 hover:text-slate-900 transition-colors">
-              <Bell size={20} />
-              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full"></span>
-            </button>
-            <div className="flex items-center gap-3 pl-4 border-l border-slate-200">
-              <div className="text-right">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Linet</p>
-              </div>
-              <UserCircle size={32} className="text-slate-300" strokeWidth={1.5} />
-            </div>
-          </div>
-        </div>
+        
 
         {/* Content Render Outlet */}
         {renderContent()}

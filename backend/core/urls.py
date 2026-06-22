@@ -23,7 +23,7 @@ from .views import (
     ICD10DiagnosisViewSet, PatientBillingSearchViewSet, PatientInvoiceViewSet,
     ImagingOrderViewSet, ImagingResultViewSet, MpesaPaymentTriggerView,
     StockTakeViewSet, ExpenseViewSet, FinancialRevenueAnalyticsView,
-    CompileClaimDispatchBatchView,
+    CompileClaimDispatchBatchView, ClaimAttachmentViewSet,
     mpesa_callback_webhook, check_invoice_status,
 )
 
@@ -95,6 +95,7 @@ router.register(r'insurance-schemes', InsuranceSchemeViewSet, basename='insuranc
 router.register(r'remittance-batches', RemittanceBatchViewSet, basename='remittance-batch')
 router.register(r'insurance-claims', InsuranceClaimViewSet, basename='insurance-claim')
 router.register(r'claim-dispatch-batches', ClaimDispatchBatchViewSet, basename='claim-dispatch-batch')
+router.register(r'claim-attachments', ClaimAttachmentViewSet, basename='claim-attachment')
 
 # --- 10. Supply Chain & Procurement Matrix ---
 router.register(r'suppliers', SupplierViewSet, basename='supplier')
@@ -132,6 +133,8 @@ urlpatterns = [
     path('patients/lookup/', RegistrationRecordViewSet.as_view({'get': 'patient_lookup'}), name='patient-lookup'),
     path('api/patients/lookup/', RegistrationRecordViewSet.as_view({'get': 'patient_lookup'}), name='api-patient-lookup'),
     path('icd11/token/', ICD11TokenProxyView.as_view(), name='icd11-token'),
+
+    path('api/finance/claims/compile-batch/', CompileClaimDispatchBatchView.as_view(), name='compile-claim-batch'),
 
     # Viewset Namespace Bindings - Resolves the frontend /api prefix breakdown safely
     path('api/', include(router.urls)), 

@@ -18,11 +18,6 @@ import datetime
 
 from authentication.models import User
 
-# --- Clinical Models ---
-
-
-
-
 class RegistrationRecord(models.Model):
     GENDER_CHOICES = [('M', 'Male'), ('F', 'Female'), ('O', 'Other')]
     PAYMENT_MODE_CHOICES = [('CASH', 'Cash'), ('INSURANCE', 'Insurance')]
@@ -123,17 +118,34 @@ class Patient(models.Model):
     def save(self, *args, **kwargs):
         # Auto-generate HRN only if it doesn't exist yet (New Patients)
         if not self.health_record_number:
+            from django.utils import timezone
             short_year = str(timezone.now().year)[-2:]
+            
             with transaction.atomic():
-                # Find the maximum ID value currently in use safely
-                max_patient = Patient.objects.select_for_update().order_by('-id').first()
-                next_id = (max_patient.id + 1) if max_patient else 1
-                self.health_record_number = f"SCC-{str(next_id).zfill(3)}/{short_year}"
+                # 1. Look for the highest sequential number specifically generated for this year
+                latest_patient = (
+                    Patient.objects.select_for_update()
+                    .filter(health_record_number__endswith=f"/{short_year}")
+                    .order_by('-health_record_number')
+                    .first()
+                )
+                
+                if latest_patient and latest_patient.health_record_number:
+                    try:
+                        # Extract the '003' part from 'SCC-003/26' safely
+                        parts = latest_patient.health_record_number.split('/')
+                        number_part = parts[0].replace('SCC-', '')
+                        next_seq = int(number_part) + 1
+                    except (ValueError, IndexError):
+                        # Fallback if text format gets corrupted
+                        next_seq = Patient.objects.count() + 1
+                else:
+                    # Brand new sequence loop for a new calendar year
+                    next_seq = 1
+                
+                self.health_record_number = f"SCC-{str(next_seq).zfill(3)}/{short_year}"
         
         super().save(*args, **kwargs)
-
-    def __str__(self):
-        return f"{self.health_record_number or 'NO HRN'} - {self.name}"
 
 class Appointment(models.Model):
     VISIT_TYPE_CHOICES = [('NEW', 'New Visit'), ('SUBSEQUENT', 'Subsequent Visit')]

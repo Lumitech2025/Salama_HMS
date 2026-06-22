@@ -1020,7 +1020,6 @@ class InsuranceCompanyAdmin(admin.ModelAdmin):
             'fields': ('name', 'payer_code', 'payer_type', 'kra_pin', 'api_endpoint')
         }),
         ('Contact & Address Parameters', {
-            # 👇 FIXED: Swapped out non-existent portal_link with api_endpoint field mapping reference
             'fields': ('contact_person', 'contact_role', 'email', 'phone', 'physical_address', 'postal_address')
         }),
         ('Contract SLA & Tariff Management', {
@@ -1031,7 +1030,6 @@ class InsuranceCompanyAdmin(admin.ModelAdmin):
 
     def view_portal(self, obj):
         """Generates a secure shortcut link directly to the payer portal in a new tab."""
-        # 👇 FIXED: Points cleanly to real api_endpoint column values
         if obj.api_endpoint:
             return format_html('<a href="{}" target="_blank" style="font-weight: bold; color: #00796b;">Verify Sync API ↗</a>', obj.api_endpoint)
         return "No API Linked"
@@ -1057,9 +1055,8 @@ class InsuranceClaimAdmin(admin.ModelAdmin):
     # Optimizes DB overhead by replacing massive dropdowns with a sleek search modal box
     raw_id_fields = ('patient', 'insurance_company')
 
-    # Color code execution pathways for insurance claims in the admin index table
     def status_tag(self, obj):
-        # 👇 FIXED: Aligned keys perfectly with your InsuranceClaim model's real database choices
+        """Color codes execution pathways for insurance claims in the admin index table."""
         status_colors = {
             'DRAFT': '#757575',               # Neutral Slate Gray
             'SUBMITTED': '#0288d1',           # Vibrant Informational Blue
@@ -1071,7 +1068,7 @@ class InsuranceClaimAdmin(admin.ModelAdmin):
         color = status_colors.get(obj.status, '#757575')
         return format_html(
             '<span style="background-color: {}; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 11px; text-transform: uppercase;">{}</span>',
-            color, obj.get_status_display() # Use get_status_display() to show clean frontend wording ("Paid/Remitted") instead of raw DB keys
+            color, obj.get_status_display()
         )
     status_tag.short_description = 'Claim Status'
 
@@ -1110,9 +1107,10 @@ class RemittanceBatchAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         """Automatically stamp the administrative auditor's user ID onto newly registered bank files."""
-        if not change: # If creating a record via admin site
+        if not change: 
             obj.reconciled_by = request.user
         super().save_model(request, obj, form, change)
+
 
 @admin.register(ClaimDispatchBatch)
 class ClaimDispatchBatchAdmin(admin.ModelAdmin):
@@ -1128,24 +1126,30 @@ class ClaimDispatchBatchAdmin(admin.ModelAdmin):
     search_fields = ('batch_reference', 'insurance_company__name')
     ordering = ('-date_dispatched', '-id')
     
-    # Pre-emptively block dangerous edits on audited transactional properties
     readonly_fields = ('date_dispatched', 'created_by')
     raw_id_fields = ('insurance_company',)
     
+    # 🌟 FIXED: Override the primary query to annotate counts, dropping N+1 runtime traps completely
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        return queryset.annotate(annotated_claims_count=Count('claims'))
+    
     def claims_count_display(self, obj):
-        """Displays total number of patient files nested inside this batch record."""
-        count = obj.claims.count()
+        """Displays total number of patient files nested inside this batch record via clean SQL annotations."""
+        # Read directly from the annotated attribute instead of running obj.claims.count()
+        count = getattr(obj, 'annotated_claims_count', 0)
         if count == 0:
             return format_html('<span style="color: #c62828; font-weight: bold;">0 Claims (Empty)</span>')
         return format_html('<span style="color: #2e7d32; font-weight: bold;">{} Claims</span>', count)
+    
     claims_count_display.short_description = 'Claims Count'
+    claims_count_display.admin_order_field = 'annotated_claims_count'  # Allows the column to be clicked and sorted dynamically
 
     def save_model(self, request, obj, form, change):
         """Automatically audit-stamps the logged-in billing specialist compile signature."""
-        if not change:  # On record creation
+        if not change:  
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
-
 # --- Admin Configuration for Master Service Catalog ---
 
 @admin.register(Service)

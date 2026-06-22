@@ -434,7 +434,7 @@ const [monthlyGrowth, setMonthlyGrowth] = useState(Array(12).fill(0));
       </div>
 
       {/* 3. CORE FINANCIAL STATEMENTS */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm w-full">
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm w-full print:hidden">
         <h4 className="text-base font-bold text-slate-900 tracking-tight mb-6">Financial Statements</h4>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[
@@ -451,23 +451,49 @@ const [monthlyGrowth, setMonthlyGrowth] = useState(Array(12).fill(0));
                 </div>
 
                 <div className="space-y-3 bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1">
-                      <Calendar size={12} /> Timeline
-                    </span>
-                    <select 
-                      value={filter.type}
-                      onChange={(e) => handleTimelineChange(card.id, 'type', e.target.value)}
-                      className="text-xs font-semibold bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-slate-700 focus:outline-none focus:border-slate-400 cursor-pointer"
-                    >
-                      <option value="annual">Annual Statement</option>
-                      <option value="monthly">Monthly Statement</option>
-                      <option value="custom">Custom</option>
-                    </select>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1">
+                        <Calendar size={12} /> Timeline
+                      </span>
+                      <select 
+                        value={filter.type}
+                        onChange={(e) => handleTimelineChange(card.id, 'type', e.target.value)}
+                        className="text-xs font-semibold bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-slate-700 focus:outline-none focus:border-slate-400 cursor-pointer"
+                      >
+                        <option value="annual">Annual Statement</option>
+                        <option value="monthly">Monthly Statement</option>
+                        <option value="custom">Custom Range</option>
+                      </select>
+                    </div>
+
+                    {filter.type === 'monthly' && (
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 transition-all">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Select Month:</span>
+                        <select
+                          value={filter.month || '1'}
+                          onChange={(e) => handleTimelineChange(card.id, 'month', e.target.value)}
+                          className="text-xs bg-slate-50 border border-slate-200 rounded-md px-2 py-0.5 font-medium text-slate-700 focus:outline-none"
+                        >
+                          <option value="1">January</option>
+                          <option value="2">February</option>
+                          <option value="3">March</option>
+                          <option value="4">April</option>
+                          <option value="5">May</option>
+                          <option value="6">June</option>
+                          <option value="7">July</option>
+                          <option value="8">August</option>
+                          <option value="9">September</option>
+                          <option value="10">October</option>
+                          <option value="11">November</option>
+                          <option value="12">December</option>
+                        </select>
+                      </div>
+                    )}
                   </div>
 
                   {filter.type === 'custom' && (
-                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 animate-in slide-in-from-top-1 duration-150">
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 animate-in slide-in-from-top-1 duration-150">
                       <input type="date" value={filter.startDate} onChange={(e) => handleTimelineChange(card.id, 'startDate', e.target.value)} className="w-full text-xs bg-slate-50 border border-slate-200 rounded-md px-1.5 py-1 text-slate-700 font-medium focus:outline-none"/>
                       <input type="date" value={filter.endDate} onChange={(e) => handleTimelineChange(card.id, 'endDate', e.target.value)} className="w-full text-xs bg-slate-50 border border-slate-200 rounded-md px-1.5 py-1 text-slate-700 font-medium focus:outline-none"/>
                     </div>
@@ -490,115 +516,211 @@ const [monthlyGrowth, setMonthlyGrowth] = useState(Array(12).fill(0));
 
       {/* --- STATEMENT PREVIEW MODALS --- */}
       {activeReport && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-8 shadow-2xl relative flex flex-col text-left">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto animate-in fade-in duration-200 print:absolute print:inset-0 print:bg-white print:p-0 print:block">
+          
+          <style>{`
+            @media print {
+              body, html { background: #fff !important; color: #000 !important; width: 100%; }
+              .print\\:hidden { display: none !important; }
+              .printable-sheet-paper { border: none !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; width: 100% !important; max-width: 100% !important; max-height: none !important; overflow: visible !important; position: absolute !important; top: 0; left: 0; }
+              * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            }
+          `}</style>
+
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto p-8 shadow-2xl relative flex flex-col text-left printable-sheet-paper">
             
+            {/* Modal Control Top Bar */}
             <div className="flex justify-between items-center pb-4 border-b border-slate-200 mb-6 print:hidden">
               <div className="flex items-center gap-2 text-slate-900">
-                <FileSpreadsheet className="text-teal-500" size={22} />
-                <h3 className="text-sm font-bold capitalize">{activeReport.replace('_', ' ')} Registry Portal</h3>
+                <FileSpreadsheet className="text-slate-700" size={20} />
+                <h3 className="text-xs font-bold uppercase tracking-wider">{activeReport.replace('_', ' ')} Sheet Preview</h3>
               </div>
               <div className="flex items-center gap-3">
-                <button type="button" onClick={() => window.print()} className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition flex items-center gap-2 text-xs font-bold cursor-pointer">
-                  <Printer size={14} /> Print Ledger
+                <button type="button" onClick={() => window.print()} className="px-3 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg transition flex items-center gap-2 text-xs font-bold cursor-pointer shadow-2xs">
+                  <Printer size={14} /> Print Document
                 </button>
-                <button type="button" onClick={() => setActiveReport(null)} className="p-2 text-slate-400 hover:text-slate-600 rounded-lg transition cursor-pointer">
-                  <X size={20} />
+                <button type="button" onClick={() => setActiveReport(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition cursor-pointer">
+                  <X size={18} />
                 </button>
               </div>
             </div>
 
-            <div className="flex-1 font-mono text-xs text-slate-800 border border-slate-300 p-8 rounded-xl bg-white shadow-inner select-text">
-              <div className="flex flex-col items-center text-center space-y-2 pb-6 border-b-2 border-slate-900 relative">
-                {!imageError && (
-                  <div className="w-16 h-16 mb-1 object-contain">
-                    <img src={logoImg} alt="Salama Cancer Centre" className="w-full h-full object-contain" onError={() => setImageError(true)}/>
+            {/* Standard A4 Formal Paper Wrapper */}
+            <div className="flex-1 bg-white p-6 font-sans text-slate-800 print:p-0">
+              
+              {/* Header Letterhead Grid with Left Logo & Complete Address Info */}
+              <div className="flex flex-row items-start justify-between pb-6 border-b border-slate-300 gap-6">
+                <div className="flex items-start gap-5">
+                  {!imageError && (
+                    <img src={logoImg} alt="Salama Logo" className="h-20 w-auto object-contain shrink-0 mt-1" onError={() => setImageError(true)}/>
+                  )}
+                  <div className="space-y-1">
+                    <h2 className="text-xl font-black tracking-tight text-slate-900">SALAMA CANCER CENTRE</h2>
+                    <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">Financial Services Division</p>
+                    
+                    {/* Detailed Corporate Address Section */}
+                    <div className="pt-1 text-[11px] text-slate-500 font-medium space-y-0.5 font-mono">
+                      <p>P.O. Box 45212 - 00100, Nairobi, Kenya</p>
+                      <p>Tel: +254 (0) 20 271 4400 / +254 722 000 000</p>
+                      <p>Email: finance@salamacancer.org | Web: www.salamacancer.org</p>
+                    </div>
                   </div>
-                )}
-                <h2 className="text-xl font-bold tracking-tight text-slate-900 font-sans">SALAMA CANCER CENTRE</h2>
-                <p className="text-xs uppercase font-sans text-slate-500 font-bold tracking-wider">Nairobi, Kenya • Financial Services Division</p>
-                <p className="text-xs font-bold pt-2 uppercase underline decoration-1 tracking-widest font-sans text-slate-900">
+                </div>
+                
+                <div className="text-right shrink-0">
+                  <span className="inline-block text-[10px] font-bold px-2.5 py-1 bg-slate-100 rounded-md text-slate-700 tracking-wider font-mono uppercase print:bg-transparent print:border print:border-slate-300">
+                    OFFICIAL LEDGER
+                  </span>
+                  <p className="text-[10px] text-slate-400 font-mono mt-2">Date: {new Date().toLocaleDateString('en-GB')}</p>
+                </div>
+              </div>
+
+              {/* Title & Active Filter Flag */}
+              <div className="my-6 space-y-1.5">
+                <h3 className="text-sm font-bold uppercase tracking-widest text-slate-900 border-l-2 border-slate-900 pl-2">
                   {activeReport === 'balance_sheet' && "Statement of Financial Position (Balance Sheet)"}
                   {activeReport === 'pnl' && "Statement of Comprehensive Income (Profit & Loss)"}
-                  {activeReport === 'cash_flow' && "Statement of Cash Flows (Direct Method)"}
+                  {activeReport === 'cash_flow' && "Statement of Cash Flows"}
+                </h3>
+                <p className="text-[11px] text-slate-500 font-medium font-mono lowercase pl-2">
+                  reporting horizon: <span className="font-bold uppercase text-slate-700">{reportTimelines[activeReport].type}</span>
+                  {reportTimelines[activeReport].type === 'monthly' && ` (month code: ${reportTimelines[activeReport].month || '1'})`}
                 </p>
               </div>
 
-              {/* RENDER A: BALANCE SHEET */}
+              {/* RENDER A: BALANCE SHEET LEDGER TABLE */}
               {activeReport === 'balance_sheet' && (
-                <div className="space-y-6 mt-6">
+                <div className="space-y-6">
                   <div>
-                    <h4 className="font-bold border-b border-slate-300 pb-1 text-slate-900 uppercase font-sans">1. Assets Ledger</h4>
-                    <div className="pl-4 space-y-1.5 mt-2">
-                      <div className="flex justify-between"><span>Pharmacy Department Assets Value</span><span className="font-bold">KES {deptAssets.PHARMACY.toLocaleString()}</span></div>
-                      <div className="flex justify-between"><span>Laboratory Department Hardware</span><span className="font-bold">KES {deptAssets.LAB.toLocaleString()}</span></div>
-                      <div className="flex justify-between"><span>Radiology & Imaging Systems</span><span className="font-bold">KES {deptAssets.RADIOLOGY.toLocaleString()}</span></div>
-                      <div className="flex justify-between"><span>Nursing Unit Infrastructure</span><span className="font-bold">KES {deptAssets.NURSING.toLocaleString()}</span></div>
-                      <div className="flex justify-between"><span>General Administrative Properties</span><span className="font-bold">KES {deptAssets.ADMIN.toLocaleString()}</span></div>
-                      <div className="flex justify-between font-bold text-slate-900 border-t border-slate-200 pt-1.5 mt-1"><span>Total Fixed Assets Valuation</span><span>KES {totalAssets.toLocaleString()}</span></div>
-                    </div>
+                    <div className="bg-slate-900 text-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-t-sm">1.0 ASSETS ACCOUNTING UNITS</div>
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-300 text-slate-400 text-[10px] uppercase font-bold tracking-wider bg-slate-50/50">
+                          <th className="py-2 px-3 w-28 font-mono">Account Code</th>
+                          <th className="py-2 px-3">Description Category</th>
+                          <th className="py-2 px-3 text-right">Value Balance (KES)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                        <tr className="hover:bg-slate-50/40"><td className="py-2 px-3 font-mono text-slate-400 text-[11px]">1010-PHA</td><td className="py-2 px-3">Pharmacy Department Asset Inventories</td><td className="py-2 px-3 text-right font-mono">{deptAssets.PHARMACY.toLocaleString()}</td></tr>
+                        <tr className="hover:bg-slate-50/40"><td className="py-2 px-3 font-mono text-slate-400 text-[11px]">1020-LAB</td><td className="py-2 px-3">Laboratory Infrastructure & Diagnostic Systems</td><td className="py-2 px-3 text-right font-mono">{deptAssets.LAB.toLocaleString()}</td></tr>
+                        <tr className="hover:bg-slate-50/40"><td className="py-2 px-3 font-mono text-slate-400 text-[11px]">1030-RAD</td><td className="py-2 px-3">Radiology & Clinical Imaging Equipment Base</td><td className="py-2 px-3 text-right font-mono">{deptAssets.RADIOLOGY.toLocaleString()}</td></tr>
+                        <tr className="hover:bg-slate-50/40"><td className="py-2 px-3 font-mono text-slate-400 text-[11px]">1040-NUR</td><td className="py-2 px-3">Nursing Unit Ward Infrastructure Assets</td><td className="py-2 px-3 text-right font-mono">{deptAssets.NURSING.toLocaleString()}</td></tr>
+                        <tr className="hover:bg-slate-50/40"><td className="py-2 px-3 font-mono text-slate-400 text-[11px]">1050-ADM</td><td className="py-2 px-3">General Corporate Administrative Properties</td><td className="py-2 px-3 text-right font-mono">{deptAssets.ADMIN.toLocaleString()}</td></tr>
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-50 font-bold text-slate-900 border-t-2 border-slate-400">
+                          <td colSpan="2" className="py-2.5 px-3 text-right uppercase text-[10px] tracking-wider">Total Fixed Assets Portfolio</td>
+                          <td className="py-2.5 px-3 text-right font-mono border-b-2 border-slate-950">KES {totalAssets.toLocaleString()}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
                   </div>
+
                   <div>
-                    <h4 className="font-bold border-b border-slate-300 pb-1 text-slate-900 uppercase font-sans">2. Liabilities & Balanced Equity</h4>
-                    <div className="pl-4 space-y-1.5 mt-2">
-                      <div className="flex justify-between"><span>Accounts Payable (Unpaid Supplier Invoices)</span><span className="font-bold">KES {supplierPayablesPart.toLocaleString()}</span></div>
-                      <div className="flex justify-between"><span>Unpaid Operational Expense Vouchers</span><span className="font-bold">KES {unpaidExpensesPart.toLocaleString()}</span></div>
-                      <div className="flex justify-between font-bold text-slate-900 border-t border-slate-200 pt-1.5 mt-1"><span>Total Dynamic Liabilities</span><span>KES {totalLiabilities.toLocaleString()}</span></div>
-                    </div>
-                    <div className="pl-4 space-y-1 mt-4 border-t-2 border-slate-900 pt-2">
-                      <div className="flex justify-between font-bold text-slate-900 text-sm"><span>TOTAL STRUCTURAL EQUITY (Assets - Liabilities)</span><span>KES {structuralEquity.toLocaleString()}</span></div>
-                    </div>
+                    <div className="bg-slate-900 text-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-t-sm">2.0 LIABILITIES & BALANCED CURRENT EQUITIES</div>
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-300 text-slate-400 text-[10px] uppercase font-bold tracking-wider bg-slate-50/50">
+                          <th className="py-2 px-3 w-28 font-mono">Account Code</th>
+                          <th className="py-2 px-3">Description Category</th>
+                          <th className="py-2 px-3 text-right">Value Balance (KES)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                        <tr className="hover:bg-slate-50/40"><td className="py-2 px-3 font-mono text-slate-400 text-[11px]">2010-PAY</td><td className="py-2 px-3">Accounts Payable (Outstanding Vendor Invoices)</td><td className="py-2 px-3 text-right font-mono text-rose-600">{supplierPayablesPart.toLocaleString()}</td></tr>
+                        <tr className="hover:bg-slate-50/40"><td className="py-2 px-3 font-mono text-slate-400 text-[11px]">2020-OPX</td><td className="py-2 px-3">Unpaid Operational Expense Accrual Vouchers</td><td className="py-2 px-3 text-right font-mono text-rose-600">{unpaidExpensesPart.toLocaleString()}</td></tr>
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-50 font-bold text-slate-900 border-t-2 border-slate-400">
+                          <td colSpan="2" className="py-2.5 px-3 text-right uppercase text-[10px] tracking-wider">Total Aggregate Liabilities</td>
+                          <td className="py-2.5 px-3 text-right font-mono border-b border-slate-400">KES {totalLiabilities.toLocaleString()}</td>
+                        </tr>
+                        <tr className="bg-slate-100/80 font-black text-slate-950 border-t border-slate-300">
+                          <td colSpan="2" className="py-3 px-3 text-right uppercase text-[11px] tracking-widest text-slate-900">NET STRUCTURAL EQUITY BALANCE (Assets - Liabilities)</td>
+                          <td className="py-3 px-3 text-right font-mono text-sm border-b-4 border-double border-slate-950 bg-slate-100">KES {structuralEquity.toLocaleString()}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
                   </div>
                 </div>
               )}
 
-              {/* RENDER B: PROFIT & LOSS */}
+              {/* RENDER B: PROFIT & LOSS REPORT */}
               {activeReport === 'pnl' && (
-                <div className="space-y-6 mt-6">
+                <div className="space-y-6">
                   <div>
-                    <h4 className="font-bold border-b border-slate-300 pb-1 text-slate-900 uppercase font-sans">Operating Gross Revenue</h4>
-                    <div className="pl-4 space-y-1.5 mt-2">
-                      <div className="flex justify-between"><span>Hospital Point-Of-Sale Revenue Streams</span><span className="font-bold">KES {totalRevenue.toLocaleString()}</span></div>
-                      <div className="flex justify-between font-bold text-slate-900 border-t border-slate-200 pt-1.5 mt-1"><span>GROSS RECORDED REVENUE</span><span>KES {totalRevenue.toLocaleString()}</span></div>
-                    </div>
+                    <div className="bg-slate-900 text-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-t-sm">Operating Gross Revenues</div>
+                    <table className="w-full text-left text-xs border-collapse">
+                      <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                        <tr className="hover:bg-slate-50/40"><td className="py-3 px-4 w-28 font-mono text-slate-400">4010-REV</td><td className="py-3 px-4">Hospital Main Point-Of-Sale Medical Revenue Streams</td><td className="py-3 px-4 text-right font-mono">KES {totalRevenue.toLocaleString()}</td></tr>
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-50 font-bold text-slate-900 border-t border-slate-300">
+                          <td colSpan="2" className="py-2.5 px-4 text-right uppercase text-[10px] tracking-wider">GROSS ANCHOR OPERATING REVENUE</td>
+                          <td className="py-2.5 px-4 text-right font-mono border-b border-slate-400">KES {totalRevenue.toLocaleString()}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
                   </div>
+
                   <div>
-                    <h4 className="font-bold border-b border-slate-300 pb-1 text-slate-900 uppercase font-sans">Less: Expenditures (OPEX)</h4>
-                    <div className="pl-4 space-y-1.5 mt-2">
-                      <div className="flex justify-between"><span>Total Dynamic Accrued Expenditures</span><span className="font-bold">KES {totalExpenses.toLocaleString()}</span></div>
-                    </div>
-                  </div>
-                  <div className="border-t-2 border-slate-900 pt-3 mt-4">
-                    <div className="flex justify-between text-sm font-bold text-teal-700 font-sans">
-                      <span>NET OPERATING SURPLUS</span>
-                      <span>KES {(totalRevenue - totalExpenses).toLocaleString()}</span>
-                    </div>
+                    <div className="bg-slate-900 text-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-t-sm">Less: Operating Expenditures (OPEX)</div>
+                    <table className="w-full text-left text-xs border-collapse">
+                      <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                        <tr className="hover:bg-slate-50/40"><td className="py-3 px-4 w-28 font-mono text-slate-400">5010-EXP</td><td className="py-3 px-4">Dynamic General Operating Expenditures Ledger</td><td className="py-3 px-4 text-right font-mono text-rose-600">({totalExpenses.toLocaleString()})</td></tr>
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-50 font-bold text-slate-900 border-t border-slate-300">
+                          <td colSpan="2" className="py-2.5 px-4 text-right uppercase text-[10px] tracking-wider">TOTAL ACCRUED EXPENDITURES LOAD</td>
+                          <td className="py-2.5 px-4 text-right font-mono border-b border-slate-400 text-rose-600">({totalExpenses.toLocaleString()})</td>
+                        </tr>
+                        <tr className="bg-slate-100/80 font-black text-slate-950 border-t-2 border-slate-400">
+                          <td colSpan="2" className="py-3 px-4 text-right uppercase text-[11px] tracking-widest text-slate-900">NET RUNNING OPERATING SURPLUS</td>
+                          <td className="py-3 px-4 text-right font-mono text-sm border-b-4 border-double border-slate-950 bg-slate-100">
+                            KES {(totalRevenue - totalExpenses).toLocaleString()}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
                   </div>
                 </div>
               )}
 
-              {/* RENDER C: CASH FLOW */}
+              {/* RENDER C: CASH FLOW STATEMENT */}
               {activeReport === 'cash_flow' && (
-                <div className="space-y-6 mt-6">
-                  <div>
-                    <h4 className="font-bold border-b border-slate-300 pb-1 text-slate-900 uppercase font-sans">Operating Cash Flows</h4>
-                    <div className="pl-4 space-y-1.5 mt-2">
-                      <div className="flex justify-between"><span>Point of Sale Cash Collections</span><span className="font-bold">KES {totalRevenue.toLocaleString()}</span></div>
-                      <div className="flex justify-between"><span>Total Disbursals for Operations & Suppliers</span><span className="font-bold">(- KES {totalExpenses.toLocaleString()})</span></div>
-                      <div className="flex justify-between font-bold text-slate-900 border-t border-slate-200 pt-1.5 mt-2">
-                        <span>NET CASH FLOW FROM OPERATIONS</span>
-                        <span>KES {(totalRevenue - totalExpenses).toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="border-t-2 border-slate-900 pt-3 mt-4">
-                    <div className="flex justify-between text-sm font-bold text-slate-900 font-sans">
-                      <span>NET INCREASE IN LIQUID CASH BALANCE</span>
-                      <span>KES {(totalRevenue - totalExpenses).toLocaleString()}</span>
-                    </div>
-                  </div>
+                <div>
+                  <div className="bg-slate-900 text-white px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-t-sm">Operating Cash Flow Activities</div>
+                  <table className="w-full text-left text-xs border-collapse">
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                      <tr className="hover:bg-slate-50/40"><td className="py-3 px-4 w-28 font-mono text-slate-400">3010-OPS</td><td className="py-3 px-4">Point of Sale Direct Cash Collections Summary</td><td className="py-3 px-4 text-right font-mono">KES {totalRevenue.toLocaleString()}</td></tr>
+                      <tr className="hover:bg-slate-50/40"><td className="py-3 px-4 w-28 font-mono text-slate-400">3020-SUP</td><td className="py-3 px-4">Direct Cash Disbursements for Operations & Material Suppliers</td><td className="py-3 px-4 text-right font-mono text-rose-600">(- KES {totalExpenses.toLocaleString()})</td></tr>
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-slate-50 font-bold text-slate-900 border-t-2 border-slate-300">
+                        <td colSpan="2" className="py-2.5 px-4 text-right uppercase text-[10px] tracking-wider">NET CASH FLOW GENERATED FROM OPERATIONS</td>
+                        <td className="py-2.5 px-4 text-right font-mono border-b border-slate-400">KES {(totalRevenue - totalExpenses).toLocaleString()}</td>
+                      </tr>
+                      <tr className="bg-slate-100/80 font-black text-slate-950 border-t-2 border-slate-400">
+                        <td colSpan="2" className="py-3 px-4 text-right uppercase text-[11px] tracking-widest text-slate-900">NET ABSOLUTE INCREASE IN LIQUID CASH POSITION</td>
+                        <td className="py-3 px-4 text-right font-mono text-sm border-b-4 border-double border-slate-950 bg-slate-100">KES {(totalRevenue - totalExpenses).toLocaleString()}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
                 </div>
               )}
+
+              {/* CORPORATE SIGNATURE ATTESTATION BLOCKS */}
+              <div className="mt-16 pt-12 border-t border-dashed border-slate-300 grid grid-cols-2 gap-16 text-[10px] uppercase font-sans font-bold tracking-wider text-slate-400">
+                <div className="space-y-6">
+                  <div className="h-4 border-b border-slate-300"></div>
+                  <p className="pl-1">Prepared By: Lead Financial Accountant</p>
+                </div>
+                <div className="space-y-6">
+                  <div className="h-4 border-b border-slate-300"></div>
+                  <p className="pl-1">Certified By: Chief Internal Auditor</p>
+                </div>
+              </div>
 
             </div>
           </div>

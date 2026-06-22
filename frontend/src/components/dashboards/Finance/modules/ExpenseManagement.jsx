@@ -141,14 +141,14 @@ export default function ExpensesManagement({ onExpenseModified }) {
     try {
       const updateData = new FormData();
       updateData.append('reference', selectedExpense.reference);
-      updateData.append('amount_paid', selectedExpense.amount_paid);
+      updateData.append('amount_to_pay', selectedExpense.amount_paid);
       
       if (selectedExpense.newFileUploaded && selectedExpense.documentFileObject) {
         updateData.append('document', selectedExpense.documentFileObject);
       }
 
-      const response = await fetch(`${API_BASE_URL}${selectedExpense.id}/`, {
-        method: 'PATCH',
+      const response = await fetch(`${API_BASE_URL}${selectedExpense.id}/offset-balance/`, {
+        method: 'POST', 
         body: updateData
       });
 
@@ -156,10 +156,8 @@ export default function ExpensesManagement({ onExpenseModified }) {
       
       setIsEditModalOpen(false);
       
-      // Refresh the local expense table data
       await fetchExpenses();
 
-      // 🌟 AUTOMATIC REFLECTION: Update the parent dashboard's master ledger metrics instantly
       if (onExpenseModified) {
         onExpenseModified();
       }

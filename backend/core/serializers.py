@@ -1466,13 +1466,13 @@ class InsuranceSchemeSerializer(serializers.ModelSerializer):
     class Meta:
         model = InsuranceScheme
         fields = '__all__'
-        extra_kwargs = {'company': {'required': False}}
+        extra_kwargs = {'company': {'required': False, 'allow_null': True}}
 
 
 class InsuranceCompanySerializer(serializers.ModelSerializer):
     schemes = InsuranceSchemeSerializer(many=True, required=False)
 
-    # Dynamic metrics pointing to performant database sources
+    # Dynamic metrics pointing to performant database annotated sources
     total_billed = serializers.SerializerMethodField()
     total_remitted = serializers.SerializerMethodField()
     aging_debt = serializers.SerializerMethodField()
@@ -1480,55 +1480,35 @@ class InsuranceCompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = InsuranceCompany
         fields = [
-            'id', 
-            'name', 
-            'payer_code',
-            'payer_type',
-            'kra_pin', 
-            'api_endpoint',
-            'physical_address',
-            'postal_address',
-            'contact_person', 
-            'contact_role',
-            'email', 
-            'phone', 
-            'contract_start_date',
-            'contract_end_date',
-            'price_list_tariff',
-            'claim_submission_window',
-            'corporate_discount_rate',
-            'total_billed', 
-            'total_remitted', 
-            'aging_debt',
-            'sla_document',  # 👇 FIXED: Restored field visibility for frontend rendering
-            'schemes'  
+            'id', 'name', 'payer_code', 'payer_type', 'kra_pin', 
+            'api_endpoint', 'physical_address', 'postal_address',
+            'contact_person', 'contact_role', 'email', 'phone', 
+            'contract_start_date', 'contract_end_date', 'price_list_tariff',
+            'claim_submission_window', 'corporate_discount_rate',
+            'total_billed', 'total_remitted', 'aging_debt',
+            'sla_document', 'schemes'  
         ]
-        # Protect cached financial targets and documents from blind json writes
         read_only_fields = ['total_billed', 'total_remitted', 'aging_debt', 'sla_document']
 
-    # --- Optimized Performance Computations ---
-    def get_total_billed(self, obj):
-        if hasattr(obj, 'annotated_total_billed'):
+    def get_total_billed(self, obj) -> float:
+        if hasattr(obj, 'annotated_total_billed') and obj.annotated_total_billed is not None:
             return float(obj.annotated_total_billed)
-        # 👇 FIXED: Leverages the stored database column field instead of looping relations
-        return float(obj.total_billed or 0.00)
+        return float(getattr(obj, 'total_billed', 0.00) or 0.00)
 
-    def get_total_remitted(self, obj):
-        if hasattr(obj, 'annotated_total_remitted'):
+    def get_total_remitted(self, obj) -> float:
+        if hasattr(obj, 'annotated_total_remitted') and obj.annotated_total_remitted is not None:
             return float(obj.annotated_total_remitted)
-        # 👇 FIXED: Safely references the tracked aggregate column
-        return float(obj.total_remitted or 0.00)
+        return float(getattr(obj, 'total_remitted', 0.00) or 0.00)
 
-    def get_aging_debt(self, obj):
-        # Always read straight from model property or perform fast local abstraction
-        return float(obj.aging_debt or 0.00)
+    def get_aging_debt(self, obj) -> float:
+        if hasattr(obj, 'annotated_aging_debt') and obj.annotated_aging_debt is not None:
+            return float(obj.annotated_aging_debt)
+        return float(getattr(obj, 'aging_debt', 0.00) or 0.00)
 
-    # --- Hardened Writable Nested Logic ---
     def create(self, validated_data):
-        """Extracts and writes inline scheme structures cleanly during creation"""
         schemes_data = validated_data.pop('schemes', [])
         
-        # Strip out any incoming placeholder IDs present during basic profile initialization
+        # Eliminate unique client staging IDs during profile creation
         for scheme in schemes_data:
             scheme.pop('id', None)
             
@@ -1539,61 +1519,46 @@ class InsuranceCompanySerializer(serializers.ModelSerializer):
         return company
 
     def update(self, instance, validated_data):
-        """Synchronizes parent attributes and reconciles child scheme entries safely"""
         has_schemes = 'schemes' in validated_data
         schemes_data = validated_data.pop('schemes', None)
         
-        # 1. Update core corporate layout configurations
+        # 1. Update Core Corporate Attributes
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        # 2. Reconcile nested child rows safely
+        # 2. Reconcile Child Schemes Safely
         if has_schemes and schemes_data is not None:
             keep_schemes = []
             for scheme_data in schemes_data:
                 scheme_id = scheme_data.get('id', None)
                 
-                # Intercept and clean out temporary React client keys
+                # Check for and sanitize temporary React client keys
                 if scheme_id and str(scheme_id).startswith('temp-'):
                     scheme_id = None
                 
-                # Clean up data dictionary for active saving
+                # 👇 FIXED: Pop 'id' only AFTER executing conditional logical validations
                 scheme_data.pop('id', None)
 
                 if scheme_id:
                     try:
-                        # 👇 FIXED: Coerce to clean integer now that string safety check has cleared
                         scheme_item = InsuranceScheme.objects.get(id=int(scheme_id), company=instance)
                         for attr, value in scheme_data.items():
                             setattr(scheme_item, attr, value)
                         scheme_item.save()
                         keep_schemes.append(scheme_item.id)
                     except (InsuranceScheme.DoesNotExist, ValueError):
-                        # Graceful creation fallback if mismatch occurs
                         new_scheme = InsuranceScheme.objects.create(company=instance, **scheme_data)
                         keep_schemes.append(new_scheme.id)
                 else:
-                    # Instantiate fresh sub-plan added dynamically via UI additions line
                     new_scheme = InsuranceScheme.objects.create(company=instance, **scheme_data)
                     keep_schemes.append(new_scheme.id)
 
-            # 3. Purge missing items dropped during user table edits
+            # 3. Purge dropped rows from the ledger context
             instance.schemes.exclude(id__in=keep_schemes).delete()
 
         return instance
 
-
-class ClaimAttachmentSerializer(serializers.ModelSerializer):
-    """
-    Nested read-only serializer to display attached biopsy reports, 
-    pre-auth letters, and nursing charts on the React dashboard.
-    """
-    document_type_display = serializers.CharField(source='get_document_type_display', read_only=True)
-
-    class Meta:
-        model = ClaimAttachment
-        fields = ['id', 'document_type', 'document_type_display', 'file', 'description', 'uploaded_at']
 
 
 class RemittanceBatchSerializer(serializers.ModelSerializer):
@@ -1617,40 +1582,131 @@ class RemittanceBatchSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class ClaimAttachmentSerializer(serializers.ModelSerializer):
+    """
+    Handles file listings and direct file binary uploads via your existing viewset.
+    """
+    document_type_display = serializers.CharField(source='get_document_type_display', read_only=True)
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ClaimAttachment
+        fields = ['id', 'claim', 'document_type', 'document_type_display', 'file', 'file_url', 'description']
+        extra_kwargs = {
+            'file': {'required': True}
+        }
+
+    def get_file_url(self, obj):
+        return obj.file.url if obj.file else None
+
+    def create(self, validated_data):
+        """
+        Idempotency Guard: If an attachment of this document type already exists 
+        for this claim, delete it first to achieve an automatic "Update / Replace" behavior.
+        """
+        claim = validated_data.get('claim')
+        doc_type = validated_data.get('document_type')
+        
+        existing = ClaimAttachment.objects.filter(claim=claim, document_type=doc_type).first()
+        if existing:
+            if existing.file:
+                existing.file.delete(save=False) # delete binary from storage
+            existing.delete() # drop the row database record
+            
+        return super().create(validated_data)
+
+
 class InsuranceClaimSerializer(serializers.ModelSerializer):
-    """
-    FIXED: Resolved the patient_name structural model crash and linked 
-    the related source patient invoice fields cleanly.
-    """
-    insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
+    # Explicit method fields to avoid silent relationship traversal drops
     patient_display_name = serializers.SerializerMethodField()
-    invoice_number = serializers.CharField(source='patient_invoice.invoice_number', read_only=True)
+    health_record_number = serializers.SerializerMethodField()
+    insurance_company_name = serializers.SerializerMethodField()
+    insurance_number = serializers.SerializerMethodField()
+    invoice_number_display = serializers.SerializerMethodField()
+    billed_invoice_value = serializers.SerializerMethodField()
+    
+    attachments = ClaimAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = InsuranceClaim
         fields = [
-            'id', 'claim_number', 'patient', 'patient_display_name', 'patient_invoice', 'invoice_number',
-            'insurance_company', 'insurance_company_name', 'pre_auth_code', 'pre_auth_approved_amount',
-            'total_amount_billed', 'amount_paid', 'shortfall_amount', 'status', 'date_submitted', 
-            'rejection_reason', 'remittance_reference'
+            'id', 'claim_number', 'patient', 'patient_display_name', 'health_record_number',
+            'insurance_company', 'insurance_company_name', 'insurance_number',
+            'patient_invoice', 'invoice_number_display', 'billed_invoice_value', 'pre_auth_code', 
+            'pre_auth_approved_amount', 'total_amount_billed', 'amount_paid', 'shortfall_amount', 
+            'status', 'date_submitted', 'rejection_reason', 'remittance_reference', 
+            'dispatch_batch', 'attachments'
         ]
 
+    # Helper helper to dynamically handle whether your field is named 'invoice' or 'patient_invoice'
+    def _get_invoice(self, obj):
+        if hasattr(obj, 'patient_invoice') and obj.patient_invoice:
+            return obj.patient_invoice
+        if hasattr(obj, 'invoice') and obj.invoice:
+            return obj.invoice
+        return None
+
     def get_patient_display_name(self, obj):
-        # Gracefully safe guard fallbacks for standard name rendering
-        if obj.patient:
-            if hasattr(obj.patient, 'name') and obj.patient.name:
-                return obj.patient.name
-            return f"{getattr(obj.patient, 'first_name', '')} {getattr(obj.patient, 'last_name', '')}".strip() or "Unnamed Patient"
+        invoice = self._get_invoice(obj)
+        if invoice and invoice.visit:
+            return invoice.visit.full_name
+        if obj.patient and hasattr(obj.patient, 'name'):
+            return obj.patient.name
         return "Unknown Patient"
 
+    def get_health_record_number(self, obj):
+        invoice = self._get_invoice(obj)
+        if invoice and invoice.visit:
+            return invoice.visit.health_record_number
+        if obj.patient and hasattr(obj.patient, 'health_record_number'):
+            return obj.patient.health_record_number
+        return "—"
+
+    def get_insurance_company_name(self, obj):
+        if obj.insurance_company:
+            return obj.insurance_company.name
+        invoice = self._get_invoice(obj)
+        if invoice and invoice.visit and invoice.visit.insurance_company:
+            return invoice.visit.insurance_company.name
+        return "Direct Client / Self Pay"
+
+    def get_insurance_number(self, obj):
+        invoice = self._get_invoice(obj)
+        if invoice and invoice.visit:
+            return invoice.visit.insurance_number or "No Policy Number"
+        return "—"
+
+    def get_invoice_number_display(self, obj):
+        invoice = self._get_invoice(obj)
+        return invoice.invoice_number if invoice else "Draft Ledger"
+
+    def get_billed_invoice_value(self, obj):
+        invoice = self._get_invoice(obj)
+        if invoice:
+            return invoice.total_payable
+        return 0.00
+
+    def create(self, validated_data):
+        # Auto-generation lifecycles
+        invoice = validated_data.get('patient_invoice') or validated_data.get('invoice')
+        
+        if invoice and not validated_data.get('total_amount_billed'):
+            validated_data['total_amount_billed'] = invoice.total_payable
+
+        if not validated_data.get('claim_number'):
+            short_year = timezone.now().strftime('%y')
+            validated_data['claim_number'] = f"CLM-{short_year}-{random.randint(1000, 9999)}"
+
+        if not validated_data.get('pre_auth_code'):
+            validated_data['pre_auth_code'] = f"AUTH-2026-TMP{random.randint(10000, 99999)}"
+
+        return super().create(validated_data)
 
 class ClaimDispatchBatchSerializer(serializers.ModelSerializer):
-    """
-    Refactored to cleanly expose summary items needed for bulk shipping lines.
-    """
     insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
-    claims_count = serializers.IntegerField(source='claims.count', read_only=True)
     sender_username = serializers.CharField(source='created_by.username', read_only=True)
+    
+    claims_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = ClaimDispatchBatch
@@ -1663,18 +1719,11 @@ class ClaimDispatchBatchSerializer(serializers.ModelSerializer):
 
 
 class DetailedPatientClaimSerializer(serializers.ModelSerializer):
-    """
-    Serializer explicitly tuned to handle the multi-column oncology registry matrix,
-    now featuring deep nested loading of required clinical attachments.
-    """
     insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
     dispatch_batch_reference = serializers.CharField(source='dispatch_batch.batch_reference', read_only=True)
     invoice_number = serializers.CharField(source='patient_invoice.invoice_number', read_only=True)
     patient_policy_number = serializers.CharField(source='patient.policy_number', default="N/A", read_only=True) 
-    
     patient_display_name = serializers.SerializerMethodField()
-    
-    # 🌟 NEW ATTACHMENT PORT: Nested access to check loaded oncology items (Biopsies, Pre-auths)
     attachments = ClaimAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
@@ -1689,11 +1738,12 @@ class DetailedPatientClaimSerializer(serializers.ModelSerializer):
 
     def get_patient_display_name(self, obj):
         if obj.patient:
-            if hasattr(obj.patient, 'name') and obj.patient.name:
+            if getattr(obj.patient, 'name', None):
                 return obj.patient.name
-            return f"{getattr(obj.patient, 'first_name', '')} {getattr(obj.patient, 'last_name', '')}".strip() or "Unnamed Patient"
+            first_name = getattr(obj.patient, 'first_name', '') or ''
+            last_name = getattr(obj.patient, 'last_name', '') or ''
+            return f"{first_name} {last_name}".strip() or "Unnamed Patient"
         return "Unknown Patient"
-    
 
 
 class ServiceSerializer(serializers.ModelSerializer):
@@ -2138,11 +2188,8 @@ class FixedAssetSerializer(serializers.ModelSerializer):
         return float(max(0, (cost - salvage) * rate * quantity))
     
 class ExpenseSerializer(serializers.ModelSerializer):
-    # Display plain text labels for choices instead of raw keys in GET requests
     category_display = serializers.CharField(source='get_category_display', read_only=True)
     behavior_display = serializers.CharField(source='get_behavior_display', read_only=True)
-    
-    # Read-only field to cleanly show only the file name to the frontend
     document_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -2156,13 +2203,16 @@ class ExpenseSerializer(serializers.ModelSerializer):
             'behavior_display', 
             'date', 
             'amount', 
+            'amount_paid',   # 🌟 ADD THIS
+            'status',        # 🌟 ADD THIS
             'reference', 
             'document', 
             'document_name',
             'created_at', 
             'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        # 🌟 Status is read-only because your model's save method overrides it!
+        read_only_fields = ['id', 'status', 'created_at', 'updated_at']
 
     def get_document_name(self, obj):
         if obj.document:
@@ -2170,7 +2220,6 @@ class ExpenseSerializer(serializers.ModelSerializer):
         return None
 
     def validate_reference(self, value):
-        # Convert empty strings or spaces from frontend inputs into the clean pending flag
         if not value or str(value).strip() == "":
             return "PENDING_SORT"
         return value
