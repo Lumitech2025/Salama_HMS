@@ -1617,20 +1617,22 @@ class ClaimAttachmentSerializer(serializers.ModelSerializer):
 
 
 class InsuranceClaimSerializer(serializers.ModelSerializer):
-    # Explicit method fields to avoid silent relationship traversal drops
-    patient_display_name = serializers.SerializerMethodField()
-    health_record_number = serializers.SerializerMethodField()
+    patient_name = serializers.SerializerMethodField()
+    patient_hrn = serializers.SerializerMethodField()
     insurance_company_name = serializers.SerializerMethodField()
     insurance_number = serializers.SerializerMethodField()
     invoice_number_display = serializers.SerializerMethodField()
     billed_invoice_value = serializers.SerializerMethodField()
+    
+    # This automatically maps the 'claim_number' database column to 'claim_reference' for React
+    claim_reference = serializers.CharField(source='claim_number', read_only=True) 
     
     attachments = ClaimAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = InsuranceClaim
         fields = [
-            'id', 'claim_number', 'patient', 'patient_display_name', 'health_record_number',
+            'id', 'claim_number', 'claim_reference', 'patient', 'patient_name', 'patient_hrn',
             'insurance_company', 'insurance_company_name', 'insurance_number',
             'patient_invoice', 'invoice_number_display', 'billed_invoice_value', 'pre_auth_code', 
             'pre_auth_approved_amount', 'total_amount_billed', 'amount_paid', 'shortfall_amount', 
@@ -1638,7 +1640,7 @@ class InsuranceClaimSerializer(serializers.ModelSerializer):
             'dispatch_batch', 'attachments'
         ]
 
-    # Helper helper to dynamically handle whether your field is named 'invoice' or 'patient_invoice'
+    # Helper method to safely locate the invoice instance
     def _get_invoice(self, obj):
         if hasattr(obj, 'patient_invoice') and obj.patient_invoice:
             return obj.patient_invoice
@@ -1646,15 +1648,17 @@ class InsuranceClaimSerializer(serializers.ModelSerializer):
             return obj.invoice
         return None
 
-    def get_patient_display_name(self, obj):
+    # 2. MATCH THE METHOD FIELD GETTERS WITH THE NEW CODES ABOVE:
+    def get_patient_name(self, obj):
         invoice = self._get_invoice(obj)
         if invoice and invoice.visit:
-            return invoice.visit.full_name
+            # Handles if your model uses full_name or name
+            return getattr(invoice.visit, 'full_name', getattr(invoice.visit, 'name', 'Unknown Patient'))
         if obj.patient and hasattr(obj.patient, 'name'):
             return obj.patient.name
         return "Unknown Patient"
 
-    def get_health_record_number(self, obj):
+    def get_patient_hrn(self, obj):
         invoice = self._get_invoice(obj)
         if invoice and invoice.visit:
             return invoice.visit.health_record_number
@@ -1687,7 +1691,6 @@ class InsuranceClaimSerializer(serializers.ModelSerializer):
         return 0.00
 
     def create(self, validated_data):
-        # Auto-generation lifecycles
         invoice = validated_data.get('patient_invoice') or validated_data.get('invoice')
         
         if invoice and not validated_data.get('total_amount_billed'):

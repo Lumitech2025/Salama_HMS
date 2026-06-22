@@ -21,10 +21,11 @@ const InsuranceClaimsHub = () => {
   // Interactive UI Modal Modifiers
   const [selectedClaimForModal, setSelectedClaimForModal] = useState(null);
   
-  // Tab 2 (Dispatch Modal) states
+  // Tab 2 (Dispatch Modal) states - UNIFORM ARCHITECTURE
   const [isDispatchModalOpen, setIsDispatchModalOpen] = useState(false);
-  const [dispatchInsurerId, setDispatchInsurerId] = useState('');
-  const [dispatchSelectedClaimIds, setDispatchSelectedClaimIds] = useState([]);
+  const [selectedInsurerId, setSelectedInsurerId] = useState("");
+  const [unbatchedClaims, setUnbatchedClaims] = useState([]);
+  const [selectedClaimIds, setSelectedClaimIds] = useState([]);
 
   // Tab 3 (Remittance Modal) states
   const [isRemitModalOpen, setIsRemitModalOpen] = useState(false);
@@ -42,6 +43,7 @@ const InsuranceClaimsHub = () => {
 
   // --- REUSABLE AUTHENTICATED REQUEST HEADER BUILDER ---
   const getAuthHeaders = (isMultipart = false) => {
+    // FIXED: Adjusted token key lookup parameter to access_token uniformly
     const token = localStorage.getItem('access_token');
     const headers = {};
     if (!isMultipart) {
@@ -109,75 +111,86 @@ const InsuranceClaimsHub = () => {
     };
   }, [claims]);
 
+  // Fetch available unsubmitted claims from the REST backend custom action
+  const fetchUnsubmittedClaimsForInsurer = async (insurerId) => {
+    setSelectedInsurerId(insurerId);
+    setSelectedClaimIds([]);
+    
+    if (!insurerId) {
+      setUnbatchedClaims([]);
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/claim-dispatch-batches/unbatched-claims/?insurance_company_id=${insurerId}`, {
+        headers: getAuthHeaders()
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setUnbatchedClaims(data);
+      }
+    } catch (err) {
+      console.error("Failed fetching outstanding medical claims inventory.", err);
+    }
+  };
+
+  // Toggle item selections inside the multi-select modal list array
+  const toggleClaimCheckboxSelection = (id) => {
+    setSelectedClaimIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  // Compute live sums within the client viewport
+  const calculateRunningBatchValueTotal = () => {
+    return unbatchedClaims
+      .filter(c => selectedClaimIds.includes(c.id))
+      .reduce((sum, c) => sum + c.billed_value, 0);
+  };
+
   // Live File Attachment Streamer linked to ClaimAttachment models
   const handleFileUpload = async (claimId, documentTypeCode, fileObject) => {
     try {
-      // 1. Prepare standard browser Form Data multipart payload wrapper
       const formData = new FormData();
       formData.append('claim', claimId);
       formData.append('document_type', documentTypeCode);
       formData.append('file', fileObject);
       formData.append('description', `Uploaded via Claims Registry Console for ${documentTypeCode}`);
 
-      // 2. POST directly to your existing attachment viewset endpoint URL
-      // We fetch your authorization headers dynamically here
-      const authHeaders = typeof getAuthHeaders === 'function' ? getAuthHeaders() : {};
+      const authHeaders = getAuthHeaders(true);
 
       const response = await fetch('/api/claim-attachments/', {
         method: 'POST',
         headers: {
-          // CRITICAL: Leave 'Content-Type' completely empty when using FormData. 
-          // The browser will automatically set 'multipart/form-data' and inject the boundary key.
-          'Authorization': authHeaders['Authorization'] || authHeaders['authorization'] || ''
+          'Authorization': authHeaders['Authorization'] || ''
         },
         body: formData
       });
 
       if (response.ok) {
-        const responseData = await response.json();
-
-        // 3. Refresh live claims data state so the badge turns Green instantly!
-        if (typeof fetchBaseData === 'function') {
-          // This hits your Promise.all pipeline and updates your entire grid cleanly!
-          await fetchBaseData(); 
-        } else {
-          // Fallback local state synchronization block if parent fetch is out of lexical scope
-          setClaims(prevClaims => prevClaims.map(c => {
-            if (c.id === claimId) {
-              const updatedAttachments = c.attachments ? [...c.attachments] : [];
-              // Filter out old file instance configurations of the same code structure
-              const filtered = updatedAttachments.filter(a => a.document_type !== documentTypeCode);
-              return {
-                ...c,
-                attachments: [...filtered, responseData]
-              };
-            }
-            return c;
-          }));
-        }
+        await fetchBaseData(); 
       } else {
         const errText = await response.text();
         console.error("Server rejected document transmission workflow rules:", errText);
-        alert("Failed to save document. Please check server validation configuration parameters.");
+        alert("Failed to save document.");
       }
     } catch (error) {
       console.error("Error staging claim documentation upload:", error);
-      alert("Failed to attach file. Please confirm backend status parameters and network route links.");
     }
   };
 
-  // Outbound Claims Batch Compilation
+  // FIXED: Consolidated variables to resolve the execution reference errors
   const handleConfirmAndStampDispatch = async () => {
-    if (!dispatchInsurerId) return alert("Please select a target Insurance Company.");
-    if (dispatchSelectedClaimIds.length === 0) return alert("Please select at least one unpaid invoice to batch out.");
+    if (!selectedInsurerId) return alert("Please select a target Insurance Company.");
+    if (selectedClaimIds.length === 0) return alert("Please select at least one unpaid invoice to batch out.");
 
     try {
-      const res = await fetch('/api/finance/claims/compile-batch/', {
+      const res = await fetch('/api/claim-dispatch-batches/', {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          insurance_company_id: dispatchInsurerId,
-          claim_ids: dispatchSelectedClaimIds
+          insurance_company: parseInt(selectedInsurerId),
+          claim_ids: selectedClaimIds
         })
       });
 
@@ -185,12 +198,12 @@ const InsuranceClaimsHub = () => {
         const data = await res.json();
         alert(`Successfully generated and logged batch reference: ${data.batch_reference || 'Success'}`);
         setIsDispatchModalOpen(false);
-        setDispatchInsurerId('');
-        setDispatchSelectedClaimIds([]);
+        setSelectedInsurerId('');
+        setSelectedClaimIds([]);
         fetchBaseData();
       } else {
         const errData = await res.json();
-        alert(`Batch generation failed: ${JSON.stringify(errData)}`);
+        alert(`Batch generation failed: ${errData.error || JSON.stringify(errData)}`);
       }
     } catch (err) {
       console.error("Batch processing transmission failure:", err);
@@ -231,8 +244,8 @@ const InsuranceClaimsHub = () => {
     if (!remitBatchId) return alert("Please select an active Batch Number to reconcile.");
     if (!remitAmountPaid) return alert("Please fill in the total payment receipt amount.");
 
-    const selectedClaimIds = Object.keys(itemizedPayments).filter(id => itemizedPayments[id].checked);
-    if (selectedClaimIds.length === 0) return alert("Please check at least one processed invoice.");
+    const activeSelectedIds = Object.keys(itemizedPayments).filter(id => itemizedPayments[id].checked);
+    if (activeSelectedIds.length === 0) return alert("Please check at least one processed invoice.");
 
     const formData = new FormData();
     formData.append('insurance_company', remitInsurerId);
@@ -311,11 +324,11 @@ const InsuranceClaimsHub = () => {
 
   const yAxisTicks = [maxAxisValue, maxAxisValue * 0.75, maxAxisValue * 0.5, maxAxisValue * 0.25, 0];
 
-  // Helper utility to check if specific document attachment entries are loaded
   const checkDocumentStatus = (claim, docType) => {
     if (!claim.attachments) return false;
     return claim.attachments.some(att => att.document_type === docType);
   };
+
 
   return (
     <div className="w-full space-y-6 select-none bg-slate-50/40 p-2 antialiased">
@@ -419,13 +432,12 @@ const InsuranceClaimsHub = () => {
               <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
                 {claims
                   .filter(c => {
-                    const matchSearch = 
-                      (c.invoice_number_display || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      (c.patient_display_name || '').toLowerCase().includes(searchQuery.toLowerCase());
+                    const patientName = c.patient_name || c.patient_display_name || '';
+                    const invoiceNum = c.invoice_number_display || '';
                     
-                    const matchStatus = statusFilter === 'all' || c.status === statusFilter;
-                    
-                    return matchSearch && matchStatus;
+                    // Fixed search condition to safely query either key string
+                    return invoiceNum.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           patientName.toLowerCase().includes(searchQuery.toLowerCase());
                   })
                   .map((claim) => (
                     <tr key={claim.id} className="hover:bg-slate-50/60 transition-colors">
@@ -433,8 +445,9 @@ const InsuranceClaimsHub = () => {
                       {/* Patient Parameters */}
                       <td className="py-3.5 px-4">
                         <div className="flex flex-col">
-                          <span className="font-bold text-slate-900">{claim.patient_display_name}</span>
-                          <span className="text-[10px] text-slate-400 font-mono">HRN: {claim.health_record_number}</span>
+                          {/* Updated to claim.patient_name matching your updated serializer */}
+                          <span className="font-bold text-slate-900">{claim.patient_name || "Unknown Patient"}</span>
+                          <span className="text-[10px] text-slate-400 font-mono">HRN: {claim.patient_hrn || "—"}</span>
                         </div>
                       </td>
                       
@@ -442,7 +455,7 @@ const InsuranceClaimsHub = () => {
                       <td className="py-3.5 px-4">
                         <div className="flex flex-col">
                           <span className="font-semibold text-slate-800">{claim.insurance_company_name}</span>
-                          <span className="text-[10px] text-indigo-500 font-mono">{claim.insurance_number}</span>
+                          <span className="text-[10px] text-indigo-500 font-mono">{claim.insurance_number || "No Card Number"}</span>
                         </div>
                       </td>
                       
@@ -458,7 +471,7 @@ const InsuranceClaimsHub = () => {
                       
                       {/* Total Aggregated Ledger Price */}
                       <td className="py-3.5 px-4 text-right font-mono font-black text-slate-900">
-                        KES {Number(claim.billed_invoice_value || 0).toLocaleString()}
+                        KES {Number(claim.total_amount_billed || claim.billed_invoice_value || 0).toLocaleString()}
                       </td>
                       
                       {/* Strict Four Core Attached Documents Configuration */}
@@ -514,6 +527,7 @@ const InsuranceClaimsHub = () => {
                         <span className={`inline-block text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded ${
                           claim.status === 'REMITTED' ? 'bg-emerald-100 text-emerald-800' :
                           claim.status === 'SUBMITTED' ? 'bg-blue-100 text-blue-800' :
+                          claim.status === 'PRE_AUTH_PENDING' ? 'bg-amber-50 border border-amber-200 text-amber-700' :
                           claim.status === 'DISPUTED' ? 'bg-rose-100 text-rose-800' : 'bg-slate-100 text-slate-700'
                         }`}>
                           {claim.status}
@@ -528,44 +542,183 @@ const InsuranceClaimsHub = () => {
       )}
 
       {/* 2. DISPATCH BATCH TABLE */}
-      {activeTab === 'dispatch' && (
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs space-y-6">
-          <div className="flex justify-between items-center">
+{activeTab === 'dispatch' && (
+  <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs space-y-6">
+    <div className="flex justify-between items-center">
+      <div>
+        <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">Outbound Claims Batch Compilation Engine</h4>
+        <p className="text-xs text-slate-400">Package multiple invoices under structured ledger logs.</p>
+      </div>
+      <button 
+        onClick={() => {
+          setIsDispatchModalOpen(true);
+          setSelectedInsurerId("");
+          setUnbatchedClaims([]);
+          setSelectedClaimIds([]);
+        }} 
+        className="bg-slate-950 text-white font-bold text-xs uppercase tracking-wider px-4 py-2.5 rounded-xl flex items-center gap-2 cursor-pointer hover:bg-slate-800 transition-all"
+      >
+        <Plus size={14}/> Dispatch & Stamp Batch
+      </button>
+    </div>
+
+    {/* Dispatch Batches Grid Table */}
+    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+      <table className="w-full text-left border-collapse text-xs">
+        <thead>
+          <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-black uppercase text-[10px] tracking-wider">
+            <th className="py-3 px-4">Insurance Company</th>
+            <th className="py-3 px-4">Batch Number Reference</th>
+            <th className="py-3 px-4">Acknowledgement Tag</th>
+            <th className="py-3 px-4 text-right">Amount Dispatched</th>
+            <th className="py-3 px-4 text-right">Date Dispatched</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+          {batches.length === 0 ? (
+            <tr>
+              <td colSpan={5} className="py-8 text-center text-slate-400 italic">No batches compiled yet. Click above to generate your first outbound cargo payload.</td>
+            </tr>
+          ) : (
+            batches.map((b) => (
+              <tr key={b.id} className="hover:bg-slate-50/50">
+                <td className="py-3 px-4 font-bold text-slate-900">
+                  {b.insurance_company_name || getInsurerName(b.insurance_company)}
+                </td>
+                <td className="py-3 px-4 font-mono font-bold text-indigo-600">{b.batch_reference}</td>
+                <td className="py-3 px-4">
+                  <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide ${b.is_acknowledged ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                    {b.is_acknowledged ? 'Acknowledged' : 'Pending'}
+                  </span>
+                </td>
+                <td className="py-3 px-4 text-right font-mono font-black">KES {Number(b.total_batch_value || 0).toLocaleString()}</td>
+                <td className="py-3 px-4 text-right text-slate-400 font-mono">{b.date_dispatched || '—'}</td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+
+    {/* DYNAMIC BATCH COMPILATION MODAL WINDOW */}
+    {isDispatchModalOpen && (
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+          
+          {/* Modal Header Section */}
+          <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
             <div>
-              <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">Outbound Claims Batch Compilation Engine</h4>
-              <p className="text-xs text-slate-400">Package multiple invoices under structured ledger logs.</p>
+              <h3 className="font-black text-sm text-slate-900 uppercase tracking-wide">Compile Corporate Remittance Consignment</h3>
+              <p className="text-xs text-slate-400">Bundle claims into a unified invoice tracking batch payload.</p>
             </div>
-            <button onClick={() => setIsDispatchModalOpen(true)} className="bg-slate-950 text-white font-bold text-xs uppercase tracking-wider px-4 py-2.5 rounded-xl flex items-center gap-2 cursor-pointer"><Plus size={14}/> Dispatch & Stamp Batch</button>
+            <button 
+              onClick={() => setIsDispatchModalOpen(false)} 
+              className="text-slate-400 hover:text-slate-600 transition-colors cursor-pointer text-sm font-bold"
+            >
+              ✕
+            </button>
           </div>
 
-          <div className="overflow-x-auto border border-slate-200 rounded-xl">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-black uppercase text-[10px] tracking-wider">
-                  <th className="py-3 px-4">Insurance Company</th>
-                  <th className="py-3 px-4">Batch Number Reference</th>
-                  <th className="py-3 px-4">Acknowledgement Tag</th>
-                  <th className="py-3 px-4 text-right">Amount Dispatched</th>
-                  <th className="py-3 px-4 text-right">Date Dispatched</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {batches.map((b) => (
-                  <tr key={b.id} className="hover:bg-slate-50/50">
-                    <td className="py-3 px-4 font-bold text-slate-900">{getInsurerName(b.insurance_company)}</td>
-                    <td className="py-3 px-4 font-mono font-bold text-indigo-600">{b.batch_reference}</td>
-                    <td className="py-3 px-4">
-                      <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wide ${b.is_acknowledged ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{b.is_acknowledged ? 'Acknowledged' : 'Pending'}</span>
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono font-black">KES {Number(b.total_batch_value || 0).toLocaleString()}</td>
-                    <td className="py-3 px-4 text-right text-slate-400 font-mono">{b.date_dispatched || '—'}</td>
-                  </tr>
+          <div className="p-6 space-y-6 overflow-y-auto flex-1">
+            {/* 1. Target Insurance Dropdown Selection */}
+            <div className="space-y-2">
+              <label className="text-[11px] font-black uppercase tracking-wider text-slate-500">Target Insurance Underwriter</label>
+              <select
+                value={selectedInsurerId}
+                onChange={(e) => fetchUnsubmittedClaimsForInsurer(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-bold text-slate-800 focus:outline-hidden focus:border-slate-950"
+              >
+                <option value="">-- Select Corporate Insurance Vendor --</option>
+                {/* FIXED: Map over 'payers' state hook vectors directly instead of undefined 'insurers' */}
+                {payers && payers.map(ins => (
+                  <option key={ins.id} value={ins.id}>{ins.name}</option>
                 ))}
-              </tbody>
-            </table>
+              </select>
+            </div>
+
+            {/* 2. Outstanding Claims Checkbox List */}
+            {selectedInsurerId && (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-500">Available Unsubmitted Claims Ledger</label>
+                  <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                    {unbatchedClaims.length} Pending Records Found
+                  </span>
+                </div>
+
+                {unbatchedClaims.length === 0 ? (
+                  <div className="border border-dashed border-slate-200 rounded-xl p-6 text-center text-xs text-slate-400 italic">
+                    All current claims under this vendor have been safely compiled or no active entries exist.
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-48 overflow-y-auto shadow-inner">
+                    {unbatchedClaims.map((claim) => {
+                      const isChecked = selectedClaimIds.includes(claim.id);
+                      return (
+                        <label 
+                          key={claim.id} 
+                          className={`flex items-center justify-between p-3 text-xs cursor-pointer select-none transition-colors ${isChecked ? 'bg-indigo-50/40' : 'hover:bg-slate-50'}`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleClaimCheckboxSelection(claim.id)}
+                              className="w-4 h-4 rounded border-slate-300 text-slate-950 focus:ring-slate-950 cursor-pointer"
+                            />
+                            <div>
+                              <span className="font-bold text-slate-900 block">{claim.patient_name}</span>
+                              <span className="font-mono text-[10px] text-slate-400">{claim.invoice_number}</span>
+                            </div>
+                          </div>
+                          <span className="font-mono font-black text-slate-900">
+                            KES {claim.billed_value.toLocaleString()}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 3. Batch Summary Bar */}
+            <div className="bg-slate-950 rounded-xl p-4 text-white flex justify-between items-center shadow-md">
+              <div>
+                <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold block">Consolidated Cargo Manifest Value</span>
+                <span className="text-[11px] font-mono text-indigo-400 font-medium">
+                  {selectedClaimIds.length} Claims bundled into consignment
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-lg font-mono font-black tracking-tight text-emerald-400">
+                  KES {calculateRunningBatchValueTotal().toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Modal Actions Footer */}
+          <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+            <button
+              onClick={() => setIsDispatchModalOpen(false)}
+              className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={selectedClaimIds.length === 0}
+              onClick={handleConfirmAndStampDispatch}
+              className={`px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider text-white shadow-xs transition-all cursor-pointer ${selectedClaimIds.length === 0 ? 'bg-slate-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+            >
+              Complete & Dispatch Batch
+            </button>
           </div>
         </div>
-      )}
+      </div>
+    )}
+  </div>
+)}
 
       {/* 3. INBOUND REMITTANCE RECONCILIATION */}
       {activeTab === 'remittance' && (

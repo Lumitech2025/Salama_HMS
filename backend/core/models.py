@@ -207,13 +207,13 @@ class Queue(models.Model):
     ]
     PRIORITY_CHOICES = [('NORMAL', 'Normal Priority'), ('HIGH', 'High Priority'), ('EMERGENCY', 'Emergency')]
 
-    token_id = models.CharField(max_length=10, unique=True, editable=False)
+    # Increased max_length slightly to accommodate safely padded tokens
+    token_id = models.CharField(max_length=15, unique=True, editable=False)
     patient = models.ForeignKey('Patient', on_delete=models.CASCADE)
-    appointment = models.ForeignKey(Appointment, on_delete=models.SET_NULL, null=True, blank=True)
+    appointment = models.ForeignKey('Appointment', on_delete=models.SET_NULL, null=True, blank=True)
 
     visit = models.OneToOneField('RegistrationRecord', on_delete=models.CASCADE, related_name='queue_ticket', null=True, blank=True)
        
-    
     current_station = models.CharField(max_length=20, choices=STATION_CHOICES, default='TRIAGE')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='WAITING')
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='NORMAL')
@@ -222,9 +222,31 @@ class Queue(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     def save(self, *args, **kwargs):
-        if not self.token_id:
-            number = random.randint(100, 999)
-            self.token_id = f"Q-{number}"
+        # Explicit check: Only generate token_id if it is a brand-new instance
+        if self._state.adding or not self.token_id:
+            today = timezone.now().date()
+            year_prefix = timezone.now().strftime('%y')
+            token_prefix = f"Q{year_prefix}-"
+            
+            # Use a select_for_update() block if your database engine supports it,
+            # or order strictly by ID to guarantee chronological sequencing.
+            latest_queue = Queue.objects.filter(
+                token_id__startswith=token_prefix
+            ).order_by('-id').first()
+            
+            if latest_queue and latest_queue.token_id and '-' in latest_queue.token_id:
+                try:
+                    # Isolate tracking suffix safely
+                    last_number_str = latest_queue.token_id.split('-')[-1]
+                    next_number = int(last_number_str) + 1
+                except (ValueError, IndexError):
+                    next_number = 1
+            else:
+                # If no records matching the pattern exist yet, start fresh at 1
+                next_number = 1
+            
+            self.token_id = f"{token_prefix}{next_number:03d}"
+            
         super().save(*args, **kwargs)
 
     @property

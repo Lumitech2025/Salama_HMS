@@ -177,6 +177,31 @@ class QueueViewSet(viewsets.ModelViewSet):
                         
                         if hasattr(invoice, 'recalculate_totals'):
                             invoice.recalculate_totals()
+
+                        if queue_item.visit and queue_item.visit.payment_mode == 'INSURANCE':
+                            try:
+                                # NOTE: Change '.models' to whatever file contains your InsuranceClaim model
+                                from .models import InsuranceClaim 
+
+                                # Check if a claim wrapper already exists to avoid duplicate rows
+                                claim_exists = InsuranceClaim.objects.filter(
+                                    patient_invoice=invoice
+                                ).exists()
+
+                                if not claim_exists:
+                                    short_year = timezone.now().strftime('%y')
+                                    
+                                    InsuranceClaim.objects.create(
+                                        patient=queue_item.patient,
+                                        insurance_company=queue_item.visit.insurance_company,
+                                        patient_invoice=invoice,
+                                        total_amount_billed=invoice.total_payable,
+                                        claim_number=f"CLM-{short_year}-{random.randint(1000, 9999)}",
+                                        pre_auth_code=f"AUTH-2026-TMP{random.randint(10000, 99999)}",
+                                        status='PRE_AUTH_PENDING' # Places them into the initial tab pool
+                                    )
+                            except Exception as claim_err:
+                                print(f"[CLAIMS AUTOMATION CRASH]: Failed to seed tracker record: {str(claim_err)}")
                             
             except Exception as billing_err:
                 print(f"[TRIAGE AUTOMATION ERROR]: Failed to generate upfront charge: {str(billing_err)}")
@@ -1672,7 +1697,6 @@ class InsuranceClaimViewSet(viewsets.ModelViewSet):
 
 
 class ClaimDispatchBatchViewSet(viewsets.ModelViewSet):
-    # 👇 FIXED: Injected .annotate(claims_count=...) directly here to completely solve N+1 problems in list loops
     queryset = ClaimDispatchBatch.objects.all().select_related(
         'insurance_company', 'created_by'
     ).annotate(
@@ -1687,8 +1711,110 @@ class ClaimDispatchBatchViewSet(viewsets.ModelViewSet):
     search_fields = ['batch_reference', 'insurance_company__name']
     ordering_fields = ['date_dispatched', 'total_batch_value', 'claims_count']
 
-    def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+    @action(detail=False, methods=['get'], url_path='unbatched-claims')
+    def unbatched_claims(self, request):
+        """
+        ENDPOINT: GET /api/dispatch-batches/unbatched-claims/?insurance_company_id=X
+        Fetches all unsubmitted, outstanding patient claims filtered by insurer.
+        """
+        company_id = request.query_params.get('insurance_company_id')
+        if not company_id:
+            return Response(
+                {"error": "Query parameter 'insurance_company_id' is mandatory."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        claims = InsuranceClaim.objects.filter(
+            insurance_company_id=company_id,
+            dispatch_batch__isnull=True,
+            status="PRE_AUTH_PENDING"
+        ).select_related('patient', 'patient_invoice')
+        
+        payload = [{
+            "id": c.id,
+            "patient_name": c.patient.name,
+            "invoice_number": c.patient_invoice.invoice_number if c.patient_invoice else "N/A",
+            "billed_value": float(c.total_amount_billed)
+        } for c in claims]
+        
+        return Response(payload, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        """
+        ENDPOINT: POST /api/dispatch-batches/
+        Payload expected: { "insurance_company": 1, "claim_ids": [10, 11, 12] }
+        Overridden to handle sequential transaction generation and mass claim transitions safely.
+        """
+        insurance_company_id = request.data.get('insurance_company')
+        claim_ids = request.data.get('claim_ids', [])
+
+        if not insurance_company_id or not claim_ids:
+            return Response(
+                {"error": "Both 'insurance_company' ID and 'claim_ids' array are required."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            with transaction.atomic():
+                # 1. Lock down unsubmitted claims to prevent concurrent batching race conditions
+                claims_to_batch = InsuranceClaim.objects.select_for_update().filter(
+                    id__in=claim_ids, 
+                    insurance_company_id=insurance_company_id,
+                    dispatch_batch__isnull=True
+                )
+                
+                if not claims_to_batch.exists():
+                    return Response(
+                        {"error": "No valid unbatched claims found matching selection criteria."}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # 2. Grab the company to extract initials for your pattern
+                from core.models import InsuranceCompany
+                company = InsuranceCompany.objects.get(id=insurance_company_id)
+                
+                # Format initials: 'Social Health Authority' -> 'SHA', 'Jubilee' -> 'Jub'
+                name_words = company.name.split()
+                if len(name_words) >= 1 and name_words[0].upper() == 'SHA':
+                    initials = 'SHA'
+                else:
+                    initials = company.name[:3].title()
+
+                # Calculate sequence index for this insurer
+                existing_count = ClaimDispatchBatch.objects.filter(insurance_company=company).count()
+                next_sequence = str(existing_count + 1).zfill(3) # e.g., '001'
+                formatted_date = timezone.now().strftime('%d/%m/%y')
+                
+                # Pattern matching: SCC-B001/Jub/22/06/26
+                computed_reference = f"SCC-B{next_sequence}/{initials}/{formatted_date}"
+
+                # 3. Sum the manifest totals
+                aggregate_value = claims_to_batch.aggregate(total=models.Sum('total_amount_billed'))['total'] or 0.00
+
+                # 4. Instantiate the batch
+                batch = ClaimDispatchBatch.objects.create(
+                    batch_reference=computed_reference,
+                    insurance_company=company,
+                    total_batch_value=aggregate_value,
+                    created_by=request.user
+                )
+
+                # 5. Connect and escalate the claims status to DISPATCHED
+                claims_to_batch.update(dispatch_batch=batch, status="DISPATCHED")
+
+                # Return serialized representation matching your list views
+                return Response({
+                    "id": batch.id,
+                    "batch_reference": batch.batch_reference,
+                    "insurance_company": company.id,
+                    "insurance_company_name": company.name,
+                    "total_batch_value": float(batch.total_batch_value),
+                    "is_acknowledged": batch.is_acknowledged,
+                    "date_dispatched": batch.date_dispatched.strftime('%Y-%m-%d')
+                }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response({"error": f"Failed compiling dispatch: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'])
     def acknowledge_receipt(self, request, pk=None):
@@ -1696,8 +1822,8 @@ class ClaimDispatchBatchViewSet(viewsets.ModelViewSet):
         batch.is_acknowledged = True
         batch.save(update_fields=['is_acknowledged'])
         return Response({"status": f"Batch {batch.batch_reference} acknowledged successfully."}, status=status.HTTP_200_OK)
-
-
+    
+    
 class ClaimAttachmentViewSet(viewsets.ModelViewSet):
     queryset = ClaimAttachment.objects.all()
     serializer_class = ClaimAttachmentSerializer

@@ -86,7 +86,9 @@ const BillingOverview = ({ onAction }) => {
           <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase italic">
             Billing <span className="text-teal-600 font-light not-italic">Desk Overview</span>
           </h3>
-          
+          <p className="text-xs text-slate-500 font-bold tracking-widest uppercase mt-1">
+            Real-time Patient Ledger Verification & Invoicing Hub
+          </p>
         </div>
         
         <button
@@ -155,7 +157,7 @@ const BillingOverview = ({ onAction }) => {
         <div className="p-8 border-b border-slate-100 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 bg-slate-50/50">
           <div>
             <h4 className="text-lg font-black text-slate-900 tracking-tight uppercase">Billing Queue Entries</h4>
-            
+            <p className="text-xs text-slate-400 font-bold tracking-wide mt-0.5">Select a tracking token payload sequence below to compile dynamic claims</p>
           </div>
           
           <div className="relative max-w-md w-full">

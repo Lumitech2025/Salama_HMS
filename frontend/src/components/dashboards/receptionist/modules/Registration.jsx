@@ -413,8 +413,7 @@ const Registration = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] bg-white border-b border-slate-100">
-                <th className="px-8 py-4">Queue ID</th>
+              <tr className="text-[12px] font-black font-bold text-4xl text-slate-900 uppercase tracking-[0.2em] bg-white border-b border-slate-100">
                 <th className="px-8 py-4">Record Number</th>
                 <th className="px-8 py-4">Patient Name</th>
                 <th className="px-8 py-4">Payment Method</th>
@@ -424,11 +423,6 @@ const Registration = () => {
             <tbody className="divide-y divide-slate-50">
               {latestRegistrations.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
-                  <td className="px-8 py-5">
-                    <span className="px-2.5 py-1 rounded-lg font-mono font-bold text-xs bg-rose-600 text-white">
-                      {r.queue_id}
-                    </span>
-                  </td>
                   <td className="px-8 py-5">
                     <span className="font-mono font-bold text-xs text-teal-600 bg-teal-50/80 px-2.5 py-1.5 rounded-xl border border-teal-100">
                       {r.health_record_number} 
