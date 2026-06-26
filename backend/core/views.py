@@ -1,4 +1,5 @@
 from django.http import JsonResponse
+from django.db import models
 from rest_framework import viewsets, filters, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -54,7 +55,7 @@ from .models import (
     Supplier,
     PurchaseOrder, GoodsReceivedNote, 
     PurchaseInvoice, PaymentVoucher,
-    NurseServiceOrder, FixedAsset, Expense, ClaimAttachment
+    NurseServiceOrder, FixedAsset, Expense, ClaimAttachment, DischargeSummary
     
 )
 
@@ -79,7 +80,7 @@ from .serializers import (
     PurchaseInvoiceSerializer, PaymentVoucherSerializer,
     ImagingOrderSerializer, ImagingResultSerializer,
     NurseServiceOrderSerializer,
-    FixedAssetSerializer, RequisitionItemSerializer, ExpenseSerializer
+    FixedAssetSerializer, RequisitionItemSerializer, ExpenseSerializer, DischargeSummarySerializer
 )
 
 
@@ -110,7 +111,7 @@ class SalamaTokenObtainPairView(TokenObtainPairView):
 class QueueViewSet(viewsets.ModelViewSet):
     queryset = Queue.objects.all().order_by('priority', 'entered_at')
     serializer_class = QueueSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['current_station', 'status', 'priority']
     search_fields = ['patient__name', 'token_id', 'patient__registry_no']
@@ -402,50 +403,52 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         # 1. Inspect raw input values since frontend keys might bypass standard validation fields
         raw_visit_val = self.request.data.get('visit') or self.request.data.get('registration')
         queue_instance = None
+        registration_record = None  # 🌟 Initialize explicitly
 
         if raw_visit_val:
-            try:
-                val_as_int = int(raw_visit_val)
-                
-                # Scenario A: The value sent is a direct primary key to a Queue record
-                queue_instance = Queue.objects.filter(id=val_as_int).first()
-                if queue_instance:
-                    if not patient_obj:
-                        queue_reg = queue_instance.visit  # This is your RegistrationRecord
-                        if queue_reg:
-                            patient_obj = queue_reg.patient
-                
-                # Scenario B: The value sent is a RegistrationRecord ID (Oncology Portal pathway)
-                else:
-                    registration_record = RegistrationRecord.objects.filter(id=val_as_int).first()
-                    if registration_record:
-                        if not patient_obj:
-                            patient_obj = registration_record.patient
-                        
-                        queue_instance = Queue.objects.filter(
-                            visit=registration_record,
-                            current_station='PHARMACY'
-                        ).first() or Queue.objects.filter(
-                            visit=registration_record
-                        ).first()
-
-            except (ValueError, TypeError):
-                pass
+            # Handle composite string tokens like "Q26-003 - Leon Mwenda" safely
+            if isinstance(raw_visit_val, str) and " - " in raw_visit_val:
+                token_code = raw_visit_val.split(" - ")[0].strip()
+                queue_instance = Queue.objects.filter(token_id=token_code).first()
+            else:
+                try:
+                    val_as_int = int(raw_visit_val)
+                    
+                    # Scenario A: The value sent is a direct primary key to a Queue record
+                    queue_instance = Queue.objects.filter(id=val_as_int).first()
+                    
+                    # Scenario B: The value sent is a RegistrationRecord ID
+                    if not queue_instance:
+                        registration_record = RegistrationRecord.objects.filter(id=val_as_int).first()
+                        if registration_record:
+                            queue_instance = Queue.objects.filter(
+                                visit=registration_record,
+                                current_station='PHARMACY'
+                            ).first() or Queue.objects.filter(
+                                visit=registration_record
+                            ).first()
+                except (ValueError, TypeError):
+                    pass
 
         if not queue_instance:
             queue_instance = serializer.validated_data.get('visit')
-            if queue_instance and not patient_obj:
-                queue_reg = getattr(queue_instance, 'registration', None) or getattr(queue_instance, 'visit', None)
-                patient_obj = getattr(queue_reg, 'patient', None)
+
+        # 🌟 CRITICAL FIX: Guarantee registration_record is correctly extracted from the valid Queue instance
+        if queue_instance and not registration_record:
+            registration_record = getattr(queue_instance, 'visit', None)
+
+        # Ensure patient_obj is resolved
+        if registration_record and not patient_obj:
+            patient_obj = registration_record.patient
+        elif queue_instance and not patient_obj:
+            patient_obj = queue_instance.patient
 
         # 2. Dynamic Diagnosis snapshot capture adjustments
-        if not diagnosis_obj and queue_instance:
-            reg_context = getattr(queue_instance, 'registration', None) or getattr(queue_instance, 'visit', None)
-            underlying_clinic_visit = getattr(reg_context, 'visit', None) if reg_context else None
-            if underlying_clinic_visit and hasattr(underlying_clinic_visit, 'diagnoses'):
-                diagnosis_obj = underlying_clinic_visit.diagnoses.first()
+        if not diagnosis_obj and registration_record:
+            if hasattr(registration_record, 'diagnoses'):
+                diagnosis_obj = registration_record.diagnoses.first()
 
-        # 3. Save master record
+        # 3. Save master record (visit expects a Queue instance)
         prescription = serializer.save(
             visit=queue_instance,   
             patient=patient_obj,    
@@ -670,8 +673,6 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": f"Internal dispensation logging error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-# --- 6. APPOINTMENTS & BILLING ---
 
 class AppointmentViewSet(viewsets.ModelViewSet):
     serializer_class = AppointmentSerializer
@@ -2655,3 +2656,44 @@ class FinancialRevenueAnalyticsView(APIView):
             "monthly_revenue": combined_monthly_revenue,
             "monthly_growth": monthly_growth_array
         }, status=200)
+    
+
+class DischargeSummaryViewSet(viewsets.ModelViewSet):
+    queryset = DischargeSummary.objects.all().select_related('visit', 'patient')
+    serializer_class = DischargeSummarySerializer
+
+    def get_queryset(self):
+        """
+        Optionally restricts the returned summaries by filtering 
+        against a `visit` query parameter in the URL.
+        """
+        queryset = self.queryset
+        visit_id = self.request.query_params.get('visit', None)
+        if visit_id is not None:
+            queryset = queryset.filter(visit_id=visit_id)
+        return queryset
+
+    @action(detail=False, methods=['get'], url_path='prefill')
+    def prefill(self, request):
+        """
+        Custom endpoint to fetch dynamic clinical defaults for a specific visit.
+        Usage: GET /api/discharge-summaries/prefill/?visit_id=<id>
+        """
+        visit_id = request.query_params.get('visit_id', None)
+        
+        if not visit_id:
+            return Response(
+                {"error": "Missing required query parameter: 'visit_id'"},
+                status=status.HTTP_400_BAD_ERROR
+            )
+            
+        # Invoke the classmethod tool we optimized inside the serializer
+        prefilled_payload = self.get_serializer_class().get_prefilled_data(visit_id)
+        
+        if not prefilled_payload:
+            return Response(
+                {"error": f"No active RegistrationRecord matching ID {visit_id} was identified."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+            
+        return Response(prefilled_payload, status=status.HTTP_200_OK)

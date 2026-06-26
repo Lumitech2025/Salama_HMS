@@ -7,7 +7,7 @@ import ServiceCatalogue from './modules/ServiceCatalogue';
 import PaymentPortal from '../receptionist/modules/PaymentPortal';
 import BillingHome from '../receptionist/modules/Registration';
 import BillingOverview from './modules/BillingOverview';
-
+import InsuranceClaimsHub from '../Finance/modules/InsuranceClaimsHub';
 
 import { 
   Bell, UserCircle, Save, Loader2, UserPlus, AlertCircle, 
@@ -195,7 +195,7 @@ const BillingOfficerDashboard = () => {
         />
       );
 
-    case 'claims': return <ClaimsTracker />;
+    case 'claims': return <InsuranceClaimsHub/>;
     case 'reconciliation': return <PharmacyReconciliation />;
     case 'insurance-providers': return <InsuranceProviders />;
     case 'service-catalogue': return <ServiceCatalogue />;

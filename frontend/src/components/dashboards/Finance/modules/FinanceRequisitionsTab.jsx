@@ -6,7 +6,8 @@ import {
     Clock, 
     Building2, 
     Search,
-    ShoppingCart 
+    ShoppingCart,
+    Layers 
 } from 'lucide-react';
 
 const FinanceRequisitionsTab = ({ onCreatePO }) => {
@@ -76,12 +77,12 @@ const FinanceRequisitionsTab = ({ onCreatePO }) => {
 
     // Helper function to extract cleanly parsed values for the Purchase Order creation
     const handleInitiatePurchaseOrder = (req) => {
-        const fullSummary = req.itemSummary || req.item_summary || req.description || '';
+        const fullSummary = req.itemSummary || req.item_summary || req.item_name || req.description || '';
         const rawDept = req.dept || req.department || 'GENERAL ADMIN';
 
         // Robust parsing regex to isolate text values from brackets and quantity qualifiers (e.g., "[POSTERS_PRINTING] Poster (x1)")
         const qtyMatch = fullSummary.match(/\(x(\d+)\)/i);
-        const parsedQty = qtyMatch ? parseInt(qtyMatch[1], 10) : 1;
+        const parsedQty = qtyMatch ? parseInt(qtyMatch[1], 10) : (req.quantity || 1);
 
         // Strip off bracket qualifiers and quantity labels to isolate clean product terms
         let cleanItemName = fullSummary.replace(/\[.*?\]/g, '').replace(/\(x\d+\)/i, '').trim();
@@ -96,7 +97,8 @@ const FinanceRequisitionsTab = ({ onCreatePO }) => {
                 itemName: cleanItemName,
                 department: rawDept.toUpperCase(),
                 quantity: parsedQty,
-                requisitionId: req.id
+                requisitionId: req.id,
+                reason: req.reason || req.justification || ''
             });
         } else {
             console.warn("Navigation execution property 'onCreatePO' is missing or unmapped in dashboard context scope.");
@@ -109,9 +111,12 @@ const FinanceRequisitionsTab = ({ onCreatePO }) => {
         const deptString = (req.dept || req.department || '').toUpperCase();
         const matchesDept = filterDept === 'ALL' || deptString === filterDept;
         
-        const summary = (req.itemSummary || req.item_summary || req.description || '').toLowerCase();
+        const summary = (req.itemSummary || req.item_summary || req.item_name || req.description || '').toLowerCase();
+        const reasonText = (req.reason || req.justification || '').toLowerCase();
         const reqId = String(req.id || '').toLowerCase();
-        const matchesSearch = summary.includes(searchTerm.toLowerCase()) || reqId.includes(searchTerm.toLowerCase());
+        const matchesSearch = summary.includes(searchTerm.toLowerCase()) || 
+                              reasonText.includes(searchTerm.toLowerCase()) || 
+                              reqId.includes(searchTerm.toLowerCase());
         
         return matchesDept && matchesSearch;
     });
@@ -203,7 +208,7 @@ const FinanceRequisitionsTab = ({ onCreatePO }) => {
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Req ID</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Source Origin</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Item Details & Requestor</th>
-                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Justification Reason</th>
+                                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Reason</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Total Outlay</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Status</th>
                                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Audit Action</th>
@@ -228,6 +233,12 @@ const FinanceRequisitionsTab = ({ onCreatePO }) => {
                             ) : (
                                 filteredLedger.map((req) => {
                                     const currentStatus = (req.status || 'PENDING').toUpperCase();
+                                    
+                                    // Robust evaluation of Store Remaining Quantities
+                                    const remainingStock = req.inventory_item_stock !== undefined ? req.inventory_item_stock : 
+                                                           req.stock_quantity !== undefined ? req.stock_quantity : 
+                                                           req.item_stock !== undefined ? req.item_stock : '0';
+
                                     return (
                                         <tr key={req.id} className="hover:bg-slate-50/60 transition-colors">
                                             
@@ -244,17 +255,23 @@ const FinanceRequisitionsTab = ({ onCreatePO }) => {
                                                 </span>
                                             </td>
 
-                                            {/* Item summary description & originator context */}
+                                            {/* Item summary description & stock indicator */}
                                             <td className="px-6 py-4 max-w-xs">
                                                 <p className="font-semibold text-slate-900 text-sm line-clamp-1">
-                                                    {req.itemSummary || req.item_summary || req.description}
+                                                    {req.itemSummary || req.item_summary || req.item_name || req.description}
                                                 </p>
-                                                <span className="text-[11px] text-slate-400 block mt-0.5">
-                                                    By: {req.requestedBy || req.requested_by || 'Staff Item'} • {req.date || req.created_at || 'Recent'}
-                                                </span>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <span className="text-[11px] text-slate-400 block">
+                                                        By: {req.requestedBy || req.requested_by || 'Staff'} • {req.date || req.created_at || 'Recent'}
+                                                    </span>
+                                                    <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded flex items-center gap-1 border border-slate-200">
+                                                        <Layers size={10} className="text-slate-400" />
+                                                        Store Stock: {remainingStock}
+                                                    </span>
+                                                </div>
                                             </td>
 
-                                            {/* Procurement reason */}
+                                            {/* Procurement Reason / Justification */}
                                             <td className="px-6 py-4 text-xs text-slate-600 font-medium max-w-xs truncate">
                                                 {req.reason || req.justification || 'Standard procurement indent'}
                                             </td>

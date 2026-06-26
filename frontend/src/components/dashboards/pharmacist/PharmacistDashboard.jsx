@@ -7,6 +7,7 @@ import LaboratoryResults from "../oncologist/modules/LaboratoryResults";
 import InventoryManager from './modules/InventoryManager';
 import PatientRegistry from "../../shared/PatientRegistry";
 import PharmacyRequisitionsTab from './modules/PharmacyRequisitionsTab';
+import DischargeSummaryTab from './modules/DischargeSummaryTab';
 
 const PharmacistDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -35,10 +36,17 @@ const PharmacistDashboard = () => {
         );
         
       case 'inventory':
-        return <InventoryManager />;
+        return <InventoryManager setActiveTab={setActiveTab} />;
 
       case 'labs':
         return <LaboratoryResults/>;
+
+      case 'requisitions':
+        return <PharmacyRequisitionsTab/>;
+
+      case 'discharge':
+        return <DischargeSummaryTab/>
+        
         
       case 'dispensing': 
         return (

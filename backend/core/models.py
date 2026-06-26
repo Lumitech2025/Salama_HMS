@@ -1026,15 +1026,18 @@ class ImagingOrder(models.Model):
         """Used by Doctor, Radiologist, Patient, Billing"""
         return getattr(self.patient, 'health_record_number', 'N/A')
 
+
+    
     @property
     def queue_id(self):
         """
-        Dynamically extracts token tracking identifier from active session sequence.
-        Used by Radiologist to process scans, and Billing Officer to calculate active invoices.
+        Traverses the visit relation to find the attached one-to-one Queue entry tracking record.
         """
-        if self.visit:
-            return getattr(self.visit, 'token_id', f"Q{self.visit.id}")
+        if self.visit and hasattr(self.visit, 'queue_ticket') and self.visit.queue_ticket:
+            return self.visit.queue_ticket.token_id
         return "N/A"
+    
+    
 
     @property
     def selected_imaging_list(self):
@@ -2527,6 +2530,51 @@ class Expense(models.Model):
 
     def __str__(self):
         return f"{self.description} ({self.category}) - Paid: KES {self.amount_paid}/{self.amount}"
+    
+
+class DischargeSummary(models.Model):
+    # Core linkage mapping to the historical episode
+    visit = models.OneToOneField('RegistrationRecord', on_delete=models.CASCADE, related_name='discharge_summary')
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='discharge_summaries')
+    
+    # Custom incremental serial sequence tracking number
+    summary_number = models.CharField(max_length=50, unique=True, editable=False, db_index=True)
+    
+    # Persistent tracking of custom textareas and forms
+    side_effects_present = models.TextField(blank=True, default='')
+    medications_received = models.TextField(blank=True, default='')
+    
+    # Store dynamic checkbox data as structured JSON fields
+    reason_for_visit = models.JSONField(default=dict, blank=True)
+    service_disposition = models.JSONField(default=dict, blank=True)
+    discharge_meds_matrix = models.JSONField(default=list, blank=True)
+    
+    # Metadata metrics
+    date_of_next_visit = models.DateField(null=True, blank=True)
+    oncologist_name = models.CharField(max_length=255, blank=True, default='DR. WATTANGA L.A.')
+    nurse_name = models.CharField(max_length=255, blank=True, default='SR. HELLEN OKELLO')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        if not self.summary_number:
+            # Safely fetch the structural HRN directly from the patient/visit link
+            hrn = self.visit.health_record_number  # e.g., "SCC-003/26"
+            
+            with transaction.atomic():
+                # Lock rows matching this patient to get an accurate count and avoid race conditions
+                existing_count = DischargeSummary.objects.select_for_update().filter(
+                    patient=self.patient
+                ).count()
+                
+                next_sequence = existing_count + 1
+                self.summary_number = f"{hrn}/DS{next_sequence}"
+                
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Summary {self.summary_number} - Visit: {self.visit.queue_id}"
 
 class LabInventoryItem(models.Model):
     CATEGORY_CHOICES = [

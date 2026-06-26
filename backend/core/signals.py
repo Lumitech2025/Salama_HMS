@@ -239,15 +239,14 @@ def trigger_completed_nurse_charges(sender, instance, created=False, **kwargs):
             )
 
 
-@receiver(post_save, sender='core.Prescription')  #  CHANGED: Pass sender as a string
+@receiver(post_save, sender='core.Prescription')  
 def trigger_completed_pharmacy_charges(sender, instance, created=False, **kwargs):
     """
     Listens to Prescriptions. Fires automatically when a prescription is issued or updated 
     to process the item selection, pull real-time retail prices from the Drug inventory,
     and post them directly onto the open PatientInvoice.
     """
-    #  INLINE IMPORTS
-    from core.models import PatientInvoice, PatientBillableItem, Service
+    from core.models import PatientInvoice, PatientBillableItem, Service, RegistrationRecord
 
     # 1. Operational Guard: Ensure an active medical registration session exists
     if not instance.visit:
@@ -257,12 +256,20 @@ def trigger_completed_pharmacy_charges(sender, instance, created=False, **kwargs
     if hasattr(instance, 'status') and getattr(instance, 'status') != 'DISPENSED':
         return
 
-    # 3. Retrieve or spin up the active tracking invoice ledger
-    invoice, _ = PatientInvoice.objects.get_or_create(
-        visit=instance.visit,
-        patient=instance.patient,
-        defaults={'status': 'UNPAID'}
-    )
+    # NEW DB GUARD: Verify that the associated registration record actually exists in the database
+    v_id = instance.visit_id if hasattr(instance, 'visit_id') else getattr(instance.visit, 'id', None)
+    if v_id and not RegistrationRecord.objects.filter(id=v_id).exists():
+        return  # Silently exit if the foreign key breaks relational integrity
+
+    # 3. Retrieve or spin up the active tracking invoice ledger safely
+    try:
+        invoice, _ = PatientInvoice.objects.get_or_create(
+            visit_id=v_id,
+            patient_id=instance.patient_id if hasattr(instance, 'patient_id') else instance.patient.id,
+            defaults={'status': 'UNPAID'}
+        )
+    except Exception:
+        return # Fallback safety catch for unresolvable foreign integrity anomalies
 
     # 4. Resolve the stock entry item from the inventory layout using the drug relation
     if not hasattr(instance, 'drug') or not instance.drug:
@@ -277,7 +284,7 @@ def trigger_completed_pharmacy_charges(sender, instance, created=False, **kwargs
     # 6. Extract the dynamic cost matrix components directly from the Drug model attributes
     retail_rate = drug_inventory_item.selling_price_kes
     billing_item_name = f"Medication: {drug_inventory_item.name} ({drug_inventory_item.strength})"
-    dispensed_quantity = getattr(instance, 'quantity', 1) # Fallback to 1 if unspecified
+    dispensed_quantity = getattr(instance, 'quantity', 1) 
 
     # 7. Locate your fallback pharmacy service SKU to maintain database integrity
     fallback_pharmacy_service = Service.objects.filter(dept='PHA', active=True).first()
@@ -291,7 +298,6 @@ def trigger_completed_pharmacy_charges(sender, instance, created=False, **kwargs
     if not already_billed:
         extra_fields = {}
         
-        # Populate operational parameters conditionally depending on schema attributes
         if hasattr(PatientBillableItem, 'unit_price'):
             extra_fields['unit_price'] = retail_rate
         if hasattr(PatientBillableItem, 'name'):
@@ -319,21 +325,23 @@ def auto_compile_corporate_insurance_claim(sender, instance, created, **kwargs):
     from django.utils import timezone
     from core.models import InsuranceClaim
 
-    visit = instance.visit
+    # NEW RELATIONAL GUARD: Safely query the visit relations using a try/except block
+    try:
+        visit = instance.visit
+    except sender.DoesNotExist:
+        return  # Exit cleanly if the invoice points to a non-existent RegistrationRecord object
     
     # 1. Operational Guard: Only handle if the visit was registered as an INSURANCE encounter
     if not visit or visit.payment_mode != "INSURANCE" or not visit.insurance_company:
         return
 
     # 2. Extract current calculated totals from your dynamic model @property
-    # Using a safety fallback of 0.00 if no items are present yet
     calculated_total = instance.total_payable or 0.00
 
     # 3. Prevent Duplication: Check if a claims entry is already tracking this invoice structure
     claim = InsuranceClaim.objects.filter(patient_invoice=instance).first()
 
     if not claim:
-        # If no claim rows exist yet, create a fresh tracking reference record
         short_year = timezone.now().strftime('%y')
         random_suffix = random.randint(1000, 9999)
         
@@ -347,8 +355,6 @@ def auto_compile_corporate_insurance_claim(sender, instance, created, **kwargs):
             status="PRE_AUTH_PENDING"
         )
     else:
-        # If the claim already exists but clinicians have added more tests/medications,
-        # update the amount billed dynamically so the dashboard displays the right total!
         if claim.total_amount_billed != calculated_total:
             InsuranceClaim.objects.filter(id=claim.id).update(total_amount_billed=calculated_total)
 

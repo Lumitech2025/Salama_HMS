@@ -183,19 +183,34 @@ const PharmacyInventory = ({ setActiveTab }) => {
   };
 
   const handleInitializeRequisition = (item) => {
-    const prefilledData = {
-      drug_name: item.name,
-      sku: item.sku,
-      batch_number: item.batch_no,
-      dosage_form: item.dosage_form,
-      strength: item.strength,
-      suggested_quantity: Math.max(0, (parseInt(item.reorder_level || 50) * 2) - parseInt(item.stock_quantity || 0)),
-      notes: `Auto stock alert trigger for batch: ${item.batch_no}`
-    };
-    localStorage.setItem('salama_prefilled_requisition', JSON.stringify(prefilledData));
-    if (setActiveTab) setActiveTab('requisitions');
-  };
+    // 1. Added optional chaining (?.) to prevent null/undefined string crashes
+    const matchedStoreItem = mainStorePharmacyItems.find(
+      store => store.sku === item.sku || store.name?.toLowerCase() === item.name?.toLowerCase()
+    );
 
+    const prefilledData = {
+      inventory_item_id: matchedStoreItem ? matchedStoreItem.id : '',
+      name: item.name,
+      sku: item.sku,
+      dosage_form: item.dosage_form || 'TABLET',
+      strength: item.strength || '',
+      quantity: Math.max(1, (parseInt(item.reorder_level || 50) * 2) - parseInt(item.stock_quantity || 0)),
+      cost_per_unit: parseFloat(item.cost_price_unit || 0)
+    };
+
+    // Stash the selection in localStorage for retrieval across tabs
+    localStorage.setItem('salama_prefilled_requisition', JSON.stringify(prefilledData));
+    
+    // 2. Fallback check: Match whatever case pattern your parent state tracking uses
+    if (setActiveTab) {
+      // Try lowercase first, otherwise try matching standard variations if it fails
+      setActiveTab('requisitions'); 
+      
+      // NOTE: If it still doesn't switch tabs, open your parent layout file 
+      // (e.g., PharmacyDashboard.jsx) and check if it expects uppercase 'REQUISITIONS'
+    }
+  };
+  
   const filteredInventory = inventory.filter(item => 
     item.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     item.sku?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -213,7 +228,6 @@ const PharmacyInventory = ({ setActiveTab }) => {
             <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic flex items-center gap-3">
                 <Store className="text-teal-600" size={32} /> Pharmacy Shop Floor
             </h2>
-            
         </div>
         <button 
           onClick={() => { resetAddForm(); setShowAddModal(true); }}

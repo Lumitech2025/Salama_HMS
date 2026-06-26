@@ -1774,3 +1774,62 @@ class ExpenseAdmin(admin.ModelAdmin):
     @admin.display(boolean=True, description='Proof Attached')
     def has_receipt_proof(self, obj):
         return bool(obj.document)
+    
+
+from django.contrib import admin
+from .models import DischargeSummary
+
+@admin.register(DischargeSummary)
+class DischargeSummaryAdmin(admin.ModelAdmin):
+    # 1. Layout Fields in List View
+    list_display = (
+        'summary_number', 
+        'get_queue_id', 
+        'get_patient_name', 
+        'date_of_next_visit', 
+        'oncologist_name', 
+        'created_at'
+    )
+    
+    # 2. Add Search and Filtering Vectors
+    search_fields = (
+        'summary_number', 
+        'visit__queue_id', 
+        'patient__first_name', 
+        'patient__last_name', 
+        'oncologist_name'
+    )
+    list_filter = ('date_of_next_visit', 'oncologist_name', 'created_at')
+    
+    # 3. Explicit Performance Optimization (Avoid N+1 queries)
+    raw_id_fields = ('visit', 'patient')
+    
+    # 4. Enforce Read-Only Rules on Generated Identifiers
+    readonly_fields = ('summary_number', 'created_at', 'updated_at')
+
+    # 5. Fieldset Grouping for a Clean Admin Interface
+    fieldsets = (
+        ('Core Case Links', {
+            'fields': ('summary_number', 'visit', 'patient')
+        }),
+        ('Clinical Logs', {
+            'fields': ('side_effects_present', 'medications_received')
+        }),
+        ('Structured JSON Configurations', {
+            'classes': ('collapse',),
+            'description': 'Raw checkbox selections parsed directly from the React Interface Matrix',
+            'fields': ('reason_for_visit', 'service_disposition', 'discharge_meds_matrix')
+        }),
+        ('Signatures & Continuity', {
+            'fields': ('date_of_next_visit', 'oncologist_name', 'nurse_name', 'created_at', 'updated_at')
+        }),
+    )
+
+    # Custom Clean Attribute Selectors for Foreign Key Joins
+    @admin.display(ordering='visit__queue_id', description='Queue ID')
+    def get_queue_id(self, obj):
+        return obj.visit.queue_id
+
+    @admin.display(ordering='visit__first_name', description='Patient Name')
+    def get_patient_name(self, obj):
+        return obj.visit.full_name

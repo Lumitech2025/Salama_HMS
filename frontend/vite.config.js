@@ -11,6 +11,7 @@ export default defineConfig({
     },
   },
   server: {
+    allowedHosts: ['detra-unjapanned-ashton.ngrok-free.dev', '.ngrok-free.dev'],
     proxy: {
       // Catches /api/v1/, /api/ext/, etc.
       '/api': {

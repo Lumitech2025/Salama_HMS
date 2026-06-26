@@ -21,6 +21,8 @@ const BillingOfficerSidebar = ({ activeTab, setActiveTab }) => {
         { id: 'clearance', label: 'Insurance Verification', icon: <FileSpreadsheet size={18} /> },
         { id: 'insurance-providers', label: 'Insurance Providers', icon: <Building2 size={18} /> },
         { id: 'service-catalogue', label: 'Service Catalogue', icon: <FileSearch size={18} /> },
+        { id: 'claims', label: 'Insurance Claims', icon: <FileSearch size={18} /> },
+        
     ];
 
     const handleLogout = () => {

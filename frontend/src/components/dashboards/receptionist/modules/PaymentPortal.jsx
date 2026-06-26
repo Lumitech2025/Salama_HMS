@@ -85,10 +85,8 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
     return () => clearTimeout(timer);
   }, [countdown, paymentStatus]);
 
-  // ✨ Intercept and ingest routed components triggered globally inside the Billing Desk workflow
   useEffect(() => {
     if (routedPatient) {
-      // Direct field parsing matching RegistrationRecord schema layouts
       const standardizedPatient = {
         id: routedPatient.id,
         name: routedPatient.patient_name || routedPatient.full_name || "UNREGISTERED ENCOUNTER",
@@ -113,7 +111,6 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
       setPaymentStatus('idle');
       setErrorMessage('');
 
-      // Aggregates matching dynamic bills, pharmacy prescription entries, and structural line charges
       if (routedPatient.active_invoice && Array.isArray(routedPatient.active_invoice.items)) {
         setCart(routedPatient.active_invoice.items);
         setInvoiceId(routedPatient.active_invoice.id);
@@ -206,8 +203,6 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
   setVerificationStatus('unverified'); 
   setPaymentStatus('idle');
   setErrorMessage('');
-
-  // Reset/Initialize counter for this patient selection
   setInvoiceCounter(1); 
 
   // 🌟 FIXED: Changed from patientRecord.active_bill to patientRecord.active_invoice
@@ -422,9 +417,9 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#0a0f1d] p-5 rounded-xl border border-slate-800 shadow-sm print:hidden">
         <div>
           <h1 className="text-lg font-bold text-white tracking-tight">
-            Salama <span className="text-emerald-400">POS Billing Terminal</span>
+            Salama <span className="text-emerald-400">POS Billing Portal</span>
           </h1>
-          <p className="text-slate-400 text-xs mt-0.5">System Date: {new Date().toLocaleDateString('en-KE')}</p>
+          <p className="text-slate-400 text-xs mt-0.5">Date: {new Date().toLocaleDateString('en-KE')}</p>
         </div>
 
         <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
@@ -447,7 +442,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
 
       {/* PATIENT SELECTOR (HIDDEN ON PRINT) */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs relative print:hidden">
-        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Active Inspected Patient Context</label>
+        <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Active Patient</label>
         
         {/* Render interactive inputs only if no patient is routed to maintain workflow isolation */}
         {!selectedPatient ? (
@@ -511,7 +506,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
 
         {hasSearched && patientQueryResults.length === 0 && searchPatient.trim().length > 2 && !isSearching && (
           <div className="absolute left-4 right-4 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-4 text-center text-xs text-slate-400 font-medium">
-            No active outpatient encounters match your parameters.
+            No Patient Matches the details.
           </div>
         )}
       </div>
@@ -523,16 +518,15 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
         <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-3.5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
-              <ShoppingBag size={14} className="text-slate-400" /> Aggregated System Invoices
+              <ShoppingBag size={14} className="text-slate-400" /> Aggregated Invoices
             </h3>
-            <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded font-mono text-[10px] font-bold">{cart.length} Combined Entries</span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase bg-slate-50/20">
-                  <th className="py-2.5 px-4 w-1/4">Origin Block</th>
+                  <th className="py-2.5 px-4 w-1/4">Station</th>
                   <th className="py-2.5 px-4 w-1/2">Service Charge / Dispensed Pharmacy Item</th>
                   <th className="py-2.5 px-4 text-right w-1/4">Cost (KES)</th>
                   <th className="py-2.5 px-4 text-center w-10"></th>
@@ -847,7 +841,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
             <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between print:hidden shrink-0">
               <div className="flex items-center gap-2">
                 <Receipt size={16} className="text-slate-600" />
-                <span className="text-sm font-bold text-slate-800">Official Patient Consolidated Invoice</span>
+                <span className="text-sm font-bold text-slate-800">Official Patient Invoice</span>
               </div>
               <div className="flex items-center gap-2">
                 <button

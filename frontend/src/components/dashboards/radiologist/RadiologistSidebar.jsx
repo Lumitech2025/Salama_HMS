@@ -7,20 +7,18 @@ import {
     Package, 
     FileSpreadsheet, 
     LogOut,
-    Beaker 
+    Beaker,
+    FileImage
 } from 'lucide-react';
-import SalamaLogo from "@/assets/Salama Cancer Centre logo.png";
 
 const RadiologistSidebar = ({ activeTab, setActiveTab, onLogout }) => {
     const navigate = useNavigate();
 
     const menuItems = [
         { id: 'overview', label: 'Home', icon: <LayoutDashboard size={18} /> },
+        { id: 'diagnostics', label: 'Images & Scans', icon: <FileImage size={18} /> },
         { id: 'labs', label: 'Lab Results', icon: <Beaker size={18} /> },
-        { id: 'prescriptions', label: 'Prescriptions', icon: <ClipboardList size={18} /> },
-        { id: 'dispensing', label: 'Patient History', icon: <Pill size={18} /> },
-        { id: 'inventory', label: 'Inventory', icon: <Package size={18} /> },
-        { id: 'requisitions', label: 'Requisitions', icon: <FileSpreadsheet size={18} /> }
+        
     ];
 
     const handleLogoutClick = () => {
@@ -35,7 +33,7 @@ const RadiologistSidebar = ({ activeTab, setActiveTab, onLogout }) => {
     };
 
     return (
-        <aside className="w-80 bg-[#020617] h-screen flex flex-col p-8 border-r border-white/5 font-['Inter'] antialiased">
+        <aside className="w-80 bg-[#020617] h-screen sticky top-0 flex flex-col p-8 border-r border-white/5 font-['Inter'] antialiased select-none shrink-0">
             {/* Standardized Corporate Identity Branding */}
             <div className="mb-8 px-2">
                 <h1 className="text-3xl font-black text-white tracking-tighter uppercase italic">
@@ -47,12 +45,13 @@ const RadiologistSidebar = ({ activeTab, setActiveTab, onLogout }) => {
             </div>
 
             {/* Navigation Menu Links Wrapper */}
-            <nav className="flex-1 space-y-2 overflow-y-auto pr-1">
+            <nav className="flex-1 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
                 {menuItems.map((item) => (
                     <button
                         key={item.id}
+                        type="button"
                         onClick={() => setActiveTab(item.id)}
-                        className={`w-full flex items-center justify-start px-6 py-4 rounded-2xl transition-all duration-300 ${
+                        className={`w-full flex items-center justify-start px-6 py-4 rounded-2xl transition-all duration-200 ${
                             activeTab === item.id 
                             ? 'bg-teal-600 text-white shadow-xl shadow-teal-600/20 font-bold' 
                             : 'text-slate-400 hover:bg-white/5 hover:text-white'
@@ -72,6 +71,7 @@ const RadiologistSidebar = ({ activeTab, setActiveTab, onLogout }) => {
                     <p className="text-[9px] text-slate-600 font-mono">Version 1.0.0 (Salama Radio)</p>
                 </div>
                 <button 
+                    type="button"
                     onClick={handleLogoutClick}
                     className="flex items-center justify-start space-x-4 px-6 py-4 text-rose-500 hover:bg-rose-500/5 rounded-2xl transition-all w-full cursor-pointer"
                 >

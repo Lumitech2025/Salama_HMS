@@ -25,23 +25,26 @@ def _execute_notification_delivery(phone, email, message_body, subject):
         except Exception as e:
             logger.error(f"Failed to dispatch email to {email}. Error: {str(e)}")
 
-    # 2. Handle SMS Dispatch
     if phone:
         try:
-            api_key = str(settings.HTTPSMS_API_KEY).strip().replace('"', '').replace("'", "")
+            # Force strip whitespace, tabs, and potential hidden Windows \r breaks
+            api_key = str(settings.HTTPSMS_API_KEY).replace('"', '').replace("'", "").strip()
             
             payload = {
-                "from": "+254714326105",       # Your authorized sending SIM
+                "from": "+254714326105",       # Must exactly match your active device in HttpSMS dashboard
                 "to": phone,                   # Target patient number
-                "content": message_body        # Valid parameter expected by gateway
+                "content": message_body        # Content payload
             }
             
             headers = {
-                "x-api-key": api_key,
+                "x-api-key": api_key,          # Sent raw without dynamic alteration strings
                 "Content-Type": "application/json",
                 "Accept": "application/json"
             }
             
+            # Debug tracking statement (you can remove this after it works)
+            logger.info(f"Sending SMS with key length {len(api_key)} ending in: {api_key[-3:]}")
+
             response = requests.post(
                 "https://api.httpsms.com/v1/messages/send", 
                 json=payload, 

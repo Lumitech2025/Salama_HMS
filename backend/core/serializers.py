@@ -20,7 +20,8 @@ from .models import (
     PurchaseInvoice, PaymentVoucher,
     PatientInvoice, PatientBillableItem,
     ImagingOrder, ImagingResult,
-    NurseServiceOrder, Expense, ClaimAttachment
+    NurseServiceOrder, Expense, ClaimAttachment,
+    DischargeSummary
 
 )
 import os
@@ -348,6 +349,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
             'items', 'treatment_date'
         ]
 
+    
     def _get_clinical_encounter(self, obj):
         """Helper to resolve the underlying clinical encounter (RegistrationRecord)."""
         return obj.visit.visit if (obj.visit and hasattr(obj.visit, 'visit')) else None
@@ -623,6 +625,7 @@ class ImagingResultSerializer(serializers.ModelSerializer):
 
 class ImagingOrderSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.name', read_only=True)
+    health_record_number = serializers.CharField(read_only=True) 
     requested_imaging = serializers.SerializerMethodField()
     token_id = serializers.SerializerMethodField()
 
@@ -632,7 +635,6 @@ class ImagingOrderSerializer(serializers.ModelSerializer):
         write_only=True, 
         required=True
     )
-    # Because you set ultrasounds as VARIABLE, this field maps the custom pricing directly!
     total_estimated_charge = serializers.FloatField(
         write_only=True, 
         required=False
@@ -641,13 +643,14 @@ class ImagingOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = ImagingOrder
         fields = [
-            'id', 'patient', 'patient_name', 'visit', 'status', 'doctor_notes',
+            'id', 'patient', 'patient_name', 'health_record_number', 'visit', 'status', 'doctor_notes',
             'has_us_carotid', 'has_us_duplex_low_ext', 'has_us_venous_ext', 
             'has_us_venous_unila', 'has_us_doppler_abd_pel', 'has_us_limited_duplex', 
             'has_us_hemodialysis', 'created_at',
             'requested_imaging', 'token_id',  
             'imaging_skus', 'total_estimated_charge'
         ]
+        
         extra_kwargs = {
             'has_us_carotid': {'write_only': True},
             'has_us_duplex_low_ext': {'write_only': True},
@@ -658,10 +661,14 @@ class ImagingOrderSerializer(serializers.ModelSerializer):
             'has_us_hemodialysis': {'write_only': True},
         }
 
+    
+    
     def get_token_id(self, obj):
-        if obj.visit and hasattr(obj.visit, 'queue_id'):
-            return obj.visit.queue_id
-        return f"IMG-{obj.id}"
+        # Dynamically proxies our updated property helper safely!
+        return obj.queue_id
+    
+
+
 
     def get_requested_imaging(self, obj):
         return getattr(obj, 'selected_imaging_list', [])
@@ -1705,11 +1712,62 @@ class InsuranceClaimSerializer(serializers.ModelSerializer):
 
         return super().create(validated_data)
 
+class DetailedPatientClaimSerializer(serializers.ModelSerializer):
+    insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
+    dispatch_batch_reference = serializers.CharField(source='dispatch_batch.batch_reference', read_only=True)
+    invoice_number = serializers.CharField(source='patient_invoice.invoice_number', read_only=True)
+    patient_policy_number = serializers.CharField(source='patient.policy_number', default="N/A", read_only=True) 
+    
+    # 1. ADD THE FIELD TRACKERS HERE
+    patient_display_name = serializers.SerializerMethodField()
+    patient_hrn = serializers.SerializerMethodField()
+    attachments = ClaimAttachmentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = InsuranceClaim
+        fields = [
+            'id', 'claim_number', 'patient_display_name', 'patient_hrn', 'patient_policy_number',
+            'patient_invoice', 'invoice_number', 'insurance_company', 'insurance_company_name', 
+            'pre_auth_code', 'pre_auth_approved_amount', 'total_amount_billed', 'amount_paid',
+            'shortfall_amount', 'status', 'date_submitted', 'dispatch_batch', 
+            'dispatch_batch_reference', 'attachments', 'rejection_reason'
+        ]
+
+    def _get_invoice(self, obj):
+        if hasattr(obj, 'patient_invoice') and obj.patient_invoice:
+            return obj.patient_invoice
+        if hasattr(obj, 'invoice') and obj.invoice:
+            return obj.invoice
+        return None
+
+    # 2. SYNC PATIENT NAME FETCHING TO LOOK INTO INVOICE VISITS
+    def get_patient_display_name(self, obj):
+        invoice = self._get_invoice(obj)
+        if invoice and invoice.visit:
+            return getattr(invoice.visit, 'full_name', getattr(invoice.visit, 'name', 'Unknown Patient'))
+        if obj.patient:
+            if getattr(obj.patient, 'name', None):
+                return obj.patient.name
+            first_name = getattr(obj.patient, 'first_name', '') or ''
+            last_name = getattr(obj.patient, 'last_name', '') or ''
+            return f"{first_name} {last_name}".strip() or "Unnamed Patient"
+        return "Unknown Patient"
+
+    # 3. ADD THE MISSING HEALTH RECORD NUMBER METHOD METHOD FIELD
+    def get_patient_hrn(self, obj):
+        invoice = self._get_invoice(obj)
+        if invoice and invoice.visit:
+            return getattr(invoice.visit, 'health_record_number', '—')
+        if obj.patient and hasattr(obj.patient, 'health_record_number'):
+            return obj.patient.health_record_number
+        return "—"
+
+
 class ClaimDispatchBatchSerializer(serializers.ModelSerializer):
     insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
     sender_username = serializers.CharField(source='created_by.username', read_only=True)
-    
     claims_count = serializers.IntegerField(read_only=True)
+    
 
     class Meta:
         model = ClaimDispatchBatch
@@ -1719,35 +1777,6 @@ class ClaimDispatchBatchSerializer(serializers.ModelSerializer):
             'created_by', 'sender_username', 'claims_count'
         ]
         read_only_fields = ['batch_reference', 'total_batch_value', 'created_by']
-
-
-class DetailedPatientClaimSerializer(serializers.ModelSerializer):
-    insurance_company_name = serializers.CharField(source='insurance_company.name', read_only=True)
-    dispatch_batch_reference = serializers.CharField(source='dispatch_batch.batch_reference', read_only=True)
-    invoice_number = serializers.CharField(source='patient_invoice.invoice_number', read_only=True)
-    patient_policy_number = serializers.CharField(source='patient.policy_number', default="N/A", read_only=True) 
-    patient_display_name = serializers.SerializerMethodField()
-    attachments = ClaimAttachmentSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = InsuranceClaim
-        fields = [
-            'id', 'claim_number', 'patient_display_name', 'patient_policy_number',
-            'patient_invoice', 'invoice_number', 'insurance_company', 'insurance_company_name', 
-            'pre_auth_code', 'pre_auth_approved_amount', 'total_amount_billed', 'amount_paid',
-            'shortfall_amount', 'status', 'date_submitted', 'dispatch_batch', 
-            'dispatch_batch_reference', 'attachments', 'rejection_reason'
-        ]
-
-    def get_patient_display_name(self, obj):
-        if obj.patient:
-            if getattr(obj.patient, 'name', None):
-                return obj.patient.name
-            first_name = getattr(obj.patient, 'first_name', '') or ''
-            last_name = getattr(obj.patient, 'last_name', '') or ''
-            return f"{first_name} {last_name}".strip() or "Unnamed Patient"
-        return "Unknown Patient"
-
 
 class ServiceSerializer(serializers.ModelSerializer):
     # Display the human-readable label for departments in read-only mode
@@ -2226,3 +2255,98 @@ class ExpenseSerializer(serializers.ModelSerializer):
         if not value or str(value).strip() == "":
             return "PENDING_SORT"
         return value
+    
+class DischargeSummarySerializer(serializers.ModelSerializer):
+    # Read-only properties generated from relational cross-joins
+    patient_name = serializers.CharField(source='visit.full_name', read_only=True)
+    age = serializers.IntegerField(source='visit.age', read_only=True)
+    gender = serializers.CharField(source='visit.get_gender_display', read_only=True)
+    date_of_service = serializers.DateTimeField(source='visit.registered_at', read_only=True, format="%Y-%m-%d")
+    primary_diagnosis = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DischargeSummary
+        fields = '__all__'
+
+    def get_primary_diagnosis(self, obj):
+        # Fallback query traversing diagnosis snapshot tables
+        diag = PatientDiagnosis.objects.filter(visit=obj.visit).first()
+        if diag:
+            return f"{diag.icd10_code} - {diag.icd10_description}"
+        return "No Primary Diagnosis Indexed"
+
+    @classmethod
+    def get_prefilled_data(cls, visit_id):
+        try:
+            visit = RegistrationRecord.objects.get(id=visit_id)
+        except RegistrationRecord.DoesNotExist:
+            return None
+
+        patient = visit.patient
+        hrn = visit.health_record_number
+        
+        # Predict the incremental layout token safely
+        existing_count = DischargeSummary.objects.filter(patient=patient).count()
+        predicted_summary_number = f"{hrn}/DS{existing_count + 1}"
+            
+        # 1. Look for diagnoses
+        diag = PatientDiagnosis.objects.filter(visit=visit).first()
+        diag_str = f"{diag.icd10_code} - {diag.icd10_description}" if diag else "No Primary Diagnosis Indexed"
+
+        # 2. Extract prescription items
+        prescription = Prescription.objects.filter(patient=patient).order_by('-created_at').first()
+        
+        chemo_meds = []
+        take_home_meds = []
+        
+        if prescription:
+            items = prescription.items.all()
+            for item in items:
+                desc = f"{item.medication_name} {item.dosage} {item.route}".strip()
+                if item.stage in ['PRE_CHEMO', 'CHEMO']:
+                    chemo_meds.append(desc)
+                elif item.stage == 'POST_CHEMO':
+                    take_home_meds.append(desc)
+
+        # 3. Format prefilled values for the double column table setup
+        discharge_meds = []
+        max_len = max(len(take_home_meds), 5)
+        for i in range(max_len):
+            left_val = take_home_meds[i] if i < len(take_home_meds) else ""
+            discharge_meds.append({
+                "text_left": left_val,
+                "text_right": ""
+            })
+
+        has_chemo = len(chemo_meds) > 0
+
+        return {
+            "visit": visit.id,
+            "patient": patient.id,
+            "summary_number": predicted_summary_number,  # Clean string inclusion for React dropdown actions
+            "patient_name": visit.full_name,
+            "age": visit.age,
+            "gender": visit.get_gender_display(),
+            "date_of_service": visit.registered_at.strftime("%Y-%m-%d"),
+            "primary_diagnosis": diag_str,
+            "side_effects_present": "",
+            "medications_received": ", ".join(chemo_meds) if chemo_meds else "None recorded.",
+            "reason_for_visit": {
+                "chemoAdministration": has_chemo,
+                "treatmentSideEffects": False,
+                "routineFollowUp": not has_chemo,
+                "psychosocialCounselling": False
+            },
+            "service_disposition": {
+                "completedCourse": False,
+                "transferredHigherLevel": False,
+                "patientTerminated": False,
+                "continuingChemo": has_chemo,
+                "transferredFacility": False,
+                "transferredFacilityDetails": ""
+            },
+            "discharge_meds_matrix": discharge_meds,
+            "date_of_next_visit": "",
+            "oncologist_name": "DR. WATTANGA L.A.",
+            "nurse_name": "SR. HELLEN OKELLO"
+        }

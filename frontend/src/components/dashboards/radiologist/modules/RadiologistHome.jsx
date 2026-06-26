@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import API from '@/api/api';
 import { 
-  Users, CheckCircle, Clock, Search, 
-  Activity, Loader2, Play, BarChart3 
+    CheckCircle, Clock, Search, Loader2, Play, BarChart3 
 } from 'lucide-react';
 
-const RadiologistHome = ({ onSelectOrder, processedSessionCount }) => {
+// FIXED: Parameters updated to match the parent Dashboard's explicit property pass
+const RadiologistHome = ({ onSelectPatient, attendedSessionCount }) => {
     const [loading, setLoading] = useState(true);
     const [orders, setOrders] = useState([]); 
     const [searchQuery, setSearchQuery] = useState('');
@@ -19,19 +19,18 @@ const RadiologistHome = ({ onSelectOrder, processedSessionCount }) => {
     const fetchImagingDashboard = useCallback(async () => {
         setLoading(true);
         try {
-            // Updated route to match the core imaging endpoint configuration precisely
             const resOrders = await API.get('/api/imaging-orders/?status=PENDING').catch(() => ({ data: [] }));
             const activeOrders = resOrders.data.results || resOrders.data || [];
             setOrders(activeOrders);
 
-            // Fetch metrics from analytics matching your core app schema
             const resAnalytics = await API.get('/api/imaging-orders/analytics/').catch(() => ({ data: {} }));
             const completedBackend = resAnalytics.data.completed_today || 0;
             const totalVolume = resAnalytics.data.total_scans_processed || 0;
 
             setStats({
                 pendingScans: activeOrders.length,
-                completedToday: completedBackend + processedSessionCount, 
+                // FIXED: Using correctly bound attendedSessionCount reference here
+                completedToday: completedBackend + attendedSessionCount, 
                 totalScansVolume: totalVolume
             });
 
@@ -40,7 +39,7 @@ const RadiologistHome = ({ onSelectOrder, processedSessionCount }) => {
         } finally {
             setLoading(false);
         }
-    }, [processedSessionCount]);
+    }, [attendedSessionCount]); // FIXED: Dependency array updated
 
     useEffect(() => {
         fetchImagingDashboard();
@@ -50,18 +49,20 @@ const RadiologistHome = ({ onSelectOrder, processedSessionCount }) => {
 
     const handleProcessScan = async (order) => {
         try {
-            onSelectOrder(order);
+            // FIXED: Calls parent method safely to set active state & flip active tab to 'diagnostics'
+            if (onSelectPatient) {
+                onSelectPatient(order);
+            }
         } catch (err) {
             console.error("Order Access Error:", err);
-            onSelectOrder(order); 
         }
     };
 
     const filteredOrders = orders.filter(order => {
         const name = order.patient_name || "";
-        const token = order.queue_id || "";
+        const token = order.token_id || "";
         const recordNum = order.health_record_number || "";
-        const selectedScans = (order.selected_imaging_list || []).join(" ");
+        const selectedScans = (order.requested_imaging || []).join(" ");
         
         return name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                token.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -122,15 +123,17 @@ const RadiologistHome = ({ onSelectOrder, processedSessionCount }) => {
                                     </td>
                                     <td className="px-10 py-8">
                                         <span className="text-sm font-bold font-mono text-blue-600 bg-blue-50/50 border border-blue-100/70 px-3 py-1.5 rounded-lg">
-                                            {order.health_record_number}
+                                            {order.health_record_number || 'N/A'}
                                         </span>
                                     </td>
                                     <td className="px-10 py-8 text-center">
-                                        <span className="bg-slate-900 text-white px-4 py-2 rounded-xl font-mono font-bold shadow-lg group-hover:bg-blue-600 transition-colors">{order.queue_id}</span>
+                                        <span className="bg-slate-900 text-white px-4 py-2 rounded-xl font-mono font-bold shadow-lg group-hover:bg-blue-600 transition-colors">
+                                            {order.token_id}
+                                        </span>
                                     </td>
                                     <td className="px-10 py-8 text-center max-w-xs">
                                         <div className="flex flex-wrap gap-1 justify-center">
-                                            {(order.selected_imaging_list || []).map((scan, idx) => (
+                                            {(order.requested_imaging || []).map((scan, idx) => (
                                                 <span key={idx} className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-[9px] font-black uppercase tracking-tight border border-slate-200">
                                                     {scan}
                                                 </span>

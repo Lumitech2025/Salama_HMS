@@ -1,33 +1,17 @@
+import os
 from pathlib import Path
 import environ
-
 from datetime import timedelta
 
-import os
-from dotenv import load_dotenv  
-
+# Build paths inside the project
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Initialize environment variables handler
 env = environ.Env(
-    # set casting defaults if variables are missing
     DEBUG=(bool, False)
 )
 
-# Read the literal .env file context matching your layout path
 environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
-
-
-
-
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
 
 SECRET_KEY = env('SECRET_KEY')
 
@@ -157,12 +141,13 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
 ]
 
+# CORS_ALLOW_ALL_ORIGINS = True # <-- Comment this out!
+CORS_ALLOW_CREDENTIALS = True
+
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
-
-CORS_ALLOW_ALL_ORIGINS = True
 
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -172,8 +157,6 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken",
     "x-requested-with",
 ]
-
-CORS_ALLOW_CREDENTIALS = True
 
 
 
@@ -205,8 +188,8 @@ EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 
-# Pulling values cleanly from your .env file
-EMAIL_HOST_USER = 'collinsmwiti98@gmail.com'
+# Read cleanly from your .env file
+EMAIL_HOST_USER = env('EMAIL_HOST_USER', default='collinsmwiti98@gmail.com')
 EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
 
 # The formal outbound header mask for patient communications
@@ -304,3 +287,7 @@ MPESA_PASSKEY = env("MPESA_PASSKEY", default="")
 
 MPESA_ENVIRONMENT = "sandbox" 
 MPESA_CALLBACK_URL = env("MPESA_CALLBACK_URL", default="")
+
+
+print("DEBUG EMAIL USER:", EMAIL_HOST_USER)
+print("DEBUG SMS KEY EXISTS:", bool(HTTPSMS_API_KEY))

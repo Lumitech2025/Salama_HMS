@@ -24,6 +24,7 @@ from .views import (
     ImagingOrderViewSet, ImagingResultViewSet, MpesaPaymentTriggerView,
     StockTakeViewSet, ExpenseViewSet, FinancialRevenueAnalyticsView,
     CompileClaimDispatchBatchView, ClaimAttachmentViewSet,
+    DischargeSummaryViewSet,
     mpesa_callback_webhook, check_invoice_status,
 )
 
@@ -111,6 +112,8 @@ router.register(r'imaging-results', ImagingResultViewSet, basename='imaging-resu
 router.register(r'nurse-orders', NurseServiceOrderViewSet, basename='nurse-order')
 router.register(r'fixed-assets', FixedAssetViewSet, basename='fixed-asset')
 router.register(r'expenses', ExpenseViewSet, basename='expense')
+
+router.register(r'discharge-summaries', DischargeSummaryViewSet, basename='discharge-summary')
 
 urlpatterns = [
     # Auth Endpoints
