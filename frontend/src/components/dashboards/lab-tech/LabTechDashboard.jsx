@@ -11,6 +11,7 @@ import PatientHistory from './modules/PatientHistory';
 import LabReference from './modules/LabReference';
 import LabInventory from './modules/LabInventory';
 import LabRequisitionsTab from './modules/LabRequisitionsTab';
+import LaboratoryResults from "../oncologist/modules/LaboratoryResults";
 
 const getShortForm = (label) => {
   const targetString = label || '';
@@ -125,7 +126,7 @@ const LabTechDashboard = () => {
   const renderModule = () => {
     switch (activeTab) {
       case 'diagnostics': return <DiagnosticWorklist />;
-      case 'history': return <PatientHistory />;
+      case 'history': return <LaboratoryResults />;
       case 'reference': return <LabReference />;
       case 'inventory': return <LabInventory />;
       case 'requisitions': return <LabRequisitionsTab />;

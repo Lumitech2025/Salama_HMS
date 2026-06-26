@@ -1,238 +1,448 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import API from '@/api/api';
 import { 
-  History, FileText, Search, User, Calendar, Download, Share2,
-  ChevronRight, MessageSquare, Loader2, RefreshCcw, Stethoscope, Beaker,
-  Pill, Activity, Clipboard
+    History, Search, Loader2, RefreshCcw, Beaker, MessageSquare, Pill, Download, 
+    X, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
 
-const PatientHistory = () => {
-  const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedReport, setSelectedReport] = useState(null);
+// Import local center brand asset directly into the compiler pipeline
+import SalamaLogo from '@/assets/Salama Cancer Centre logo.png';
 
-  const fetchHistory = useCallback(async () => {
-    setLoading(true);
-    try {
-      // 1. Fetch all clinical touchpoints in parallel
-      const [labRes, notesRes, prescriptionRes] = await Promise.all([
-        API.get('/lab-results/', { params: { status: 'COMPLETED' } }),
-        API.get('/clinical-notes/'),
-        API.get('/prescriptions/')
-      ]);
-
-      const labData = labRes.data.results || labRes.data || [];
-      const notesData = notesRes.data.results || notesRes.data || [];
-      const prescriptionData = prescriptionRes.data.results || prescriptionRes.data || [];
-
-      // 2. MASTER GROUPING LOGIC: Combine Labs, Notes, and Prescriptions by Patient + Visit
-      const masterRegistry = {};
-
-      const getGroupKey = (item) => `${item.patient}-${item.visit || item.appointment || 'walk-in'}`;
-
-      // Process Lab Results
-      labData.forEach(item => {
-        const key = getGroupKey(item);
-        if (!masterRegistry[key]) masterRegistry[key] = { patient_name: item.patient_name, date: item.test_date || item.created_at, labs: [], notes: [], prescriptions: [] };
-        
-        if (item.parameters) {
-          Object.entries(item.parameters).forEach(([k, v]) => {
-            masterRegistry[key].labs.push({ name: `${item.test_label || item.test_name}: ${k.replace('_', ' ')}`, value: v });
-          });
-        }
-        if (item.technician_notes) masterRegistry[key].notes.push({ author: "Lab Tech", content: item.technician_notes, role: 'LAB' });
-      });
-
-      // Process Clinical Notes
-      notesData.forEach(item => {
-        const key = getGroupKey(item);
-        if (!masterRegistry[key]) masterRegistry[key] = { patient_name: item.patient_name, date: item.created_at, labs: [], notes: [], prescriptions: [] };
-        masterRegistry[key].notes.push({ 
-          author: item.author_name || "Doctor", 
-          content: item.content, 
-          role: item.note_type || 'CLINICAL' 
-        });
-      });
-
-      // Process Prescriptions
-      prescriptionData.forEach(item => {
-        const key = getGroupKey(item);
-        if (!masterRegistry[key]) masterRegistry[key] = { patient_name: item.patient_name, date: item.created_at, labs: [], notes: [], prescriptions: [] };
-        
-        const meds = item.items?.map(m => `${m.drug_name} (${m.dosage})`) || [];
-        masterRegistry[key].prescriptions.push({ 
-          id: item.id, 
-          status: item.status, 
-          summary: meds.join(", ") 
-        });
-      });
-
-      const sortedHistory = Object.values(masterRegistry).sort((a, b) => new Date(b.date) - new Date(a.date));
-      setHistory(sortedHistory);
-    } catch (err) {
-      console.error("Master History sync error", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchHistory(); }, [fetchHistory]);
-
-  const formatDate = (dateString) => {
-    if (!dateString) return "N/A";
-    return new Date(dateString).toLocaleDateString('en-KE', { 
-      year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-    });
-  };
-
-  const filteredHistory = history.filter(h => h.patient_name?.toLowerCase().includes(searchTerm.toLowerCase()));
-
-  return (
-    <div className="space-y-8 animate-in fade-in duration-700 font-['Inter']">
-      
-      {/* HEADER */}
-      <div className="bg-white border border-slate-100 rounded-[3rem] p-10 shadow-xl flex flex-col md:flex-row justify-between items-center gap-6">
-        <div>
-          <h3 className="text-3xl font-black text-slate-900 uppercase italic tracking-tighter flex items-center gap-4">
-            <div className="p-3 bg-blue-50 rounded-2xl text-blue-600"><History size={28} /></div>
-            Clinical <span className="text-blue-600">History Registry</span>
-          </h3>
-          <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] mt-3">Comprehensive Patient Audit Trail</p>
-        </div>
-        <div className="flex gap-4 w-full md:w-auto">
-          <div className="relative flex-1 md:w-96">
-            <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-            <input 
-              type="text" 
-              placeholder="Search patient records..." 
-              className="w-full bg-slate-50 border border-slate-100 rounded-[1.5rem] py-4 pl-16 pr-6 text-sm font-bold text-slate-900 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all shadow-sm"
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <button onClick={fetchHistory} className="p-4 bg-white hover:bg-slate-50 border border-slate-100 rounded-[1.5rem] transition-all group">
-            <RefreshCcw size={22} className={`text-blue-500 ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
-      </div>
-
-      {/* TABLE */}
-      <div className="bg-white border border-slate-100 rounded-[4rem] overflow-hidden shadow-2xl mx-1">
-        <div className="overflow-x-auto min-h-[400px]">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
-                <th className="py-8 px-12 italic">Patient Identity</th>
-                <th className="py-8 px-12 text-center italic">Clinical Events</th>
-                <th className="py-8 px-12 text-center italic">Most Recent Visit</th>
-                <th className="py-8 px-12 text-right italic">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {loading ? (
-                <tr><td colSpan="4" className="py-40 text-center text-slate-300 font-black uppercase text-[10px] tracking-widest italic">Syncing Central EMR...</td></tr>
-              ) : filteredHistory.map((record, index) => (
-                <tr key={index} className="group hover:bg-slate-50 transition-all">
-                  <td className="py-10 px-12 font-black text-slate-900 text-lg uppercase tracking-tight italic">{record.patient_name}</td>
-                  <td className="py-10 px-12 text-center">
-                    <div className="flex justify-center gap-2">
-                        {record.labs.length > 0 && <span className="bg-teal-50 text-teal-600 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border border-teal-100">Labs</span>}
-                        {record.notes.length > 0 && <span className="bg-blue-50 text-blue-600 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border border-blue-100">Notes</span>}
-                        {record.prescriptions.length > 0 && <span className="bg-rose-50 text-rose-600 px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border border-rose-100">Meds</span>}
-                    </div>
-                  </td>
-                  <td className="py-10 px-12 text-center font-bold text-slate-400 text-xs uppercase italic">{formatDate(record.date)}</td>
-                  <td className="py-10 px-12 text-right">
-                    <button onClick={() => setSelectedReport(record)} className="bg-[#020617] text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] hover:bg-blue-600 transition-all shadow-lg">View Profile</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* MODAL REPORT */}
-      {selectedReport && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-md animate-in fade-in">
-          <div className="bg-white rounded-[3.5rem] w-full max-w-3xl overflow-hidden shadow-2xl animate-in zoom-in max-h-[90vh] flex flex-col">
-            <div className="bg-[#020617] p-10 text-white flex justify-between items-center shrink-0">
-              <div>
-                <h2 className="text-2xl font-black uppercase italic tracking-tighter">Salama <span className="text-blue-400">Clinical Summary</span></h2>
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] mt-2">{selectedReport.patient_name}</p>
-              </div>
-              <button onClick={() => setSelectedReport(null)} className="p-4 bg-white/5 hover:bg-white/10 rounded-full text-white transition-all"><X size={24} className="rotate-90" /></button>
-            </div>
-            
-            <div className="p-12 space-y-10 overflow-y-auto">
-              {/* Lab Section */}
-              {selectedReport.labs.length > 0 && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-teal-600 font-black uppercase text-[10px] tracking-widest"><Beaker size={16} /> Diagnostic Data</div>
-                  <div className="grid grid-cols-2 gap-3">
-                    {selectedReport.labs.map((t, i) => (
-                      <div key={i} className="bg-slate-50 p-4 rounded-2xl flex justify-between border border-slate-100">
-                        <span className="text-[10px] font-black text-slate-400 uppercase italic">{t.name}</span>
-                        <span className="text-xs font-black text-slate-900">{t.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Notes Section */}
-              {selectedReport.notes.length > 0 && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-blue-600 font-black uppercase text-[10px] tracking-widest"><MessageSquare size={16} /> Clinical Narratives</div>
-                  <div className="space-y-3">
-                    {selectedReport.notes.map((n, i) => (
-                      <div key={i} className="bg-blue-50/30 p-6 rounded-3xl border border-blue-100/50">
-                        <p className="text-[9px] font-black text-blue-400 uppercase mb-2">Observation by {n.author}</p>
-                        <p className="text-sm text-slate-700 italic font-bold leading-relaxed">"{n.content}"</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Prescription Section */}
-              {selectedReport.prescriptions.length > 0 && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-rose-600 font-black uppercase text-[10px] tracking-widest"><Pill size={16} /> Active Medication</div>
-                  <div className="space-y-2">
-                    {selectedReport.prescriptions.map((p, i) => (
-                      <div key={i} className="bg-rose-50/30 p-5 rounded-2xl border border-rose-100/50 flex justify-between items-center">
-                        <p className="text-xs font-bold text-slate-700">{p.summary}</p>
-                        <span className="text-[8px] font-black bg-rose-500 text-white px-2 py-1 rounded-md uppercase">{p.status}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            <div className="p-10 bg-slate-50 border-t border-slate-100 grid grid-cols-2 gap-4 shrink-0">
-                <button className="bg-white border border-slate-200 text-slate-900 py-4 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3"><Download size={18} /> Export EMR</button>
-                <button className="bg-blue-600 text-white py-4 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl shadow-blue-200"><Share2 size={18} /> Share Record</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+const REFERENCE_RANGES = {
+    cbc_hb: { min: 12.0, max: 17.5, label: "Hemoglobin", unit: "g/dL" },
+    cbc_wbc: { min: 4.0, max: 11.0, label: "Total WBC Count", unit: "x10^9/L" },
+    cbc_neut: { min: 1.5, max: 7.5, label: "Absolute Neutrophils", unit: "x10^9/L" },
+    cbc_plt: { min: 150, max: 450, label: "Platelets", unit: "x10^9/L" },
+    cbc_mcv: { min: 80, max: 100, label: "Mean Corpuscular Vol (MCV)", unit: "fL" },
+    
+    ue_na: { min: 135, max: 145, label: "Sodium (Na+)", unit: "mmol/L" },
+    ue_k: { min: 3.5, max: 5.1, label: "Potassium (K+)", unit: "mmol/L" },
+    ue_creatinine: { min: 50, max: 110, label: "Serum Creatinine", unit: "µmol/L" },
+    ue_urea: { min: 2.5, max: 7.8, label: "Clinipak Urea", unit: "mmol/L" },
+    
+    lft_alt: { min: 7, max: 56, label: "Alanine Transaminase (ALT/SGPT)", unit: "U/L" },
+    lft_ast: { min: 10, max: 40, label: "AST / SGOT", unit: "U/L" },
+    lft_tbil: { min: 3, max: 21, label: "Total Bilirubin (T.BIL)", unit: "µmol/L" },
+    lft_dbil: { min: 0, max: 5.1, label: "Direct Bilirubin", unit: "µmol/L" },
+    lft_alp: { min: 40, max: 130, label: "Alkaline Phosphatase (ALP)", unit: "U/L" },
+    lft_albumin: { min: 35, max: 50, label: "Albumin", unit: "g/L" },
+    
+    psa_total: { min: 0, max: 4.0, label: "Total PSA", unit: "ng/mL" }
 };
 
-const X = ({ size, className }) => (
-  <svg 
-    xmlns="http://www.w3.org/2000/svg" 
-    width={size} height={size} 
-    viewBox="0 0 24 24" fill="none" 
-    stroke="currentColor" strokeWidth="3" 
-    strokeLinecap="round" strokeLinejoin="round" 
-    className={className}
-  >
-    <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
-  </svg>
-);
+const evaluateRange = (name, value) => {
+    if (!value || isNaN(value) || !REFERENCE_RANGES[name]) return { status: 'NORMAL', label: 'Within Range' };
+    const numVal = parseFloat(value);
+    const config = REFERENCE_RANGES[name];
+
+    if (numVal > config.max) return { status: 'HIGH', label: 'High' };
+    if (numVal < config.min) return { status: 'LOW', label: 'Low' };
+    return { status: 'NORMAL', label: 'Within Range' };
+};
+
+const PatientHistory = () => {
+    const [history, setHistory] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [selectedPatientRecord, setSelectedPatientRecord] = useState(null);
+
+    const fetchHistory = useCallback(async () => {
+        setLoading(true);
+        try {
+            const [labRes, notesRes, prescriptionRes] = await Promise.all([
+                API.get('/lab-results/', { params: { status: 'COMPLETED' } }),
+                API.get('/clinical-notes/'),
+                API.get('/prescriptions/')
+            ]);
+
+            const labData = labRes.data.results || labRes.data || [];
+            const notesData = notesRes.data.results || notesRes.data || [];
+            const prescriptionData = prescriptionRes.data.results || prescriptionRes.data || [];
+
+            const masterRegistry = {};
+            const getGroupKey = (item) => `${item.patient}-${item.visit || item.appointment || 'walk-in'}`;
+
+            // Process Lab Data directly mapping to analytical keys
+            labData.forEach(item => {
+                const key = getGroupKey(item);
+                if (!masterRegistry[key]) {
+                    masterRegistry[key] = { 
+                        patient_id: item.patient,
+                        visit_id: item.visit,
+                        patient_name: item.patient_name, 
+                        date: item.test_date || item.created_at, 
+                        collection_date: item.test_date || item.created_at,
+                        labs: [], 
+                        notes: [], 
+                        prescriptions: [] 
+                    };
+                }
+                
+                const targetParameters = item.parameters || item;
+                const excludedKeys = ['id', 'patient', 'patient_name', 'visit', 'lab_order', 'test_name', 'test_date', 'created_at', 'status', 'technician_notes', 'is_critical', 'parameters'];
+                
+                Object.entries(targetParameters).forEach(([paramKey, val]) => {
+                    if (val !== "" && val !== null && val !== undefined && !excludedKeys.includes(paramKey)) {
+                        const rangeConfig = REFERENCE_RANGES[paramKey] || { label: paramKey.replace('_', ' ').toUpperCase(), min: 'N/A', max: 'N/A', unit: '---' };
+                        const evaluation = evaluateRange(paramKey, val);
+
+                        masterRegistry[key].labs.push({
+                            paramKey,
+                            testLabel: rangeConfig.label,
+                            result: val,
+                            unit: rangeConfig.unit,
+                            min: rangeConfig.min,
+                            max: rangeConfig.max,
+                            evalLabel: evaluation.label,
+                            evalStatus: evaluation.status,
+                            profileScope: item.test_name || "Diagnostic Profile"
+                        });
+                    }
+                });
+
+                if (item.technician_notes) {
+                    masterRegistry[key].notes.push({ author: "Lab Tech Remarks", content: item.technician_notes, role: 'LAB' });
+                }
+            });
+
+            // Process Clinical Notes
+            notesData.forEach(item => {
+                const key = getGroupKey(item);
+                if (!masterRegistry[key]) {
+                    masterRegistry[key] = { patient_id: item.patient, visit_id: item.visit, patient_name: item.patient_name, date: item.created_at, collection_date: item.created_at, labs: [], notes: [], prescriptions: [] };
+                }
+                masterRegistry[key].notes.push({ author: item.author_name || "Doctor", content: item.content, role: item.note_type || 'CLINICAL' });
+            });
+
+            // Process Prescriptions
+            prescriptionData.forEach(item => {
+                const key = getGroupKey(item);
+                if (!masterRegistry[key]) {
+                    masterRegistry[key] = { patient_id: item.patient, visit_id: item.visit, patient_name: item.patient_name, date: item.created_at, collection_date: item.created_at, labs: [], notes: [], prescriptions: [] };
+                }
+                const meds = item.items?.map(m => `${m.drug_name} (${m.dosage || m.strength || 'As Directed'})`) || [];
+                masterRegistry[key].prescriptions.push({ id: item.id, status: item.status || 'Active', summary: meds.join(", ") });
+            });
+
+            const sortedHistory = Object.values(masterRegistry).sort((a, b) => new Date(b.date) - new Date(a.date));
+            setHistory(sortedHistory);
+            if (sortedHistory.length > 0) setSelectedPatientRecord(sortedHistory[0]);
+        } catch (err) {
+            console.error("Master History sync error", err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { fetchHistory(); }, [fetchHistory]);
+
+    const formatDate = (dateString) => {
+        if (!dateString) return "N/A";
+        return new Date(dateString).toLocaleDateString('en-GB', { 
+            year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+        });
+    };
+
+    const filteredHistory = useMemo(() => {
+        if (!searchTerm.trim()) return history;
+        return history.filter(h => h.patient_name?.toLowerCase().includes(searchTerm.toLowerCase()));
+    }, [history, searchTerm]);
+
+    const handlePrintDownload = () => {
+        window.print();
+    };
+
+    return (
+        <div className="flex flex-col lg:flex-row gap-8 min-h-screen bg-slate-50/50 p-4 font-['Inter'] text-slate-800 text-left relative">
+            
+            {/* Native Sheet Print Configuration Override CSS rule sets */}
+            <style dangerouslySetInnerHTML={{__html: `
+                @media print {
+                    body * { visibility: hidden !important; }
+                    #printable-history-sheet, #printable-history-sheet * { visibility: visible !important; }
+                    #printable-history-sheet { 
+                        position: absolute !important; 
+                        left: 0 !important; 
+                        top: 0 !important; 
+                        width: 100% !important; 
+                        display: block !important;
+                        background: white !important;
+                        color: black !important;
+                    }
+                    .screen-only { display: none !important; }
+                }
+            `}} />
+
+            {/* Sidebar Controls Panel */}
+            <div className="w-full lg:w-96 bg-white border border-slate-200/60 rounded-[2.5rem] p-6 shadow-sm flex flex-col h-[calc(100vh-4rem)] lg:sticky lg:top-8 screen-only">
+                <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-4">
+                    <div className="flex items-center gap-3">
+                        <History className="text-blue-600 animate-pulse" size={22} />
+                        <div>
+                            <h2 className="font-black uppercase text-sm tracking-tight">EMR Patient History</h2>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Clinical Audit Ledger</p>
+                        </div>
+                    </div>
+                    <button onClick={fetchHistory} disabled={loading} className="p-2 text-slate-400 hover:text-blue-600 rounded-xl hover:bg-slate-50 transition-all">
+                        <RefreshCcw size={16} className={loading ? "animate-spin text-blue-600" : ""} />
+                    </button>
+                </div>
+
+                <div className="relative mb-4">
+                    <input 
+                        type="text" 
+                        placeholder="Search patient medical charts..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full bg-slate-50 text-xs text-slate-800 font-semibold pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    />
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                    {loading ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-2">
+                            <Loader2 size={24} className="animate-spin text-blue-600" />
+                            <span className="text-[10px] font-black uppercase text-slate-400">Syncing Master Database...</span>
+                        </div>
+                    ) : filteredHistory.length === 0 ? (
+                        <div className="text-center py-12 text-slate-400 font-medium text-xs italic">No clinical files located.</div>
+                    ) : (
+                        filteredHistory.map((record, index) => (
+                            <button
+                                key={index}
+                                onClick={() => setSelectedPatientRecord(record)}
+                                className={`w-full text-left p-4 rounded-2xl transition-all border flex flex-col gap-2 ${
+                                    selectedPatientRecord?.patient_id === record.patient_id && selectedPatientRecord?.visit_id === record.visit_id
+                                    ? 'bg-[#020617] text-white border-[#020617] shadow-xl' 
+                                    : 'bg-slate-50/50 border-slate-100 hover:bg-slate-100/70'
+                                }`}
+                            >
+                                <div className="flex justify-between items-start gap-2 w-full">
+                                    <span className="font-black uppercase text-xs tracking-tight truncate block flex-1">{record.patient_name || "Anonymous Case"}</span>
+                                    <span className="text-[8px] font-mono opacity-60 whitespace-nowrap">{new Date(record.date).toLocaleDateString('en-GB')}</span>
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                    {record.labs.length > 0 && <span className="bg-teal-500/10 text-teal-500 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider">Labs</span>}
+                                    {record.notes.length > 0 && <span className="bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider">Notes</span>}
+                                    {record.prescriptions.length > 0 && <span className="bg-rose-500/10 text-rose-500 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider">Meds</span>}
+                                </div>
+                            </button>
+                        ))
+                    )}
+                </div>
+            </div>
+
+            {/* Active Workspace View Panel */}
+            <div className="flex-1 space-y-6 screen-only">
+                {selectedPatientRecord ? (
+                    <div className="bg-white border border-slate-200/60 rounded-[3rem] p-8 shadow-sm space-y-8 animate-in fade-in duration-300">
+                        
+                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-slate-100 pb-6">
+                            <div>
+                                <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest block mb-1">Centralized Medical Chart File</span>
+                                <h1 className="text-2xl font-black uppercase text-slate-900 tracking-tight">{selectedPatientRecord.patient_name}</h1>
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                    <p className="text-xs font-mono font-black text-slate-500 uppercase tracking-wider bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200/40">
+                                        Registry Entry: {formatDate(selectedPatientRecord.date)}
+                                    </p>
+                                    <p className="text-xs font-mono font-black text-teal-600 uppercase tracking-wider bg-teal-50/60 px-3 py-1.5 rounded-xl border border-teal-100/40">
+                                        Collection Timestamp: {formatDate(selectedPatientRecord.collection_date)}
+                                    </p>
+                                </div>
+                            </div>
+                            
+                            <button 
+                                onClick={handlePrintDownload}
+                                className="flex items-center justify-center gap-2 bg-[#020617] hover:bg-slate-800 text-white font-black uppercase tracking-widest p-4 rounded-2xl text-xs shadow-md transition-all self-start sm:self-auto"
+                            >
+                                <Download size={14} className="text-teal-400" /> Download & Print Report
+                            </button>
+                        </div>
+
+                        {/* Laboratory Parameters Structured Table */}
+                        {selectedPatientRecord.labs.length > 0 && (
+                            <div className="space-y-4">
+                                <h3 className="font-black text-xs uppercase text-slate-900 tracking-wider flex items-center gap-2">
+                                    <Beaker size={14} className="text-teal-600" /> Laboratory Diagnostics Parameters
+                                </h3>
+                                <div className="border border-slate-200/60 rounded-2xl overflow-hidden bg-white shadow-sm">
+                                    <table className="w-full text-xs text-left border-collapse">
+                                        <thead>
+                                            <tr className="bg-slate-50/70 border-b border-slate-200/60 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                                                <th className="py-3.5 px-4">Test Profile</th>
+                                                <th className="py-3.5 px-4">Parameter Name</th>
+                                                <th className="py-3.5 px-4">Result</th>
+                                                <th className="py-3.5 px-4">Unit</th>
+                                                <th className="py-3.5 px-4">Reference Range</th>
+                                                <th className="py-3.5 px-4 text-right">Evaluation</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                                            {selectedPatientRecord.labs.map((row, i) => (
+                                                <tr key={i} className="hover:bg-slate-50/30">
+                                                    <td className="py-3 px-4 text-slate-400 text-[10px] uppercase font-bold">{row.profileScope}</td>
+                                                    <td className="py-3 px-4 font-bold text-slate-900">{row.testLabel}</td>
+                                                    <td className="py-3 px-4 font-mono font-bold text-slate-900 bg-slate-50/50">{row.result}</td>
+                                                    <td className="py-3 px-4 font-mono text-slate-500 lowercase">{row.unit}</td>
+                                                    <td className="py-3 px-4 font-mono text-slate-500">{row.min} - {row.max}</td>
+                                                    <td className={`py-3 px-4 text-right font-black text-[10px] flex items-center justify-end gap-1 ${
+                                                        row.evalStatus === 'HIGH' ? 'text-rose-600' : row.evalStatus === 'LOW' ? 'text-amber-600' : 'text-teal-600'
+                                                    }`}>
+                                                        {row.evalStatus !== 'NORMAL' && (row.evalStatus === 'HIGH' ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />)}
+                                                        {row.evalLabel}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Clinical Narratives */}
+                        {selectedPatientRecord.notes.length > 0 && (
+                            <div className="space-y-4">
+                                <h3 className="font-black text-xs uppercase text-slate-900 tracking-wider flex items-center gap-2">
+                                    <MessageSquare size={14} className="text-blue-600" /> Practitioner Progress Records
+                                </h3>
+                                <div className="grid grid-cols-1 gap-3">
+                                    {selectedPatientRecord.notes.map((n, i) => (
+                                        <div key={i} className="bg-blue-50/30 p-5 rounded-2xl border border-blue-100/50">
+                                            <p className="text-[9px] font-black text-blue-400 uppercase mb-1">Source entry: {n.author}</p>
+                                            <p className="text-xs text-slate-700 font-semibold italic leading-relaxed">"{n.content}"</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Pharmaceutical Prescriptions */}
+                        {selectedPatientRecord.prescriptions.length > 0 && (
+                            <div className="space-y-4">
+                                <h3 className="font-black text-xs uppercase text-slate-900 tracking-wider flex items-center gap-2">
+                                    <Pill size={14} className="text-rose-600" /> Prescribed Formulations
+                                </h3>
+                                <div className="space-y-2">
+                                    {selectedPatientRecord.prescriptions.map((p, i) => (
+                                        <div key={i} className="bg-rose-50/20 p-4 rounded-xl border border-rose-100/40 flex justify-between items-center text-xs">
+                                            <p className="font-bold text-slate-800">{p.summary}</p>
+                                            <span className="text-[9px] font-black bg-rose-600 text-white px-2 py-0.5 rounded uppercase tracking-wider">{p.status}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="h-full min-h-[60vh] flex flex-col items-center justify-center border border-dashed border-slate-200 rounded-[3rem] p-12 text-center bg-white">
+                        <History size={48} className="text-slate-300 mb-3 stroke-[1.5]" />
+                        <h2 className="font-black uppercase text-sm tracking-tight text-slate-400">No Profile Record Selected</h2>
+                        <p className="text-xs text-slate-400 max-w-xs mt-1">Activate an entry inside the central audit registry timeline sidebar to build full metrics reports.</p>
+                    </div>
+                )}
+            </div>
+
+            {/* PRINT COMPILER DOM ELEMENT TARGET - ACTIVATES NATIVELY ON WINDOW PRINT */}
+            {selectedPatientRecord && (
+                <div id="printable-history-sheet" className="hidden bg-white text-black text-left font-['Inter'] p-8">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '3px solid #020617', paddingBottom: '16px', fontFamily: 'sans-serif' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                            <img src={SalamaLogo} alt="Salama Cancer Centre" style={{ width: '80px', height: '80px', objectFit: 'contain' }} />
+                            <div>
+                                <h1 style={{ margin: 0, fontSize: '24px', fontWeight: '900', color: '#020617', letterSpacing: '-0.5px' }}>SALAMA CANCER CENTRE</h1>
+                                <p style={{ margin: '2px 0 0 0', fontSize: '13px', fontWeight: '500', color: '#475569' }}>Holistic Cancer and Palliative Care</p>
+                                <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#64748b' }}>P.O BOX 19619-40123, Kisumu, Kenya</p>
+                                <p style={{ margin: '2px 0 0 0', fontSize: '11px', color: '#64748b' }}>Tel: +254 756 364 419 | Email: scanccentre@gmail.com</p>
+                            </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                            <h2 style={{ margin: 0, fontSize: '14px', fontWeight: '900', color: '#2563eb', letterSpacing: '1px' }}>CLINICAL REGISTRY HISTORICAL REPORT</h2>
+                            <p style={{ margin: '5px 0 0 0', fontSize: '11px', fontFamily: 'monospace' }}><strong>Date Compiled:</strong> {new Date().toLocaleDateString('en-GB')}</p>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', margin: '24px 0', paddingBottom: '16px', borderBottom: '1px solid #e2e8f0', fontFamily: 'sans-serif', fontSize: '12px' }}>
+                        <div>
+                            <p style={{ margin: '4px 0' }}><strong>Patient Identifier Name:</strong> {selectedPatientRecord.patient_name}</p>
+                            <p style={{ margin: '4px 0' }}><strong>Encounter Record Stamp:</strong> {formatDate(selectedPatientRecord.date)}</p>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                            <p style={{ margin: '4px 0' }}><strong>Date of Results Collection:</strong> {formatDate(selectedPatientRecord.collection_date)}</p>
+                        </div>
+                    </div>
+
+                    {/* Labs Printing Element Table */}
+                    {selectedPatientRecord.labs.length > 0 && (
+                        <div style={{ marginTop: '24px' }}>
+                            <h3 style={{ fontSize: '12px', fontWeight: '900', color: '#020617', borderBottom: '1px solid #020617', paddingBottom: '6px', marginBottom: '12px', textTransform: 'uppercase' }}>LABORATORY RESULT PARAMETERS METRICS</h3>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'sans-serif', fontSize: '11px', textAlign: 'left' }}>
+                                <thead>
+                                    <tr style={{ borderBottom: '2px solid #94a3b8', textTransform: 'uppercase', fontSize: '9px', color: '#64748b' }}>
+                                        <th style={{ padding: '8px 6px' }}>Investigation Group</th>
+                                        <th style={{ padding: '8px 6px' }}>Analyte Label Name</th>
+                                        <th style={{ padding: '8px 6px' }}>Reported Result</th>
+                                        <th style={{ padding: '8px 6px' }}>Unit</th>
+                                        <th style={{ padding: '8px 6px' }}>Reference Targets</th>
+                                        <th style={{ padding: '8px 6px', textAlign: 'right' }}>Status Flag</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {selectedPatientRecord.labs.map((row, idx) => (
+                                        <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                            <td style={{ padding: '8px 6px', color: '#64748b', fontSize: '10px' }}>{row.profileScope}</td>
+                                            <td style={{ padding: '8px 6px', fontWeight: 'bold', color: '#0f172a' }}>{row.testLabel}</td>
+                                            <td style={{ padding: '8px 6px', fontWeight: 'bold', fontFamily: 'monospace', fontSize: '12px' }}>{row.result}</td>
+                                            <td style={{ padding: '8px 6px', fontFamily: 'monospace', color: '#475569' }}>{row.unit}</td>
+                                            <td style={{ padding: '8px 6px', fontFamily: 'monospace', color: '#475569' }}>{row.min} - {row.max}</td>
+                                            <td style={{ padding: '8px 6px', textAlign: 'right', fontWeight: '900', fontSize: '10px', color: row.evalStatus === 'HIGH' ? '#e11d48' : row.evalStatus === 'LOW' ? '#d97706' : '#0d9488' }}>
+                                                {row.evalLabel}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+
+                    {/* Progress Remarks Print Summary */}
+                    {selectedPatientRecord.notes.length > 0 && (
+                        <div style={{ marginTop: '24px' }}>
+                            <h3 style={{ fontSize: '12px', fontWeight: '900', color: '#020617', borderBottom: '1px solid #020617', paddingBottom: '6px', marginBottom: '12px', textTransform: 'uppercase' }}>CLINICAL TIMELINE PROGRESS NARRATIVES</h3>
+                            {selectedPatientRecord.notes.map((note, idx) => (
+                                <div key={idx} style={{ marginBottom: '12px', padding: '10px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '11px' }}>
+                                    <p style={{ margin: '0 0 4px 0', fontWeight: 'bold', color: '#64748b', fontSize: '9px', textTransform: 'uppercase' }}>Source: {note.author} ({note.role})</p>
+                                    <p style={{ margin: 0, fontStyle: 'italic', color: '#334155', lineHeight: '1.5' }}>"{note.content}"</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Prescription Print Summary */}
+                    {selectedPatientRecord.prescriptions.length > 0 && (
+                        <div style={{ marginTop: '24px' }}>
+                            <h3 style={{ fontSize: '12px', fontWeight: '900', color: '#020617', borderBottom: '1px solid #020617', paddingBottom: '6px', marginBottom: '12px', textTransform: 'uppercase' }}>PHARMACEUTICAL FORMULATION MEDICATION ORDERS</h3>
+                            {selectedPatientRecord.prescriptions.map((presc, idx) => (
+                                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 6px', borderBottom: '1px solid #e2e8f0', fontSize: '11px', fontFamily: 'sans-serif' }}>
+                                    <span style={{ fontWeight: '500' }}>{presc.summary}</span>
+                                    <span style={{ fontWeight: 'bold', fontSize: '10px', textTransform: 'uppercase', color: '#64748b' }}>[{presc.status}]</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    <div style={{ marginTop: '80px', display: 'flex', justifyContent: 'space-between', fontFamily: 'sans-serif', fontSize: '12px' }}>
+                        <div>
+                            <p style={{ borderTop: '1px solid #020617', width: '220px', paddingTop: '6px', textAlign: 'center', fontWeight: 'bold' }}>Compiled Records Archivist</p>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                            <p style={{ borderTop: '1px solid #020617', width: '220px', paddingTop: '6px', textAlign: 'center', marginLeft: 'auto', fontWeight: 'bold' }}>Salama Verification Stamp</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 export default PatientHistory;

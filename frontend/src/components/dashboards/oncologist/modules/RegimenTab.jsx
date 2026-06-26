@@ -84,8 +84,8 @@ const RegimenTab = () => {
       .then(data => setAllSites(data))
       .catch(err => setFormStatus({ type: 'error', message: err.message }));
 
-    // Fetch existing records for the data table
-    fetch('/api/protocol-masters/', {
+    // FIXED: Fetch existing records from '/api/protocols/' instead of '/api/protocol-masters/'
+    fetch('/api/protocols/', {
       headers: getAuthHeaders()
     })
       .then(res => {
@@ -605,9 +605,7 @@ const RegimenTab = () => {
             </div>
 
             {/* INFO FOOTER */}
-            <div className="mt-6 border-t border-slate-100 pt-4 text-xs font-medium text-slate-400 bg-slate-50 border border-slate-100 px-3 py-2 rounded-lg text-left">
-              Regimen templates look up active medical databases automatically to verify clinical staging parameters.
-            </div>
+            
 
           </div>
         </div>
@@ -617,10 +615,10 @@ const RegimenTab = () => {
       {/* RECENTLY SAVED MASTER PROTOCOLS TABLE SECTION */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mt-8">
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
-          <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-            Active Master Protocols Configurations
-          </h3>
-          <p className="text-xs text-slate-500 mt-0.5">Live index of all completed oncology pathways registered in system memory.</p>
+          <h2 className="text-xl font-bold text-slate-1200 uppercase tracking-wider">
+            Active Protocols
+          </h2>
+         
         </div>
 
         <div className="overflow-x-auto">

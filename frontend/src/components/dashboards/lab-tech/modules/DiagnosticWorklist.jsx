@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import API from '@/api/api';
 import { 
-    FlaskConical, Save, ChevronDown, Eye, Send, Beaker, Loader2, Microscope, X, 
-    ArrowUpRight, ArrowDownRight, ClipboardList, RefreshCw, Search, Printer, Download, CheckCircle2
+    FlaskConical, Save, ChevronDown, Eye, Beaker, Loader2, Microscope, X, 
+    ArrowUpRight, ArrowDownRight, ClipboardList, RefreshCw, Search, Download
 } from 'lucide-react';
 
 // Import your native local asset directly into the bundler pipeline
@@ -25,7 +25,7 @@ const REFERENCE_RANGES = {
     lft_tbil: { min: 3, max: 21, label: "Total Bilirubin (T.BIL)", unit: "µmol/L" },
     lft_dbil: { min: 0, max: 5.1, label: "Direct Bilirubin", unit: "µmol/L" },
     lft_alp: { min: 40, max: 130, label: "Alkaline Phosphatase (ALP)", unit: "U/L" },
-    lft_albumin: { min: 35, max: 50, text: "Albumin", unit: "g/L" },
+    lft_albumin: { min: 35, max: 50, label: "Albumin", unit: "g/L" },
     
     psa_total: { min: 0, max: 4.0, label: "Total PSA", unit: "ng/mL" }
 };
@@ -63,14 +63,13 @@ const PARAM_VALUE_MAPPINGS = {
     "+4": "4+"
 };
 
-// Helper function to decode standard backend choice characters to elegant report designations
 const formatGender = (genderCode) => {
     if (!genderCode) return "N/A";
     const code = String(genderCode).toUpperCase().trim();
-    if (code === 'M') return 'Male';
-    if (code === 'F') return 'Female';
-    if (code === 'O') return 'Other';
-    return genderCode; // Fallback mapping in case it's already evaluated
+    if (code === 'M' || code === 'MALE') return 'Male';
+    if (code === 'F' || code === 'FEMALE') return 'Female';
+    if (code === 'O' || code === 'OTHER') return 'Other';
+    return genderCode;
 };
 
 const evaluateRange = (name, value) => {
@@ -147,6 +146,7 @@ const DiagnosticWorklist = () => {
     
     const [testResults, setTestResults] = useState({});
     const [techNotes, setTechNotes] = useState("");
+    const [fixedOrderedTests, setFixedOrderedTests] = useState([]);
 
     const initializeBlankResults = () => {
         const initialResults = {};
@@ -155,6 +155,7 @@ const DiagnosticWorklist = () => {
         });
         setTestResults(initialResults);
         setTechNotes("");
+        setFixedOrderedTests([]);
     };
 
     const fetchQueue = useCallback(async () => {
@@ -182,16 +183,6 @@ const DiagnosticWorklist = () => {
             const id = String(p.id || "");
             const token = (p.token_id || "").toLowerCase();
             const record = (p.health_record_number || "").toLowerCase();
-            const age = (typeof visit === 'object' && visit?.age) || 
-                    (typeof patient === 'object' && patient?.age) || 
-                    record.patient_age || "—";
-        
-        let resolvedGender = "—";
-        const rawGender = (typeof visit === 'object' && visit?.gender) || 
-                          (typeof patient === 'object' && patient?.gender) || 
-                          record.patient_gender;
-        if (rawGender === 'M' || rawGender === 'Male') resolvedGender = 'Male';
-        if (rawGender === 'F' || rawGender === 'Female') resolvedGender = 'Female';
 
             return name.includes(normQuery) || id.includes(normQuery) || token.includes(normQuery) || record.includes(normQuery);
         });
@@ -209,11 +200,38 @@ const DiagnosticWorklist = () => {
             
             if (activeLabOrders.length > 0) {
                 setActiveOrder(activeLabOrders[0]);
+                const targets = activeLabOrders[0].requested_tests || [];
+                if (targets.length > 0) {
+                    const matched = ALL_AVAILABLE_TESTS.filter(availableTest => 
+                        targets.some(requested => requested.toLowerCase().trim() === availableTest.toLowerCase().trim())
+                    );
+                    setFixedOrderedTests(matched);
+                } else {
+                    setFixedOrderedTests(ALL_AVAILABLE_TESTS);
+                }
             } else {
                 setActiveOrder(null);
+                const targets = patient.requested_tests || [];
+                if (targets.length > 0) {
+                    const matched = ALL_AVAILABLE_TESTS.filter(availableTest => 
+                        targets.some(requested => requested.toLowerCase().trim() === availableTest.toLowerCase().trim())
+                    );
+                    setFixedOrderedTests(matched);
+                } else {
+                    setFixedOrderedTests(ALL_AVAILABLE_TESTS);
+                }
             }
         } catch (err) { 
             console.error("Error fetching requisitions from lab-orders", err); 
+            const targets = patient.requested_tests || [];
+            if (targets.length > 0) {
+                const matched = ALL_AVAILABLE_TESTS.filter(availableTest => 
+                    targets.some(requested => requested.toLowerCase().trim() === availableTest.toLowerCase().trim())
+                );
+                setFixedOrderedTests(matched);
+            } else {
+                setFixedOrderedTests(ALL_AVAILABLE_TESTS);
+            }
         } finally { 
             setFetchingTests(false); 
         }
@@ -233,31 +251,29 @@ const DiagnosticWorklist = () => {
     };
 
     const explicitDisplayedTests = useMemo(() => {
-        const targets = activeOrder?.requested_tests || selectedPatient?.requested_tests || [];
-        if (targets.length === 0) return ALL_AVAILABLE_TESTS;
-        
-        return ALL_AVAILABLE_TESTS.filter(availableTest => 
-            targets.some(requested => requested.toLowerCase().trim() === availableTest.toLowerCase().trim())
-        );
-    }, [activeOrder, selectedPatient]);
+        if (fixedOrderedTests.length > 0) return fixedOrderedTests;
+        return ALL_AVAILABLE_TESTS;
+    }, [fixedOrderedTests]);
 
-    const handleCommitResults = async () => {
+    const handleCommitAndDispatch = async () => {
         if (!selectedPatient) return;
+
+        const activeSubmissions = explicitDisplayedTests.filter(testName => {
+            const parameters = testResults[testName] || {};
+            return Object.values(parameters).some(val => val !== "" && val !== undefined && val !== null);
+        });
+
+        if (activeSubmissions.length === 0) {
+            alert("⚠ Please fill in diagnostic results before attempting to save parameters.");
+            return;
+        }
+
+        if (!window.confirm("Verify metrics, commit parameters down to EMR and dispatch patient back to Doctor?")) return;
+
         setSubmitting(true);
         try {
             const visitId = selectedPatient.visit || selectedPatient.visit_id;
             const patientId = selectedPatient.patient || selectedPatient.patient_id || selectedPatient.id;
-
-            const activeSubmissions = explicitDisplayedTests.filter(testName => {
-                const parameters = testResults[testName] || {};
-                return Object.values(parameters).some(val => val !== "" && val !== undefined && val !== null);
-            });
-
-            if (activeSubmissions.length === 0) {
-                alert("⚠ Please fill in diagnostic results before attempting to save parameters.");
-                setSubmitting(false);
-                return;
-            }
 
             const promises = activeSubmissions.map(testName => {
                 const coreParameters = testResults[testName] || {};
@@ -302,32 +318,25 @@ const DiagnosticWorklist = () => {
                 await API.patch(`/lab-orders/${activeOrder.id}/`, { status: 'COMPLETED' });
             }
 
-            alert("✅ Diagnostic parameters verified and committed down to EMR.");
-            fetchPatientRequisitions(selectedPatient);
+            // INSTANT COMPANION RUN: DISPATCH BACK TO DOCTOR PIPELINE STATION
+            try {
+                await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'DOCTOR' });
+                alert("✅ Diagnostic parameters committed and patient successfully dispatched to Doctor.");
+            } catch (dispatchErr) {
+                console.error("Auto dispatch component warning:", dispatchErr);
+                alert("✅ Results saved, but verification required for Doctor station router context.");
+            }
+
+            setSelectedPatient(null);
+            setActiveOrder(null);
+            initializeBlankResults();
+            fetchQueue();
         } catch (err) {
             console.error(err);
-            alert("❌ Error committing results to server routers.");
+            alert("❌ Error committing metrics down to server routers.");
         } finally { 
             setSubmitting(false); 
         }
-    };
-
-    const handleDispatch = async () => {
-        if (!selectedPatient) return;
-        if (!window.confirm("Publish results and return patient to Clinic room?")) return;
-        try {
-            await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'DOCTOR' });
-            alert("🚀 Patient dispatched back to Doctor workflow queue.");
-            setSelectedPatient(null);
-            setActiveOrder(null);
-            fetchQueue();
-        } catch (err) { 
-            alert("Dispatch failed. Confirm endpoint architecture specifications."); 
-        }
-    };
-
-    const triggerNativePrint = () => {
-        window.print();
     };
 
     const flattenedReportRows = useMemo(() => {
@@ -428,7 +437,6 @@ const DiagnosticWorklist = () => {
     return (
         <div className="flex flex-col lg:flex-row gap-8 min-h-screen bg-slate-50/50 p-4 font-['Inter'] text-slate-800 text-left relative">
             
-            {/* ENHANCED CSS OVERRIDE FOR PRINTING — FORCES SYSTEM PARENTS TO VISIBLE */}
             <style dangerouslySetInnerHTML={{__html: `
                 @media print {
                     html, body, #root, main, .app-layout-wrapper {
@@ -447,7 +455,7 @@ const DiagnosticWorklist = () => {
                         display: block !important; 
                         visibility: visible !important;
                         position: absolute; 
-                        left: 0; s
+                        left: 0;
                         top: 0; 
                         width: 100%; 
                         padding: 10px;
@@ -547,11 +555,10 @@ const DiagnosticWorklist = () => {
                                     <h1 className="text-2xl font-black uppercase text-slate-900 tracking-tight">{selectedPatient.patient_name || selectedPatient.name}</h1>
                                     <div className="flex flex-wrap gap-2 mt-2">
                                         <p className="text-xs font-mono font-black text-slate-500 uppercase tracking-wider bg-slate-100 px-3 py-1.5 rounded-xl inline-block border border-slate-200/40">
-                                            HRN: {selectedPatient.health_record_number || "N/A"}
+                                            HRN: {selectedPatient.health_record_number || selectedPatient.patient_hn || "N/A"}
                                         </p>
-                                        {/* Dynamic Registration Fields extracted below */}
                                         <p className="text-xs font-mono font-black text-slate-500 uppercase tracking-wider bg-slate-100 px-3 py-1.5 rounded-xl inline-block border border-slate-200/40">
-                                            Age: {selectedPatient.age ?? "N/A"} Yrs | Sex: {formatGender(selectedPatient.rawGender || selectedPatient.sex)}
+                                            Age: {selectedPatient.age || selectedPatient.patient_age || "N/A"} Yrs | Sex: {formatGender(selectedPatient.gender || selectedPatient.sex || selectedPatient.patient_gender)}
                                         </p>
                                     </div>
                                 </div>
@@ -570,15 +577,6 @@ const DiagnosticWorklist = () => {
                                     </div>
                                 </div>
                             </div>
-
-                            <button 
-                                onClick={handleCommitResults}
-                                disabled={submitting}
-                                className="bg-teal-600 hover:bg-teal-700 text-white font-black text-xs uppercase tracking-widest px-6 py-4 rounded-2xl flex items-center gap-2 shadow-lg transition-all self-start whitespace-nowrap disabled:opacity-50"
-                            >
-                                {submitting ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 
-                                Commit Metrics Data
-                            </button>
                         </div>
 
                         {fetchingTests ? (
@@ -613,38 +611,32 @@ const DiagnosticWorklist = () => {
                                         onClick={() => setShowPreview(!showPreview)}
                                         className="border-2 border-slate-200 hover:border-slate-800 text-slate-800 font-black text-xs uppercase tracking-widest p-4 rounded-2xl flex items-center justify-center gap-2 transition-all shadow-sm"
                                     >
-                                        <Eye size={14} /> {showPreview ? "Hide Report Preview" : "1. View Report"}
+                                        <Eye size={14} /> {showPreview ? "Hide Report Preview" : "View Report Preview"}
                                     </button>
 
                                     <button 
-                                                  onClick={() => {
-                                                    // 1. Grab the clean HTML layout structure of just the laboratory sheet element
-                                                    const printContents = document.getElementById('printable-lab-sheet').innerHTML;
-                                                    // 2. Save the complete active application layout state in memory
-                                                    const originalContents = document.body.innerHTML;
-                                    
-                                                    // 3. Temporarily isolate the document body context down to ONLY the targeted report
-                                                    document.body.innerHTML = `<div id="printable-lab-sheet" style="padding:20px;">${printContents}</div>`;
-                                    
-                                                    // 4. Fire the print dialog
-                                                    window.print();
-                                    
-                                                    // 5. Instantly restore your original live web application state seamlessly
-                                                    document.body.innerHTML = originalContents;
-                                                    
-                                                    // Forcing a clean window reload ensures all React button action click bindings re-initialize perfectly
-                                                    window.location.reload();
-                                                  }}
-                                                  className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold tracking-wide px-5 py-2.5 rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
-                                                >
-                                                  <Download className="h-4 w-4" /> DOWNLOAD REPORT
-                                              </button>
+                                        type="button"
+                                        onClick={() => {
+                                            const printContents = document.getElementById('printable-lab-sheet').innerHTML;
+                                            const originalContents = document.body.innerHTML;
+                                            document.body.innerHTML = `<div id="printable-lab-sheet" style="padding:20px;">${printContents}</div>`;
+                                            window.print();
+                                            document.body.innerHTML = originalContents;
+                                            window.location.reload();
+                                        }}
+                                        className="flex items-center justify-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold tracking-wide p-4 rounded-2xl text-xs shadow-sm transition-all"
+                                    >
+                                        <Download className="h-4 w-4" /> Download Report
+                                    </button>
+
                                     <button
                                         type="button"
-                                        onClick={handleDispatch}
-                                        className="bg-[#020617] hover:bg-slate-800 text-white font-black text-xs uppercase tracking-widest p-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg transition-all"
+                                        onClick={handleCommitAndDispatch}
+                                        disabled={submitting}
+                                        className="bg-[#020617] hover:bg-slate-800 text-white font-black text-xs uppercase tracking-widest p-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg transition-all disabled:opacity-50"
                                     >
-                                        <Send size={14} className="text-teal-400" /> 3. Send to Doctor / Pharmacist
+                                        {submitting ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} className="text-teal-400" />} 
+                                        Save Results & Send to Doctor
                                     </button>
                                 </div>
                             </div>
@@ -675,10 +667,10 @@ const DiagnosticWorklist = () => {
                                     <div className="grid grid-cols-2 gap-4 py-6 border-b text-xs text-slate-700">
                                         <div>
                                             <p><strong className="font-bold text-slate-900">Patient Name:</strong> {selectedPatient.patient_name || selectedPatient.name}</p>
-                                            <p className="mt-1"><strong className="font-bold text-slate-900">Health Record Number (HRN):</strong> {selectedPatient.health_record_number || "N/A"}</p>
+                                            <p className="mt-1"><strong className="font-bold text-slate-900">Health Record Number (HRN):</strong> {selectedPatient.health_record_number || selectedPatient.patient_hn || "N/A"}</p>
                                         </div>
                                         <div className="text-right">
-                                            <p><strong className="font-bold text-slate-900">Age / Gender:</strong> {selectedPatient.age ?? "N/A"} / {formatGender(selectedPatient.gender || selectedPatient.sex)}</p>
+                                            <p><strong className="font-bold text-slate-900">Age / Gender:</strong> {selectedPatient.age || selectedPatient.patient_age || "N/A"} / {formatGender(selectedPatient.gender || selectedPatient.sex || selectedPatient.patient_gender)}</p>
                                             <p className="mt-1"><strong className="font-bold text-slate-900">Investigation Scope:</strong> {explicitDisplayedTests.join(', ')}</p>
                                         </div>
                                     </div>
@@ -754,11 +746,10 @@ const DiagnosticWorklist = () => {
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', margin: '20px 0', paddingBottom: '15px', borderBottom: '1px solid #e2e8f0', fontFamily: 'sans-serif', fontSize: '12px' }}>
                         <div>
                             <p style={{ margin: '4px 0' }}><strong>Patient Name:</strong> {selectedPatient.patient_name || selectedPatient.name}</p>
-                            <p style={{ margin: '4px 0' }}><strong>Health Record Number (HRN):</strong> {selectedPatient.health_record_number || "N/A"}</p>
+                            <p style={{ margin: '4px 0' }}><strong>Health Record Number (HRN):</strong> {selectedPatient.health_record_number || selectedPatient.patient_hn || "N/A"}</p>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                            {/* Verified Registration values embedded precisely here */}
-                            <p style={{ margin: '4px 0' }}><strong>Age / Gender:</strong> {selectedPatient.age ?? "N/A"} Yrs / {formatGender(selectedPatient.gender || selectedPatient.sex)}</p>
+                            <p style={{ margin: '4px 0' }}><strong>Age / Gender:</strong> {selectedPatient.age || selectedPatient.patient_age || "N/A"} Yrs / {formatGender(selectedPatient.gender || selectedPatient.sex || selectedPatient.patient_gender)}</p>
                             <p style={{ margin: '4px 0' }}><strong>Tests Executed:</strong> {explicitDisplayedTests.join(', ')}</p>
                         </div>
                     </div>

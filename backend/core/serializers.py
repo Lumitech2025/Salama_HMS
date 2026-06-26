@@ -981,15 +981,37 @@ class ProtocolSerializer(serializers.ModelSerializer):
     applicable_stages = serializers.JSONField(required=False, default=list)
     total_cost_per_cycle = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0.00)
     regimen_template_id = serializers.IntegerField(required=False, allow_null=True)
+    
+    # NEW DYNAMIC READ-ONLY FIELDS FOR TEXT NAMES
+    primary_site_name = serializers.SerializerMethodField()
+    cancer_type_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Protocol
         fields = [
             'id', 'name', 'description', 'total_cycles', 
-            'cycle_duration_days', 'primary_site_id', 'cancer_type_id', 
-            'regimen_template_id', 'applicable_stages', 'total_cost_per_cycle', 
-            'components'
+            'cycle_duration_days', 'primary_site_id', 'primary_site_name', 
+            'cancer_type_id', 'cancer_type_name', 'regimen_template_id', 
+            'applicable_stages', 'total_cost_per_cycle', 'components'
         ]
+
+    def get_primary_site_name(self, obj):
+        try:
+            # Replace 'CancerSite' with your actual imported body site model name
+            from core.models import CancerSite 
+            site = CancerSite.objects.filter(id=obj.primary_site_id).first()
+            return site.name if site else f"Site ID: {obj.primary_site_id}"
+        except Exception:
+            return f"Site ID: {obj.primary_site_id}"
+
+    def get_cancer_type_name(self, obj):
+        try:
+            # Replace 'CancerType' with your actual imported variant variant model name
+            from core.models import CancerType 
+            variant = CancerType.objects.filter(id=obj.cancer_type_id).first()
+            return variant.name if variant else f"Type ID: {obj.cancer_type_id}"
+        except Exception:
+            return f"Type ID: {obj.cancer_type_id}"
 
     def create(self, validated_data):
         components_data = validated_data.pop('components', [])
