@@ -256,16 +256,29 @@ class PatientViewSet(viewsets.ModelViewSet):
 
 class VitalSignViewSet(viewsets.ModelViewSet):
     serializer_class = VitalSignSerializer
-    permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Fallback to query parameter matching regardless of active filter backends
-        queryset = VitalSign.objects.all().order_by('-created_at')
-        patient_id = self.request.query_params.get('patient', None)
+        user = self.request.user
         
+        # 1. Start with the master database ledger sorted chronologically
+        queryset = VitalSign.objects.all().order_by('-created_at')
+
+        # 2. Check if a specific patient ID parameter is provided in the incoming URL request
+        patient_id = self.request.query_params.get('patient', None)
         if patient_id is not None:
-            queryset = queryset.filter(patient_id=patient_id)
+            return queryset.filter(patient_id=patient_id)
+
+        # 3. Handle Patient Portal Context Base Routes
+        if hasattr(user, 'role') and user.role == 'PATIENT':
+            user_has_patient_profile = Patient.objects.filter(email__iexact=user.email.strip()).exists()
             
+            if user_has_patient_profile:
+                return queryset.filter(patient__email__iexact=user.email.strip())
+            else:
+                return queryset
+
+        # 4. Standard view for Doctors, Nurses, and Medical staff
         return queryset
 
     def perform_create(self, serializer):
@@ -290,7 +303,7 @@ class ClinicalNoteViewSet(viewsets.ModelViewSet):
 class ImagingRecordViewSet(viewsets.ModelViewSet):
     queryset = ImagingRecord.objects.all().order_by('-created_at')
     serializer_class = ImagingRecordSerializer
-    permission_classes = [permissions.IsAuthenticated, IsClinicalStaff]
+    permission_classes = [permissions.IsAuthenticated]
     filterset_fields = ['patient']
 
 # --- 5. PRESCRIPTIONS & PHARMACY ---
@@ -1913,10 +1926,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
     search_fields = ['sku', 'name']
 
     def destroy(self, request, *args, **kwargs):
-        """
-        Prevent accidental hard deletion of services. Soft-deactivates instead 
-        to maintain historical foreign key data integrity.
-        """
+       
         instance = self.get_object()
         instance.active = False
         instance.save()
@@ -1927,10 +1937,7 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
 # APIs
 class ICD11TokenProxyView(APIView):
-    """
-    Obtains and caches short-lived OAuth2 access tokens from the WHO Identity server
-    to securely authorize the frontend Embedded Classification Tool.
-    """
+    
     def get(self, request):
         # 1. Look for a valid token in the Django cache framework first
         cached_token = cache.get('icd11_access_token')
@@ -2087,6 +2094,32 @@ class SupplierViewSet(viewsets.ModelViewSet):
             "flagged_vendors": serializer.data
         }, status=status.HTTP_200_OK)
     
+    @action(detail=False, methods=['get'], url_path='metrics')
+    def metrics(self, request):
+        # 1. Count Active suppliers matching state layout
+        active_suppliers = Supplier.objects.filter(is_active=True).count()
+
+        # 2. Aggregating invoices dynamically using the exact PurchaseInvoice structures
+        invoice_aggregates = PurchaseInvoice.objects.aggregate(
+            pending_amt=Sum('total_billed', filter=Q(status='UNPAID') | Q(status='PARTIAL')),
+            pending_count=Count('id', filter=Q(status='UNPAID') | Q(status='PARTIAL'))
+        )
+
+        # 3. Sum total real voucher allocations to date across all providers
+        total_paid = PaymentVoucher.objects.aggregate(total=Sum('amount_paid'))['total'] or 0.0
+
+        # 4. Filter out Open POs that do not possess any related GoodsReceivedNote records yet
+        grn_po_ids = GoodsReceivedNote.objects.values_list('purchase_order_id', flat=True)
+        open_pos_count = PurchaseOrder.objects.exclude(id__in=grn_po_ids).count()
+
+        return Response({
+            "pendingPayments": float(invoice_aggregates['pending_amt'] or 0.0),
+            "pendingInvoicesCount": invoice_aggregates['pending_count'] or 0,
+            "totalPaid": float(total_paid),
+            "activeSuppliers": active_suppliers,
+            "openPurchaseOrdersCount": open_pos_count
+        })
+        
 
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
     """
@@ -2673,27 +2706,111 @@ class DischargeSummaryViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(visit_id=visit_id)
         return queryset
 
+    @action(detail=False, methods=['get'], url_path='eligible-patients')
+    def eligible_patients(self, request):
+        """
+        Returns all patients who have a prescription, ensuring they show up 
+        in the discharge summary selection workflow.
+        GET /api/discharge-summaries/eligible-patients/
+        """
+        # Fetch all prescriptions and select/prefetch related fields for efficiency
+        prescriptions = Prescription.objects.select_related('patient', 'visit').order_by('-created_at')
+        
+        results = []
+        seen_visits = set()
+        
+        for rx in prescriptions:
+            visit_id = rx.visit_id if rx.visit else f"rx-{rx.id}"
+            # Avoid duplicating dropdown entries for the same clinical visit encounter
+            if visit_id in seen_visits:
+                continue
+                
+            seen_visits.add(visit_id)
+            
+            token = rx.visit.token_id if (rx.visit and getattr(rx.visit, 'token_id', None)) else f"RX#{rx.id}"
+            patient_name = rx.patient.name if hasattr(rx.patient, 'name') else f"{getattr(rx.patient, 'first_name', '')} {getattr(rx.patient, 'last_name', '')}".strip()
+            
+            results.append({
+                "id": rx.id,
+                "visit_id": rx.visit_id,  # Link field used for fetching context
+                "token_id": token,
+                "patient_name": patient_name or "Unknown Patient"
+            })
+            
+        return Response(results, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['get'], url_path='prefill')
     def prefill(self, request):
         """
-        Custom endpoint to fetch dynamic clinical defaults for a specific visit.
-        Usage: GET /api/discharge-summaries/prefill/?visit_id=<id>
+        Auto-populates the dual-column matrix schema with PRE_CHEMO and CHEMO orders.
+        GET /api/discharge-summaries/prefill/?visit_id=<id>
         """
         visit_id = request.query_params.get('visit_id', None)
-        
         if not visit_id:
-            return Response(
-                {"error": "Missing required query parameter: 'visit_id'"},
-                status=status.HTTP_400_BAD_ERROR
-            )
-            
-        # Invoke the classmethod tool we optimized inside the serializer
-        prefilled_payload = self.get_serializer_class().get_prefilled_data(visit_id)
+            return Response({"error": "Missing visit_id parameter"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Find the prescription linked to this visit (or fallback via smart lookups if necessary)
+        prescription = Prescription.objects.filter(
+            Q(visit_id=visit_id) | Q(id=visit_id)
+        ).prefetch_related('items', 'patient', 'diagnosis').first()
         
-        if not prefilled_payload:
-            return Response(
-                {"error": f"No active RegistrationRecord matching ID {visit_id} was identified."},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        if not prescription:
+            return Response({"error": "No prescription records found for this patient encounter."}, status=status.HTTP_404_NOT_FOUND)
+
+        patient = prescription.patient
+        patient_name = patient.name if hasattr(patient, 'name') else f"{getattr(patient, 'first_name', '')} {getattr(patient, 'last_name', '')}".strip()
+
+        # 🟢 FIX: Safe extraction of diagnosis text representation to clear the AttributeError
+        diagnosis_str = ""
+        if prescription.diagnosis:
+            if hasattr(prescription.diagnosis, 'diagnosis_name'):
+                diagnosis_str = prescription.diagnosis.diagnosis_name
+            elif hasattr(prescription.diagnosis, 'condition'):
+                diagnosis_str = prescription.diagnosis.condition
+            else:
+                diagnosis_str = str(prescription.diagnosis)
+                
+        if not diagnosis_str or "Object" in diagnosis_str:
+            diagnosis_str = prescription.protocol or 'N/A'
+
+        # Distribute the prescription rows cleanly into your structured dual-column matrix layout
+        pre_chemo_lines = list(prescription.items.filter(stage='PRE_CHEMO'))
+        chemo_lines = list(prescription.items.filter(stage='CHEMO'))
+        
+        matrix_rows = []
+        # Maintain a minimum display block matching your 5-row UI specification matrix
+        max_rows = max(len(pre_chemo_lines), len(chemo_lines), 5)
+
+        for i in range(max_rows):
+            text_left = ""
+            text_right = ""
             
-        return Response(prefilled_payload, status=status.HTTP_200_OK)
+            if i < len(pre_chemo_lines):
+                pc = pre_chemo_lines[i]
+                text_left = f"{pc.medication_name} {pc.dosage} via {pc.route}".strip()
+                
+            if i < len(chemo_lines):
+                c = chemo_lines[i]
+                # Standard formatting string matching oncological nursing delivery cards
+                text_right = f"{c.medication_name} {c.dosage} in {c.diluent} ({c.volume}ml) over {c.duration}".strip()
+
+            matrix_rows.append({
+                "text_left": text_left,
+                "text_right": text_right,
+                # Automatically check the line items if data has been prefilled
+                "checked_left": bool(text_left),
+                "checked_right": bool(text_right)
+            })
+
+        payload = {
+            "visit": prescription.visit_id or visit_id,
+            "patient": patient.id,
+            "patient_name": patient_name,
+            "age": getattr(patient, 'age', ''),
+            "gender": getattr(patient, 'gender', ''),
+            "primary_diagnosis": diagnosis_str,
+            "chemo_meds_matrix": matrix_rows,
+            "side_effects_present": "None reported during administration counter phase."
+        }
+        
+        return Response(payload, status=status.HTTP_200_OK)

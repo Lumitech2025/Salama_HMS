@@ -13,6 +13,15 @@ const SupplierManagement = () => {
   const [editingSupplier, setEditingSupplier] = useState(null);
   const [selectedSupplier, setSelectedSupplier] = useState(null);
 
+  // Live Metrics State mapping directly to your backend procurement data models
+  const [metrics, setMetrics] = useState({
+    pendingPayments: 0,
+    pendingInvoicesCount: 0,
+    totalPaid: 0,
+    activeSuppliers: 0,
+    openPurchaseOrdersCount: 0
+  });
+
   const initialFormState = {
     name: '', category: 'PHARMA', contact_person: '', email: '', phone: '',
     tin_number: '', license_number: '', bank_name: '', account_number: '', swift_code: '',
@@ -66,6 +75,7 @@ const SupplierManagement = () => {
         bank_confirmation_doc: null
       });
       fetchSuppliers();
+      fetchMetrics(); // Automatically refresh counts upon data modification
     } catch (err) { 
       console.error("Submission Error:", err.response?.data || err);
       alert("Error: Failed to save supplier. Please verify all fields and documents."); 
@@ -87,8 +97,18 @@ const SupplierManagement = () => {
     }
   };
 
+  const fetchMetrics = async () => {
+    try {
+      const response = await API.get('/suppliers/metrics/');
+      setMetrics(response.data);
+    } catch (err) {
+      console.error("Error fetching dashboard live KPI metrics:", err);
+    }
+  };
+
   useEffect(() => {
     fetchSuppliers();
+    fetchMetrics();
   }, []);
 
   return (
@@ -96,43 +116,56 @@ const SupplierManagement = () => {
       
       {/* 1. OPERATIONAL & RISK KPI HEADERS */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        
+        {/* KPI 1: Pending Payments */}
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl flex flex-col justify-between">
           <div>
-            <p className="text-[15px] bold font-black text-slate-1000 uppercase tracking-widest mb-1">Accounts Payable</p>
-            <h3 className="text-3xl bold font-black text-rose-600 tracking-tighter italic uppercase leading-none">KES 8,400,000</h3>
+            <p className="text-[15px] bold font-black text-slate-1000 uppercase tracking-widest mb-1">Pending Payments</p>
+            <h3 className="text-3xl bold font-black text-rose-600 tracking-tighter italic uppercase leading-none">
+              KES {Number(metrics.pendingPayments).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </h3>
           </div>
           <div className="flex items-center gap-1.5 mt-4 text-[10px] font-bold text-rose-500 bg-rose-50 px-3 py-1.5 rounded-xl w-max">
-            <Clock size={12}/> 14 Invoices Due
+            <Clock size={12}/> {metrics.pendingInvoicesCount} Invoices Due
           </div>
         </div>
 
+        {/* KPI 2: Total Amount Paid */}
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl text-left flex flex-col justify-between">
           <div>
-            <p className="text-[15px] font-black text-slate-1000 uppercase tracking-widest mb-1">Active Partners</p>
-            <h3 className="text-3xl font-black text-slate-900 tracking-tighter italic uppercase leading-none">{suppliers.length} </h3>
+            <p className="text-[15px] font-black text-slate-1000 uppercase tracking-widest mb-1">Total Amount Paid</p>
+            <h3 className="text-3xl font-black text-emerald-600 tracking-tighter italic uppercase leading-none">
+              KES {Number(metrics.totalPaid).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </h3>
           </div>
           <div className="flex items-center gap-1.5 mt-4 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-3 py-1.5 rounded-xl w-max">
-            <Award size={12}/> 100% Verified
+            <CheckCircle2 size={12}/> Total Paid to Date
           </div>
         </div>
 
+        {/* KPI 3: Active Suppliers */}
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl text-left flex flex-col justify-between">
           <div>
-            <p className="text-[15px] font-black text-slate-1000 uppercase tracking-widest mb-1">Avg Fulfillment Cycle</p>
-            <h3 className="text-3xl font-black text-teal-600 tracking-tighter italic uppercase leading-none">4.2 Days</h3>
+            <p className="text-[15px] font-black text-slate-1000 uppercase tracking-widest mb-1">Active Suppliers</p>
+            <h3 className="text-3xl font-black text-slate-900 tracking-tighter italic uppercase leading-none">
+              {suppliers.length}
+            </h3>
           </div>
           <div className="flex items-center gap-1.5 mt-4 text-[10px] font-bold text-teal-600 bg-teal-50 px-3 py-1.5 rounded-xl w-max">
-            <CheckCircle2 size={12}/> -0.8d vs Last Month
+            <Award size={12}/> Verified Registry
           </div>
         </div>
 
+        {/* KPI 4: Open/Unfulfilled Purchase Orders */}
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl relative overflow-hidden text-left flex flex-col justify-between">
           <div>
             <p className="text-[15px] font-black text-slate-1000 uppercase tracking-widest mb-1">Open Purchase Orders</p>
-            <h3 className="text-3xl font-black text-amber-600 tracking-tighter italic uppercase leading-none">07 Pending</h3>
+            <h3 className="text-3xl font-black text-amber-600 tracking-tighter italic uppercase leading-none">
+              {String(metrics.openPurchaseOrdersCount).padStart(2)} Pending
+            </h3>
           </div>
           <div className="flex items-center gap-1.5 mt-4 text-[10px] font-bold text-amber-600 bg-amber-50 px-3 py-1.5 rounded-xl w-max">
-            <Send size={12}/> KES 2.1M Committed
+            <Send size={12}/> No GRN Logged
           </div>
         </div>
       </div>
@@ -223,7 +256,7 @@ const SupplierManagement = () => {
                           onClick={() => {
                             setSupplierForm({
                               ...initialFormState,
-                              ...vendor // Hydrates existing vendor string paths correctly
+                              ...vendor 
                             });
                             setEditingSupplier(vendor);
                             setShowSupplierModal(true);
@@ -303,19 +336,19 @@ const SupplierManagement = () => {
                         <p className="text-[10px] font-black text-slate-900 uppercase tracking-[0.3em] flex items-center gap-2"><Upload size={14}/> Optional Compliance Documentation</p>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          {/* KRA PIN Doc - UNBOUND FOR OPTIONAL USE */}
+                          {/* KRA PIN Doc */}
                           <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-3">
                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">1. Tax Registration (KRA PIN Document)</label>
                             <input type="file" accept=".pdf" onChange={(e) => handleFileChange('kra_pin_doc', e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer w-full" />
                           </div>
 
-                          {/* Certificate of Incorporation - UNBOUND FOR OPTIONAL USE */}
+                          {/* Certificate of Incorporation */}
                           <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-3">
                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">2. Certificate of Incorporation / Reg</label>
                             <input type="file" accept=".pdf" onChange={(e) => handleFileChange('incorporation_doc', e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer w-full" />
                           </div>
 
-                          {/* Regulatory Medical/Trade License - UNBOUND FOR OPTIONAL USE */}
+                          {/* Regulatory Medical/Trade License */}
                           <div className="bg-white p-5 rounded-2xl border border-slate-100 space-y-3">
                             <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">3. Operating License (PPB / Commercial)</label>
                             <input type="file" accept=".pdf" onChange={(e) => handleFileChange('regulatory_license_doc', e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-black file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer w-full" />
@@ -328,7 +361,7 @@ const SupplierManagement = () => {
                           </div>
                         </div>
 
-                        {/* Special Composite Tracker Slot: Tax Compliance Certificate + Validation Clock */}
+                        {/* Special Composite Tracker Slot */}
                         <div className="bg-white p-6 rounded-2xl border border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
                           <div className="space-y-2">
                             <label className="text-[10px] font-black text-rose-600 uppercase tracking-wider block">5. Valid Tax Compliance Certificate (TCC)</label>

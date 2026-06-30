@@ -1636,10 +1636,7 @@ class InventoryItemAdmin(admin.ModelAdmin):
 
 @admin.register(StockTake)
 class StockTakeAdmin(admin.ModelAdmin):
-    """
-    Auditing reconciliation log viewer.
-    Highlights processing errors, variance tracking calculations, and auditing officers.
-    """
+    
     list_display = (
         'created_at_date', 
         'item_description', 
@@ -1682,17 +1679,30 @@ class StockTakeAdmin(admin.ModelAdmin):
 
     # Red/Green dynamic alert system flag for the Finance Officer
     def variance_alert(self, obj):
-        if obj.variance == 0:
+        try:
+            # 🎯 Coerce safely into pure numeric types first
+            var_val = int(obj.variance) if obj.variance is not None else 0
+            var_pct = float(obj.variance_percentage) if obj.variance_percentage is not None else 0.0
+        except (ValueError, TypeError):
+            var_val = 0
+            var_pct = 0.0
+
+        if var_val == 0:
             return format_html('<span style="color: #059669; font-weight: 900;">Perfect Match (0)</span>')
         
-        color = '#dc2626' if obj.variance < 0 else '#d97706'
-        sign = '+' if obj.variance > 0 else ''
+        color = '#dc2626' if var_val < 0 else '#d97706'
+        sign = '+' if var_val > 0 else ''
+        
+        # 🛠️ Pre-format strings directly inside Python f-strings where types are certain
+        formatted_variance = f"{var_val:,}"
+        formatted_percentage = f"{var_pct:.1f}"
+
+        # Feed regular formatted strings into clean text placeholders ({})
         return format_html(
-            '<span style="color: {}; font-weight: 900;">{}{:,} ({:.1f}%)</span>', 
-            color, sign, obj.variance, obj.variance_percentage
+            '<span style="color: {}; font-weight: 900;">{}{}{} ({}%)</span>', 
+            color, sign, formatted_variance, '', formatted_percentage
         )
     variance_alert.short_description = "Variance Metric"
-
 
 
 @admin.register(FixedAsset)

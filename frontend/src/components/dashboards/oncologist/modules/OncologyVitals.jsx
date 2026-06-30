@@ -209,7 +209,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         setImagingRequests(prev => ({ ...prev, [testId]: !prev[testId] }));
     };
 
-    // ✨ NEW: Toggle tracking handler for Nurse Procedures panel
     const toggleNurseService = (serviceId) => {
         setNurseRequests(prev => ({ ...prev, [serviceId]: !prev[serviceId] }));
     };
@@ -234,7 +233,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         }, 0);
     }, [imagingRequests, servicePrices]);
 
-    // ✨ NEW: Live pricing calculator for selected Nursing actions
     const totalNurseRequisitionCost = useMemo(() => {
         return AVAILABLE_NURSE_SERVICES.reduce((sum, service) => {
             if (nurseRequests[service.id]) {
@@ -364,17 +362,12 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
         // 1. Map selected scans to retrieve pricing details
         const requestedScansDetails = AVAILABLE_IMAGING_TESTS.filter(scan => imagingRequests[scan.id]);
         const totalRadiologyCharge = requestedScansDetails.reduce((sum, scan) => sum + (scan.price || 0), 0);
-
-        // 2. UNTANGLE IDs: Find the actual patient record ID vs the visit ID (32)
-        // If your selectedPatient object nests the patient details, this falls back safely.
         const realPatientId = selectedPatient.patient_id || 
                               (selectedPatient.patient && typeof selectedPatient.patient === 'object' ? selectedPatient.patient.id : selectedPatient.patient) || 
                               selectedPatient.patient;
                               
         const realVisitId = selectedPatient.visit_id || selectedPatient.visit || selectedPatient.id;
 
-        // Safety fallback: If your data model doesn't nest the patient ID and it matches the visit ID, 
-        // ensure we check your console. logs to map the accurate property name.
         if (!realPatientId || realPatientId === realVisitId) {
             console.warn("WARNING: realPatientId resolved identical to visit ID (32). Check your console object schema:", selectedPatient);
         }
@@ -386,11 +379,14 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             requestedScansDetails
         );
 
+        await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'RADIOLOGY' });
+
         // 4. Success Flow
         alert(`Successfully billed $${totalRadiologyCharge} and routed patient to Radiology!`);
         
         // Reset the checkmarks local state dictionary cleanly
         setImagingRequests({}); 
+        onTabSwitch('home');
         
     } catch (error) {
         console.error("Radiology integration failure:", error);
@@ -480,7 +476,7 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                     <div className="flex items-center gap-4 flex-1 w-full">
                         <div className="p-3.5 bg-slate-100 rounded-xl text-slate-700"><User size={20} /></div>
                         <div className="flex-1 relative">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-0.5">Switch Patient Queue Entry</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 ml-0.5">Switch Patient</p>
                             <select 
                                 className="w-full bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 font-semibold text-slate-800 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white cursor-pointer appearance-none transition-all"
                                 onChange={(e) => handlePatientChange(e.target.value)}
@@ -488,7 +484,7 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                             >
                                 <option value="" disabled>Select patient from doctor queue...</option>
                                 {queue.map(p => (
-                                    <option key={p.id} value={p.id}>{p.patient_name} — #{p.token_id}</option>
+                                    <option key={p.id} value={p.id}>{p.patient_name} — {p.token_id}</option>
                                 ))}
                             </select>
                             <ChevronDown className="absolute right-4 top-9 text-slate-400 pointer-events-none" size={16} />
@@ -646,40 +642,44 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                         </div>
 
                         {/* RADIOLOGY / IMAGING REQUESTS PANEL */}
-                        <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
-                            <div className="flex items-center justify-between mb-6">
-                                <div className="flex items-center gap-3">
-                                    <div className="bg-purple-600 p-2.5 rounded-xl text-white"><ImageIcon size={18} /></div>
-                                    <h3 className="text-md font-bold text-slate-900">Radiology & Imaging Requisition</h3>
+                            <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
+                                <div className="flex items-center justify-between mb-6">
+                                    <div className="flex items-center gap-3">
+                                        <div className="bg-purple-600 p-2.5 rounded-xl text-white"><ImageIcon size={18} /></div>
+                                        <h3 className="text-md font-bold text-slate-900">Radiology & Imaging Requisition</h3>
+                                    </div>
                                 </div>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {AVAILABLE_IMAGING_TESTS.map((scan) => {
-                                    return (
-                                        <div 
-                                            key={scan.id} 
-                                            onClick={() => toggleImagingTest(scan.id)}
-                                            className={`flex items-center justify-between p-5 rounded-xl border-2 transition-all cursor-pointer ${imagingRequests[scan.id] ? 'bg-purple-50/60 border-purple-500 shadow-sm' : 'bg-slate-50 border-transparent hover:border-slate-200'}`}
-                                        >
-                                            <div className="flex flex-col gap-0.5">
-                                                <span className={`text-xs font-bold ${imagingRequests[scan.id] ? 'text-purple-900' : 'text-slate-600'}`}>{scan.label}</span>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {AVAILABLE_IMAGING_TESTS.map((scan) => {
+                                        return (
+                                            <div 
+                                                key={scan.id} 
+                                                onClick={() => toggleImagingTest(scan.id)}
+                                                className={`flex items-center justify-between p-5 rounded-xl border-2 transition-all cursor-pointer ${imagingRequests[scan.id] ? 'bg-purple-50/60 border-purple-500 shadow-sm' : 'bg-slate-50 border-transparent hover:border-slate-200'}`}
+                                            >
+                                                <div className="flex flex-col gap-0.5">
+                                                    <span className={`text-xs font-bold ${imagingRequests[scan.id] ? 'text-purple-900' : 'text-slate-600'}`}>{scan.label}</span>
+                                                    {/* ✨ ADDED: Dynamic price visualization sub-tag */}
+                                                    <span className="text-[10px] font-mono text-slate-400 mt-0.5">
+                                                        KES {(scan.price || 0).toLocaleString()}
+                                                    </span>
+                                                </div>
+                                                {imagingRequests[scan.id] ? <CheckCircle2 size={18} className="text-purple-600" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-300" />}
                                             </div>
-                                            {imagingRequests[scan.id] ? <CheckCircle2 size={18} className="text-purple-600" /> : <div className="w-4 h-4 rounded-full border-2 border-slate-300" />}
-                                        </div>
-                                    );
-                                })}
-                            </div>
+                                        );
+                                    })}
+                                </div>
 
-                            <button 
-                                onClick={handleReferToRadiology}
-                                disabled={isSavingImaging}
-                                className="w-full mt-6 bg-purple-600 hover:bg-purple-700 text-white py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2.5 shadow-lg"
-                            >
-                                {isSavingImaging ? <Loader2 className="animate-spin" size={18} /> : <ClipboardCheck size={18} />} 
-                                Submit Requisition to Radiology ({AVAILABLE_IMAGING_TESTS.filter(s => imagingRequests[s.id]).length} Checked)
-                            </button>
-                        </div>
+                                <button 
+                                    onClick={handleReferToRadiology}
+                                    disabled={isSavingImaging}
+                                    className="w-full mt-6 bg-purple-600 hover:bg-purple-700 text-white py-4 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2.5 shadow-lg"
+                                >
+                                    {isSavingImaging ? <Loader2 className="animate-spin" size={18} /> : <ClipboardCheck size={18} />} 
+                                    Submit Requisition to Radiology ({AVAILABLE_IMAGING_TESTS.filter(s => imagingRequests[s.id]).length} Checked)
+                                </button>
+                            </div>
 
                         {/* ✨ NEW: NURSING STATION PROCEDURES PANEL */}
                         <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">

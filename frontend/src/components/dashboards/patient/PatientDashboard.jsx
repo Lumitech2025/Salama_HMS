@@ -47,11 +47,11 @@ const PatientDashboard = ({ onLogout }) => {
     if (!patientId) return;
     try {
       const config = getRequestConfig();
+      console.log(`📡 Fetching sub-records from backend for Patient ID: ${patientId}`);
 
-      // Query records passing explicit token configurations directly to satisfy Django permission classes
       const [appRes, vitRes, noteRes, rxRes, labRes, imgRes, chemoRes, billRes] = await Promise.all([
         API.get(`/appointments/?patient=${patientId}`, config).catch(() => ({ data: [] })),
-        API.get(`/vital-signs/?patient=${patientId}`, config).catch(() => ({ data: [] })),
+        API.get(`/vitals/?patient=${patientId}`, config).catch(() => ({ data: [] })),
         API.get(`/clinical-notes/?patient=${patientId}`, config).catch(() => ({ data: [] })),
         API.get(`/prescriptions/?patient=${patientId}`, config).catch(() => ({ data: [] })),
         API.get(`/lab-results/?patient=${patientId}`, config).catch(() => ({ data: [] })),
@@ -83,16 +83,25 @@ const PatientDashboard = ({ onLogout }) => {
       const patientList = patientRes.data.results || patientRes.data || [];
       
       if (patientList.length === 0) {
-        throw new Error("No accessible patient profile linked to this account session.");
+        console.log("No personal patient row. Initializing overview selection context instead.");
+        
+        // Fetch any existing records to give an initial workflow context
+        const generalLookUp = await API.get('/patients/?all=true', config).catch(() => ({ data: [] }));
+        const list = generalLookUp.data.results || generalLookUp.data || [];
+        
+        if (list.length > 0) {
+          // Set the state baseline context. The single tracking useEffect below will manage the initial data fetch.
+          setSelectedPatientContext(list[0]);
+          setLoading(false);
+          return;
+        } else {
+          throw new Error("No historical patient registry information exists in the database.");
+        }
       }
       
-      // Use the authenticated endpoint profile as base data
+      // Standard path for real patients
       const assignedProfile = patientList[0];
       setPatientData(assignedProfile);
-      
-      // Target the active selection context ID over baseline if explicitly focused
-      const activeId = selectedPatientContext?.id || assignedProfile.id;
-      await fetchPatientSubRecords(activeId);
 
     } catch (err) {
       console.error("Critical error mapping client dashboard metrics array:", err);
@@ -100,19 +109,22 @@ const PatientDashboard = ({ onLogout }) => {
     } finally {
       setLoading(false);
     }
-  }, [getRequestConfig, selectedPatientContext?.id, fetchPatientSubRecords]);
+  }, [getRequestConfig]);
 
-  // Handle baseline initialization
+  // Handle baseline initialization once on mount
   useEffect(() => {
     fetchComprehensivePatientData();
-  }, []);
+  }, [fetchComprehensivePatientData]);
 
-  // Proactively re-trigger query dependency arrays instantly when workspace context changes
+  // 🎯 UNIFIED SINGLE SOURCE OF TRUTH FOR DATA SYNC: 
+  // Runs whenever currentPatient swaps, ensuring sub-records are fetched for the active context.
   useEffect(() => {
-    if (currentPatient?.id) {
-      fetchPatientSubRecords(currentPatient.id);
+    const realPatientId = currentPatient?.patient?.id || currentPatient?.id;
+    
+    if (realPatientId) {
+      fetchPatientSubRecords(realPatientId);
     }
-  }, [currentPatient?.id, fetchPatientSubRecords]);
+  }, [currentPatient, fetchPatientSubRecords]);
 
   const renderTabContent = () => {
     const contextPayload = { 

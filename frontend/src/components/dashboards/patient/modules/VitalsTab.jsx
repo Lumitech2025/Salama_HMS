@@ -15,7 +15,7 @@ const VitalsTab = ({ vitals = [], patientData }) => {
       return `${corePatient.first_name || ''}${mid} ${corePatient.last_name || ''}`.trim().toUpperCase();
     }
     
-    // Fallback for flat dictionary name structures
+    // Fallback for flat dictionary name structures (e.g., ID 93: COLLINS KIMATHI MWITI)
     if (corePatient.name) return corePatient.name.toUpperCase();
     
     return "UNKNOWN PATIENT RECORD";
@@ -23,33 +23,33 @@ const VitalsTab = ({ vitals = [], patientData }) => {
 
   const healthRecordNumber = corePatient?.health_record_number || "PENDING ISSUANCE";
 
-  // Rely on the server-filtered vitals data array passed straight down from the parent shell
-  const targetVitals = Array.isArray(vitals) ? vitals : [];
+  // Handle DRF Pagination envelopes safely (checks if vitals is inside .results or is a raw list)
+  const targetVitals = Array.isArray(vitals) 
+    ? vitals 
+    : (vitals?.results && Array.isArray(vitals.results) ? vitals.results : []);
 
   // Helper utility to safely extract or calculate BMI on the fly if backend misses it
   const getBmiValue = (item) => {
-    if (item.bmi !== undefined && item.bmi !== null && Number(item.bmi) !== 0) {
+    if (item?.bmi !== undefined && item?.bmi !== null && Number(item.bmi) !== 0) {
       return Number(item.bmi);
     }
-    if (item.weight && item.height && Number(item.height) > 0) {
+    if (item?.weight && item?.height && Number(item.height) > 0) {
       const heightM = Number(item.height) / 100;
-      return roundToTwo(Number(item.weight) / (heightM * heightM));
+      return Math.round((Number(item.weight) / (heightM * heightM)) * 100) / 100;
     }
     return 0;
   };
 
   // Helper utility to safely extract or calculate BSA (Mosteller Formula) on the fly
   const getBsaValue = (item) => {
-    if (item.bsa !== undefined && item.bsa !== null && Number(item.bsa) !== 0) {
+    if (item?.bsa !== undefined && item?.bsa !== null && Number(item.bsa) !== 0) {
       return Number(item.bsa);
     }
-    if (item.weight && item.height) {
-      return roundToTwo(Math.sqrt((Number(item.height) * Number(item.weight)) / 3600));
+    if (item?.weight && item?.height) {
+      return Math.round(Math.sqrt((Number(item.height) * Number(item.weight)) / 3600) * 100) / 100;
     }
     return 0;
   };
-
-  const roundToTwo = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
 
   // Extract the latest record 
   const latestVitals = targetVitals[0] || {};
@@ -57,10 +57,25 @@ const VitalsTab = ({ vitals = [], patientData }) => {
   const latestBsa = getBsaValue(latestVitals);
 
   const renderBP = (v) => {
-    if (v && v.systolic_bp && v.diastolic_bp) {
-      return `${v.systolic_bp}/${v.diastolic_bp} mmHg`;
+    if (v && (v.systolic_bp || v.systolic)) {
+      const sys = v.systolic_bp || v.systolic;
+      const dia = v.diastolic_bp || v.diastolic;
+      return `${sys}/${dia} mmHg`;
     }
     return '—';
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'Clinical Check';
+    try {
+      return new Date(dateStr).toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      });
+    } catch (e) {
+      return 'Clinical Check';
+    }
   };
 
   return (
@@ -84,7 +99,7 @@ const VitalsTab = ({ vitals = [], patientData }) => {
         </div>
         <div className="hidden sm:block">
           <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 px-3 py-1 rounded-full uppercase tracking-wider">
-            Vitals View Mode Locked
+            Portal View Mode Active
           </span>
         </div>
       </div>
@@ -110,21 +125,21 @@ const VitalsTab = ({ vitals = [], patientData }) => {
           },
           { 
             label: 'Heart Rate', 
-            value: latestVitals.heart_rate ? `${latestVitals.heart_rate} bpm` : '—', 
+            value: latestVitals.heart_rate || latestVitals.pulse ? `${latestVitals.heart_rate || latestVitals.pulse} bpm` : '—', 
             sub: 'Pulse Cycle Frequency', 
             icon: Activity, 
             color: 'text-emerald-600 bg-emerald-50 border-emerald-100' 
           },
           { 
             label: 'Respiratory Rate', 
-            value: latestVitals.respiratory_rate ? `${latestVitals.respiratory_rate} cpm` : '—', 
+            value: latestVitals.respiratory_rate || latestVitals.rr ? `${latestVitals.respiratory_rate || latestVitals.rr} cpm` : '—', 
             sub: 'Breathing Excursion Frequency', 
             icon: Wind, 
             color: 'text-orange-600 bg-orange-50 border-orange-100' 
           },
           { 
             label: 'Body Temperature', 
-            value: latestVitals.temperature ? `${latestVitals.temperature} °C` : '—', 
+            value: latestVitals.temperature || latestVitals.temp ? `${latestVitals.temperature || latestVitals.temp} °C` : '—', 
             sub: 'Core Thermal Reading', 
             icon: Thermometer, 
             color: 'text-amber-600 bg-amber-50 border-amber-100' 
@@ -193,16 +208,19 @@ const VitalsTab = ({ vitals = [], patientData }) => {
               {targetVitals.length > 0 ? targetVitals.map((item, idx) => {
                 const currentBmi = getBmiValue(item);
                 const currentBsa = getBsaValue(item);
+                const tempVal = item.temperature || item.temp;
 
                 return (
                   <tr key={idx} className="hover:bg-slate-50/70 transition-colors text-slate-700">
                     <td className="p-4 text-left font-semibold text-slate-900">
-                      {item.created_at ? new Date(item.created_at).toLocaleDateString('en-GB') : 'Clinical Check'}
+                      {formatDate(item.created_at || item.recorded_at)}
                     </td>
                     <td className="p-4 text-center font-mono font-bold text-slate-900 text-base">{renderBP(item)}</td>
-                    <td className="p-4 text-center font-mono text-base">{item.heart_rate || '—'}</td>
-                    <td className="p-4 text-center font-mono text-base">{item.respiratory_rate || '—'}</td>
-                    <td className="p-4 text-center font-mono text-base">{vitals.temperature ? `${item.temperature}°C` : '—'}</td>
+                    <td className="p-4 text-center font-mono text-base">{item.heart_rate || item.pulse || '—'}</td>
+                    <td className="p-4 text-center font-mono text-base">{item.respiratory_rate || item.rr || '—'}</td>
+                    <td className="p-4 text-center font-mono text-base">
+                      {tempVal ? `${tempVal}°C` : '—'}
+                    </td>
                     <td className="p-4 text-center font-mono font-bold text-emerald-600 text-base">{item.spo2 ? `${item.spo2}%` : '—'}</td>
                     <td className="p-4 text-center font-mono text-sm">{item.weight || '—'}kg / {item.height || '—'}cm</td>
                     <td className="p-4 text-center font-mono font-bold text-indigo-700 bg-indigo-50/40 text-base">

@@ -38,6 +38,8 @@ export default function PurchaseOrderManagement({ prefilledData, clearPrefilledD
 
   const [catalog, setCatalog] = useState([]);
 
+  const [inventoryItems, setInventoryItems] = useState([]);
+
   // File Upload State
   const [attachedFile, setAttachedFile] = useState(null);
 
@@ -73,6 +75,18 @@ export default function PurchaseOrderManagement({ prefilledData, clearPrefilledD
         .then(res => setCatalog(res.data))
         .catch(err => console.error(err));
   }, []);
+
+  useEffect(() => {
+  const fetchInventory = async () => {
+    try {
+      const response = await API.get('/inventory/'); // Adjust if your endpoint path differs
+      setInventoryItems(response.data);
+    } catch (err) {
+      console.error("Error fetching main store inventory catalog:", err);
+    }
+  };
+  fetchInventory();
+}, []);
 
   useEffect(() => {
     fetchPurchaseOrders();
@@ -511,35 +525,89 @@ export default function PurchaseOrderManagement({ prefilledData, clearPrefilledD
               </div>
 
               <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Requested Line Items</h4>
-                  <button type="button" onClick={handleAddItemRow} className="text-xs bg-slate-900 text-teal-400 font-bold uppercase px-4 py-2 rounded-xl flex items-center gap-2"><Plus size={14}/> Add Row</button>
-                </div>
-                {poForm.items.map((item, index) => (
-                  <div key={index} className="grid grid-cols-12 gap-3 items-center bg-slate-50 p-3 rounded-2xl border">
-                    <div className="col-span-4">
-                      <input list="catalog-items" required placeholder="Item description or SKU" value={item.item_name} onChange={(e) => handleItemChange(index, 'item_name', e.target.value)} className="w-full bg-white border rounded-xl py-3 px-4 text-xs font-bold outline-none" />
-                      <datalist id="catalog-items">
-                        {catalog.map((c, i) => <option key={i} value={c} />)}
-                      </datalist>
-                    </div>
-                    <div className="col-span-2">
-                      <select value={item.category} onChange={(e) => handleItemChange(index, 'category', e.target.value)} className="w-full bg-white border rounded-xl py-3 px-2 text-xs font-bold outline-none">
-                        {DEPARTMENTS.filter(d => d !== 'ALL').map(d => <option key={d} value={d}>{d}</option>)}
-                      </select>
-                    </div>
-                    <div className="col-span-2">
-                      <input required type="number" min="1" placeholder="Qty" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 1)} className="w-full bg-white border rounded-xl py-3 px-3 text-xs font-bold text-center outline-none" />
-                    </div>
-                    <div className="col-span-3">
-                      <input required type="number" min="0" step="0.01" placeholder="Unit Price (KES)" value={item.unit_cost} onChange={(e) => handleItemChange(index, 'unit_cost', parseFloat(e.target.value) || 0)} className="w-full bg-white border rounded-xl py-3 px-3 text-xs font-bold outline-none" />
-                    </div>
-                    <div className="col-span-1 text-center">
-                      <button type="button" disabled={poForm.items.length === 1} onClick={() => handleRemoveItemRow(index)} className="text-slate-300 hover:text-rose-600 disabled:opacity-30"><Trash2 size={16}/></button>
-                    </div>
-                  </div>
-                ))}
+              <div className="flex justify-between items-center">
+                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Requested Line Items</h4>
+                <button type="button" onClick={handleAddItemRow} className="text-xs bg-slate-900 text-teal-400 font-bold uppercase px-4 py-2 rounded-xl flex items-center gap-2"><Plus size={14}/> Add Row</button>
               </div>
+              {poForm.items.map((item, index) => (
+                <div key={index} className="grid grid-cols-12 gap-3 items-center bg-slate-50 p-3 rounded-2xl border">
+                  
+                  {/* 1. DYNAMIC ITEM DESCRIPTION & STRENGTH SELECTOR */}
+                  <div className="col-span-3">
+                    <select
+                      required
+                      // Reconstruct value key to cleanly match selection identity strings
+                      value={item.item_name ? `${item.item_name}|${item.sku || ''}` : ""}
+                      onChange={(e) => {
+                        const compositeValue = e.target.value;
+                        if (!compositeValue) {
+                          handleItemChange(index, 'item_name', '');
+                          handleItemChange(index, 'sku', '');
+                          return;
+                        }
+
+                        // Unpack composite keys instantly
+                        const [selectedName, selectedSku] = compositeValue.split('|');
+                        
+                        // Commit item name and SKU fields down into the state array
+                        handleItemChange(index, 'item_name', selectedName);
+                        handleItemChange(index, 'sku', selectedSku);
+
+                        // Locate matching element for downstream pricing details context logic
+                        const matchedItem = catalog.find(
+                          inv => inv.sku === selectedSku || 
+                          ((inv.department === 'PHARMACY' ? `${inv.name} ${inv.strength || ''}`.trim() : inv.name) === selectedName)
+                        );
+                        
+                        if (matchedItem) {
+                          handleItemChange(index, 'category', matchedItem.department);
+                          handleItemChange(index, 'unit_cost', parseFloat(matchedItem.cost_per_unit) || 0);
+                        }
+                      }}
+                      className="w-full bg-white border rounded-xl py-3 px-3 text-xs font-bold outline-none focus:border-teal-500"
+                    >
+                      <option value="">-- Select Store Item --</option>
+                      {catalog.map((invItem, idx) => {
+                        // Rule Implementation: Explicitly bind Name + Strength if it is a PHARMACY drug
+                        const formattedItemName = invItem.department === 'PHARMACY'
+                          ? `${invItem.name} ${invItem.strength || ''}`.trim()
+                          : invItem.name;
+
+                        return (
+                          <option key={idx} value={`${formattedItemName}|${invItem.sku || ''}`}>
+                            {formattedItemName}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  
+
+                  {/* 3. CATEGORY / DEPARTMENT FIELD */}
+                  <div className="col-span-2">
+                    <select value={item.category} onChange={(e) => handleItemChange(index, 'category', e.target.value)} className="w-full bg-white border rounded-xl py-3 px-2 text-xs font-bold outline-none">
+                      {DEPARTMENTS.filter(d => d !== 'ALL').map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+
+                  {/* 4. QUANTITY FIELD */}
+                  <div className="col-span-2">
+                    <input required type="number" min="1" placeholder="Qty" value={item.quantity} onChange={(e) => handleItemChange(index, 'quantity', parseInt(e.target.value) || 1)} className="w-full bg-white border rounded-xl py-3 px-3 text-xs font-bold text-center outline-none" />
+                  </div>
+
+                  {/* 5. UNIT PRICE FIELD */}
+                  <div className="col-span-2">
+                    <input required type="number" min="0" step="0.01" placeholder="Unit Price (KES)" value={item.unit_cost} onChange={(e) => handleItemChange(index, 'unit_cost', parseFloat(e.target.value) || 0)} className="w-full bg-white border rounded-xl py-3 px-3 text-xs font-bold outline-none" />
+                  </div>
+
+                  {/* 6. REMOVE ROW ACTION BUTTON */}
+                  <div className="col-span-1 text-center">
+                    <button type="button" disabled={poForm.items.length === 1} onClick={() => handleRemoveItemRow(index)} className="text-slate-300 hover:text-rose-600 disabled:opacity-30"><Trash2 size={16}/></button>
+                  </div>
+                </div>
+              ))}
+            </div>
 
               <div className="flex justify-between items-center border-t pt-6">
                 <div className="text-left">
