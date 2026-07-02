@@ -11,7 +11,6 @@ const LabReference = () => {
   const [editId, setEditId] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
 
-  // BASELINE STANDARDS
   const MAIN_PANELS = [
     "Full Blood Count (CBC)",
     "Urea, Electrolytes & Creatinine (U&E)",
@@ -28,13 +27,11 @@ const LabReference = () => {
 
   const METRIC_UNITS = ["g/dL", "x10³/µL", "x10⁹/L", "mmol/L", "µmol/L", "U/L", "fL", "ng/mL"];
 
-  // DYNAMIC STATE REFERENCE (Initialized strictly empty as requested)
   const [references, setReferences] = useState(() => {
     const saved = localStorage.getItem('master_lab_references');
     return saved ? JSON.parse(saved) : [];
   });
 
-  // FORM OBJECT INITIALIZATION
   const [newForm, setNewForm] = useState({
     parent_panel: '',
     name: '',
@@ -46,12 +43,10 @@ const LabReference = () => {
     price: ''
   });
 
-  // EFFECT HOOK: KEEP LOCAL STORAGE IN SYNC WHENEVER STATE ALTERS
   useEffect(() => {
     localStorage.setItem('master_lab_references', JSON.stringify(references));
   }, [references]);
 
-  // EFFECT HOOK: MOUNT AND SYNC REGISTRY VIA DB
   useEffect(() => {
     const loadMasterRegistry = async () => {
       if (references.length === 0) setLoading(true);
@@ -74,7 +69,6 @@ const LabReference = () => {
     loadMasterRegistry();
   }, []);
 
-  // MANUAL FULL FORCED DISPATCH TRIGGER
   const handleForceGlobalSync = async () => {
     setLoading(true);
     try {
@@ -93,7 +87,6 @@ const LabReference = () => {
     }
   };
 
-  // API TRIGGER: COMMITTING EDITED RANGE MATRIX OR NOTES
   const handleUpdate = async (item) => {
     const updatedRefs = references.map(r => r.id === item.id ? item : r);
     setReferences(updatedRefs);
@@ -114,8 +107,6 @@ const LabReference = () => {
       alert(`⚠️ Row metrics updated locally. System data is preserved in this browser layer.`);
     }
   };
-
-  // API TRIGGER: EXPLICIT REMOVAL OF SPECIFIC CONFIG RECORD
   const handleDelete = async (id, name) => {
     if (!window.confirm(`Are you absolutely sure you want to completely erase the configuration for "${name}"?`)) {
       return;
@@ -142,8 +133,6 @@ const LabReference = () => {
       item.id === id ? { ...item, [field]: value } : item
     ));
   };
-
-  // API TRIGGER: PERSISTING NEWLY FORMED DIAGNOSTIC ELEMENT
   const handleAddSubmit = async (e) => {
     e.preventDefault();
     if (!newForm.parent_panel || !newForm.name || !newForm.unit) {
@@ -192,8 +181,6 @@ const LabReference = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700 font-['Inter'] pb-20 max-w-[1600px] mx-auto px-4">
-      
-      {/* HEADER BAR */}
       <div className="bg-[#020617] p-8 rounded-[2rem] shadow-2xl flex flex-col lg:flex-row justify-between items-center gap-6 relative overflow-hidden">
         <div className="relative z-10 flex items-center gap-4">
           <div className="bg-teal-500 p-3.5 rounded-2xl shadow-lg text-white">
@@ -240,7 +227,6 @@ const LabReference = () => {
         </div>
       </div>
 
-      {/* NEW REGISTRATION DRAWER SECTION */}
       {showAddForm && (
         <form onSubmit={handleAddSubmit} className="bg-slate-50 border border-slate-200 rounded-[2rem] p-8 space-y-6 animate-in slide-in-from-top duration-300">
           <div className="flex justify-between items-center border-b border-slate-200 pb-4">
@@ -321,8 +307,6 @@ const LabReference = () => {
           </div>
         </form>
       )}
-
-      {/* FILTER SEARCH BAR */}
       <div className="max-w-xl relative mx-auto">
         <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
         <input 
@@ -333,7 +317,6 @@ const LabReference = () => {
         />
       </div>
 
-      {/* CORE CONFIGURATION MASTER PANEL TABLE */}
       <div className="bg-white border border-slate-200 rounded-[2rem] overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           {loading && references.length === 0 ? (
@@ -365,24 +348,19 @@ const LabReference = () => {
               <tbody className="divide-y divide-slate-100 text-sm">
                 {filteredData.map((item) => (
                   <tr key={item.id} className={`group transition-all ${editId === item.id ? 'bg-teal-50/30' : 'hover:bg-slate-50/40'}`}>
-                    
-                    {/* METRIC PARAMETER NAME */}
+                
                     <td className="px-6 py-5">
                       <p className="font-bold text-slate-900">{item.name}</p>
                       <span className="text-xs text-slate-400 font-medium">{item.unit}</span>
                     </td>
 
-                    {/* PARENT PROFILE SPECIFICATION */}
                     <td className="px-6 py-5">
                       <span className="bg-slate-100 text-slate-800 px-3 py-1 rounded-md text-xs font-semibold inline-block">
                         {item.category}
                       </span>
                     </td>
-
-                    {/* CONDITIONAL TAB LOGIC: CLINICAL CRITERIA VS PRICING */}
                     {activeTab === 'clinical' ? (
                       <>
-                        {/* REFERENCE BASELINE */}
                         <td className="px-6 py-5 whitespace-nowrap">
                           {editId === item.id ? (
                             <div className="flex gap-2 max-w-[140px]">
@@ -394,7 +372,6 @@ const LabReference = () => {
                           )}
                         </td>
 
-                        {/* RECOMMENDATION BELOW MIN */}
                         <td className="px-6 py-5">
                           {editId === item.id ? (
                             <textarea className="w-full text-xs font-medium border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-rose-500 focus:border-rose-500" rows={2} value={item.recommendation_below_minimum} onChange={(e) => handleInputChange(item.id, 'recommendation_below_minimum', e.target.value)} placeholder="Below minimum recommendation..." />
@@ -406,7 +383,6 @@ const LabReference = () => {
                           )}
                         </td>
 
-                        {/* RECOMMENDATION ABOVE MAX */}
                         <td className="px-6 py-5">
                           {editId === item.id ? (
                             <textarea className="w-full text-xs font-medium border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-amber-500 focus:border-amber-500" rows={2} value={item.recommendation_above_maximum} onChange={(e) => handleInputChange(item.id, 'recommendation_above_maximum', e.target.value)} placeholder="Above maximum recommendation..." />
@@ -428,7 +404,6 @@ const LabReference = () => {
                       </td>
                     )}
 
-                    {/* ACTION TRIGGERS (INCLUDES WORKABLE ACTION CONTROLLERS AND UN-INTERRUPTED DELETE COMPONENT) */}
                     <td className="px-6 py-5">
                       <div className="flex justify-center items-center gap-2">
                         {editId === item.id ? (

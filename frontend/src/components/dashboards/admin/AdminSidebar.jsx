@@ -44,8 +44,6 @@ const AdminSidebar = ({ activeTab, setActiveTab, onLogout }) => {
           </p>
         </div>
       </div>
-
-      {/* Main Navigation */}
       <nav className="flex-1 space-y-2 overflow-y-auto pr-1">
         {menuItems.map((item) => (
           <button
@@ -65,7 +63,6 @@ const AdminSidebar = ({ activeTab, setActiveTab, onLogout }) => {
         ))}
       </nav>
 
-      {/* Footer */}
       <div className="pt-6 border-t border-white/10 space-y-4">
         <button 
           onClick={handleLogoutClick}

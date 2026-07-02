@@ -4,8 +4,6 @@ import {
     FlaskConical, Save, ChevronDown, Eye, Beaker, Loader2, Microscope, X, 
     ArrowUpRight, ArrowDownRight, ClipboardList, RefreshCw, Search, Download
 } from 'lucide-react';
-
-// Import your native local asset directly into the bundler pipeline
 import SalamaLogo from '@/assets/Salama Cancer Centre logo.png';
 
 const REFERENCE_RANGES = {
@@ -317,8 +315,6 @@ const DiagnosticWorklist = () => {
             if (activeOrder?.id) {
                 await API.patch(`/lab-orders/${activeOrder.id}/`, { status: 'COMPLETED' });
             }
-
-            // INSTANT COMPANION RUN: DISPATCH BACK TO DOCTOR PIPELINE STATION
             try {
                 await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'DOCTOR' });
                 alert("✅ Diagnostic parameters committed and patient successfully dispatched to Doctor.");
@@ -464,8 +460,6 @@ const DiagnosticWorklist = () => {
                     }
                 }
             `}} />
-
-            {/* Sidebar Control Interface */}
             <div className="w-full lg:w-80 bg-white border border-slate-200/60 rounded-[2.5rem] p-6 shadow-sm flex flex-col h-[calc(100vh-4rem)] lg:sticky lg:top-8 screen-only">
                 <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-4">
                     <div className="flex items-center gap-3">
@@ -543,7 +537,6 @@ const DiagnosticWorklist = () => {
                 </div>
             </div>
 
-            {/* Main Diagnostics Workspace */}
             <div className="flex-1 space-y-6 screen-only">
                 {selectedPatient ? (
                     <div className="bg-white border border-slate-200/60 rounded-[3rem] p-8 shadow-sm space-y-8 animate-in fade-in duration-300">
@@ -641,8 +634,6 @@ const DiagnosticWorklist = () => {
                                 </div>
                             </div>
                         )}
-
-                        {/* WORKSPACE PREVIEW ELEMENT */}
                         {showPreview && (
                             <div className="mt-8 border-4 border-dashed border-slate-200 rounded-[2.5rem] p-6 bg-slate-100/50">
                                 <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-4">Live Dynamic Report Render Output</span>
@@ -723,8 +714,6 @@ const DiagnosticWorklist = () => {
                     </div>
                 )}
             </div>
-
-            {/* PRINTING ENGINE DOM TARGET */}
             {selectedPatient && (
                 <div id="printable-lab-sheet" className="hidden print:block bg-white text-black text-left font-['Inter'] antialiased p-2">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #000', paddingBottom: '15px', fontFamily: 'sans-serif' }}>

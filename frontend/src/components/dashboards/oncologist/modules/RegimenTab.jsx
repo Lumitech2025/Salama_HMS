@@ -17,29 +17,24 @@ const administrationRoutes = ["IV Infusion", "Oral", "Subcutaneous", "Intratheca
 const clinicalStages = ["Stage I", "Stage II", "Stage III", "Stage IV", "Recurrent", "Metastatic"];
 
 const RegimenTab = () => {
-  // Core Form State
   const [primarySite, setPrimarySite] = useState('');
   const [cancerType, setCancerType] = useState('');
   const [regimenName, setRegimenName] = useState('');
   const [cycles, setCycles] = useState(6);
-  const [cycleDuration, setCycleDuration] = useState(21); // New State tracked explicitly
+  const [cycleDuration, setCycleDuration] = useState(21); 
   const [selectedStages, setSelectedStages] = useState([]);
   
-  // Dynamic Dropdown Arrays loaded from Backend
   const [allSites, setAllSites] = useState([]);
   const [availableVariants, setAvailableVariants] = useState([]);
   const [availableTemplates, setAvailableTemplates] = useState([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
   
-  // Saved Data Table List state
   const [protocolsList, setProtocolsList] = useState([]);
   
-  // Worksheet Row Items (Removed costPerCycle)
   const [medications, setMedications] = useState([
     { medicationName: '', dosageValue: '', unit: 'mg/m²', route: 'IV Infusion' }
   ]);
   
-  // UI Controls and Statuses
   const [drugSearchTerm, setDrugSearchTerm] = useState('');
   const [formStatus, setFormStatus] = useState({ type: '', message: '' });
 
@@ -56,7 +51,6 @@ const RegimenTab = () => {
     return headers;
   };
 
-  // Safe Mapping Helpers that support explicit properties, fallback keys, or live component lookups
   const getPrimarySiteName = (item) => {
     if (item.primary_site_name) return item.primary_site_name;
     const targetId = parseInt(item.primary_site_id || item.primary_site);
@@ -71,9 +65,7 @@ const RegimenTab = () => {
     return variant ? variant.name : (targetId ? `Type ID: ${targetId}` : '—');
   };
 
-  // Load Protocols list along with Primary Sites on component mounting
   useEffect(() => {
-    // Fetch base sites
     fetch('/api/cancer-sites/', {
       headers: getAuthHeaders()
     })
@@ -84,7 +76,6 @@ const RegimenTab = () => {
       .then(data => setAllSites(data))
       .catch(err => setFormStatus({ type: 'error', message: err.message }));
 
-    // FIXED: Fetch existing records from '/api/protocols/' instead of '/api/protocol-masters/'
     fetch('/api/protocols/', {
       headers: getAuthHeaders()
     })
@@ -99,7 +90,6 @@ const RegimenTab = () => {
       .catch(err => console.error("Error fetching protocols initialization:", err));
   }, []);
 
-  // Dropdown 1 Actions: Primary Site Selection
   const handleSiteChange = (siteId) => {
     setPrimarySite(siteId);
     setCancerType('');
@@ -122,7 +112,6 @@ const RegimenTab = () => {
       .catch(err => setFormStatus({ type: 'error', message: err.message }));
   };
 
-  // Dropdown 2 Actions: Specific Cancer Variant Selection
   const handleVariantChange = (typeId) => {
     setCancerType(typeId);
     setRegimenName('');
@@ -143,7 +132,6 @@ const RegimenTab = () => {
       .catch(err => setFormStatus({ type: 'error', message: err.message }));
   };
 
-  // Dropdown 3 Actions: Regimen Template Pre-population Selection
   const handleTemplateSelectionChange = (regimenId) => {
     setSelectedTemplateId(regimenId);
     if (!regimenId) {
@@ -217,7 +205,7 @@ const RegimenTab = () => {
     setCancerType('');
     setRegimenName('');
     setCycles(6);
-    setCycleDuration(21); // Reset duration back to standard count maps
+    setCycleDuration(21); 
     setSelectedStages([]);
     setAvailableVariants([]);
     setAvailableTemplates([]);
@@ -230,7 +218,6 @@ const RegimenTab = () => {
   const handleSubmitRegimenBlueprint = (e) => {
     if (e) e.preventDefault();
     
-    // Guard clause to ensure form completeness
     if (!primarySite || !cancerType || !regimenName || selectedStages.length === 0) {
       setFormStatus({ type: 'error', message: 'Please select a Site, Cancer Type, Regimen Name, and at least one Stage.' });
       return;
@@ -242,36 +229,31 @@ const RegimenTab = () => {
       return;
     }
 
-    // Resolve the display names from local lookup state to avoid ReferenceErrors
     const targetSiteObj = allSites.find(s => s.id === parseInt(primarySite));
     const explicitSiteName = targetSiteObj ? targetSiteObj.name : `Site ID: ${primarySite}`;
 
     const targetVariantObj = availableVariants.find(v => v.id === parseInt(cancerType));
     const explicitTypeName = targetVariantObj ? targetVariantObj.name : `Type ID: ${cancerType}`;
 
-    // BUILD THE PAYLOAD DIRECTLY AGAINST YOUR IN-USE MODELS
     const protocolPayload = {
-      // Top-Level 'Protocol' Fields
       name: regimenName.toUpperCase().trim(),
       description: "", // Fallback empty description
       total_cycles: Number(cycles),
       cycle_duration_days: Number(cycleDuration),
       
-      // Core structural IDs (passed strictly as parsed integers)
       primary_site_id: parseInt(primarySite),
       cancer_type_id: parseInt(cancerType),
       regimen_template_id: selectedTemplateId ? parseInt(selectedTemplateId) : null,
       
       applicable_stages: selectedStages,
-      total_cost_per_cycle: 0.00, // Handled automatically or by finance teams later
+      total_cost_per_cycle: 0.00, 
 
-      // Nested 'ProtocolIngredient' fields mapped directly to the serializer's 'components' property
       components: medications.map(m => ({
         medication_name: m.medicationName.trim(),
         base_dosage: parseFloat(m.dosageValue),
         dosage_unit: m.unit,
         route_of_administration: m.route,
-        cost_per_cycle: null // Left null initially per model rules
+        cost_per_cycle: null
       }))
     };
 
@@ -281,7 +263,7 @@ const RegimenTab = () => {
       body: JSON.stringify(protocolPayload)
     })
       .then(async (res) => {
-        // Capture detailed Django REST / API error arrays if they exist
+  
         if (!res.ok) {
           const errorData = await res.json().catch(() => ({}));
           const systemMessage = errorData.detail || errorData.message || JSON.stringify(errorData);
@@ -295,7 +277,6 @@ const RegimenTab = () => {
           message: `Regimen [${protocolPayload.name}] saved successfully.` 
         });
         
-        // Contextually enrich the record returned from the backend matrix list view row
         const UIReadyRecord = {
           ...savedData,
           primary_site_name: explicitSiteName,
@@ -314,8 +295,7 @@ const RegimenTab = () => {
 
   return (
     <div className="space-y-6 text-left w-full max-w-none px-2 pb-12 font-sans">
-      
-      {/* HEADER CONTROLS */}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200 pb-4 gap-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Treatment Regimen Setup</h2>
@@ -341,7 +321,6 @@ const RegimenTab = () => {
         </div>
       </div>
 
-      {/* STATUS NOTIFICATION BANNER */}
       {formStatus.message && (
         <div className={`p-4 rounded-xl flex items-start gap-3 border text-sm ${
           formStatus.type === 'error' ? 'bg-rose-50 border-rose-100 text-rose-800' : 'bg-emerald-50 border-emerald-100 text-emerald-800'
@@ -361,7 +340,6 @@ const RegimenTab = () => {
               Regimen Classification
             </h3>
 
-            {/* STEP 1: PRIMARY SITE */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">1. Primary Body Site</label>
               <select 
@@ -376,7 +354,6 @@ const RegimenTab = () => {
               </select>
             </div>
 
-            {/* STEP 2: CANCER TYPE VARIANT */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">2. Cancer Type</label>
               <select 
@@ -392,7 +369,6 @@ const RegimenTab = () => {
               </select>
             </div>
 
-            {/* STEP 3: REGIMEN TEMPLATE */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-blue-600 uppercase tracking-wider block">
                 3. Regimen
@@ -414,7 +390,6 @@ const RegimenTab = () => {
 
             <hr className="border-slate-100" />
 
-            {/* REGIMEN NAME */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Protocol</label>
               <div className="relative">
@@ -429,7 +404,6 @@ const RegimenTab = () => {
               </div>
             </div>
 
-            {/* DEFAULT CYCLES */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Default Number of Cycles</label>
               <div className="relative">
@@ -445,7 +419,6 @@ const RegimenTab = () => {
               </div>
             </div>
 
-            {/* NEW EXTENSION FIELD: CYCLE DURATION IN DAYS */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Duration of Cycle (Days)</label>
               <div className="relative">
@@ -462,7 +435,7 @@ const RegimenTab = () => {
               </div>
             </div>
 
-            {/* TARGET CLINICAL STAGES */}
+
             <div className="space-y-2">
               <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Applicable Cancer Stages</label>
               <div className="flex flex-wrap gap-2">
@@ -489,7 +462,7 @@ const RegimenTab = () => {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: DYNAMIC MEDICATION EDITOR */}
+   
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm flex flex-col h-full justify-between">
             <div>
@@ -508,10 +481,8 @@ const RegimenTab = () => {
                 </button>
               </div>
 
-              {/* DYNAMIC ROW TRACKER */}
               <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
                 
-                {/* SEARCH FILTER */}
                 {medications.length > 3 && (
                   <div className="relative mb-2">
                     <Search className="absolute left-3 top-2.5 text-slate-400" size={14} />
@@ -544,7 +515,6 @@ const RegimenTab = () => {
 
                       <div className="grid grid-cols-1 md:grid-cols-10 gap-3">
                         
-                        {/* DRUG NAME */}
                         <div className="md:col-span-4 space-y-1">
                           <label className="text-[10px] font-semibold text-slate-400 uppercase block">Drug Name</label>
                           <input 
@@ -556,7 +526,6 @@ const RegimenTab = () => {
                           />
                         </div>
 
-                        {/* BASE DOSAGE VALUE */}
                         <div className="md:col-span-2 space-y-1">
                           <label className="text-[10px] font-semibold text-slate-400 uppercase block">Dosage Value</label>
                           <input 
@@ -568,7 +537,6 @@ const RegimenTab = () => {
                           />
                         </div>
 
-                        {/* METRIC UNIT */}
                         <div className="md:col-span-2 space-y-1">
                           <label className="text-[10px] font-semibold text-slate-400 uppercase block">Unit</label>
                           <select 
@@ -582,7 +550,6 @@ const RegimenTab = () => {
                           </select>
                         </div>
 
-                        {/* ROUTE OF ADMINISTRATION */}
                         <div className="md:col-span-2 space-y-1">
                           <label className="text-[10px] font-semibold text-slate-400 uppercase block">Route</label>
                           <select 
@@ -603,16 +570,12 @@ const RegimenTab = () => {
                 })}
               </div>
             </div>
-
-            {/* INFO FOOTER */}
             
 
           </div>
         </div>
 
       </form>
-
-      {/* RECENTLY SAVED MASTER PROTOCOLS TABLE SECTION */}
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mt-8">
         <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
           <h2 className="text-xl font-bold text-slate-1200 uppercase tracking-wider">

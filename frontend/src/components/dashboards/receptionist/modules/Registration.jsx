@@ -131,7 +131,7 @@ const Registration = () => {
     }
   };
 
-  // 🌟 Standard Input Value Trackers
+ 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData(prev => {
@@ -147,7 +147,7 @@ const Registration = () => {
     });
   };
 
-  // 🌟 Debounce Hook Lifecycle Handler
+ 
   useEffect(() => {
     if (formData.is_returning && formData.id_number.trim().length >= 4) {
       const delayDebounceFn = setTimeout(() => {
@@ -231,7 +231,7 @@ const Registration = () => {
         </div>
       )}
 
-      {/* Analytics widgets */}
+      
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
           <StatCard label="Total Registrations" value={analytics.total_patients} icon={<Users className="text-blue-500"/>} color="blue" />
           <StatCard label="Today's Intake" value={analytics.todays_registrations} icon={<Calendar className="text-teal-500"/>} color="teal" />
@@ -239,7 +239,7 @@ const Registration = () => {
           <StatCard label="Returning Patients" value={analytics.returning_today} icon={<RefreshCw className="text-amber-500"/>} color="amber" />
       </div>
 
-      {/* Page Header */}
+      
       <div className="flex justify-between items-center mb-8 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
         <div>
           <h1 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3 uppercase italic">
@@ -260,7 +260,7 @@ const Registration = () => {
 
       <form id="registration-form" onSubmit={handleSubmit} className="space-y-8 mb-12">
         
-        {/* BLOCK 1: ADMISSIONS STATUS RADAR (Top Configuration) */}
+        
         <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-4 bg-gradient-to-r from-slate-50/50 to-white">
           <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2">
             <RefreshCw size={14} className="text-slate-400 animation-delay" /> 1. Intake Profile Context
@@ -276,7 +276,7 @@ const Registration = () => {
             </label>
           </div>
 
-          {/* Dynamic Autofill Feedback Badge */}
+          
           {formData.is_returning && lookupMessage.text && (
             <div className={`p-3.5 rounded-xl border text-xs font-bold flex items-center gap-2.5 transition-all ${
               lookupMessage.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' :
@@ -288,7 +288,7 @@ const Registration = () => {
           )}
         </div>
         
-        {/* BLOCK 2: PRIMARY DEMOGRAPHICS */}
+        
         <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
           <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2">
             <UserPlus size={14} className="text-slate-400" /> 2. Personal Demographics
@@ -334,7 +334,7 @@ const Registration = () => {
           </div>
         </div>
 
-        {/* BLOCK 3: NEXT OF KIN RELATIONAL DATA */}
+        
         <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
           <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2 mb-2">
             <Contact2 size={14} className="text-slate-400" /> 3. Next of Kin
@@ -364,7 +364,7 @@ const Registration = () => {
           </div>
         </div>
 
-        {/* BLOCK 4: FINANCIAL COVER */}
+       
         <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-6">
           <h3 className="text-xs font-black uppercase text-slate-400 tracking-wider flex items-center gap-2 mb-2">
             <Layers size={14} className="text-slate-400" /> 4. Insurance & Billing Configuration
@@ -405,7 +405,7 @@ const Registration = () => {
 
       </form>
 
-      {/* Activity Logs Table */}
+      
       <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-50 bg-slate-50/50">
           <h3 className="font-black text-slate-900 uppercase italic tracking-tight text-xs">Live Registration Stream</h3>

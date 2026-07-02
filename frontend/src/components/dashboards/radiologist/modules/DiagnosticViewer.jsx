@@ -132,9 +132,7 @@ const DiagnosticViewer = ({ patient, onBack, onComplete }) => {
                 TICKET: {patient.token_id || 'N/A'}
               </span>
             </div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-              Clinical Indication: <span className="text-slate-700 font-medium italic">Referral query protocols</span>
-            </p>
+            
           </div>
         </div>
       </div>
@@ -145,8 +143,8 @@ const DiagnosticViewer = ({ patient, onBack, onComplete }) => {
         {/* LEFT COMPONENT COLUMN: ORDERED ITEMS SELECTOR */}
         <div className="lg:col-span-4 bg-white border border-slate-100 shadow-xl rounded-[2.5rem] p-6 space-y-4">
           <div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Requisition Map</span>
-            <h3 className="text-sm font-black text-slate-950 uppercase tracking-wide mt-0.5">Requested Procedures</h3>
+           
+            <h3 className="text-sm font-black text-slate-950 uppercase tracking-wide mt-0.5">Requested Images</h3>
           </div>
 
           <div className="space-y-2">

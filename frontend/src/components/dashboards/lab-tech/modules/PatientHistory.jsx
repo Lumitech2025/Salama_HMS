@@ -4,8 +4,6 @@ import {
     History, Search, Loader2, RefreshCcw, Beaker, MessageSquare, Pill, Download, 
     X, ArrowUpRight, ArrowDownRight
 } from 'lucide-react';
-
-// Import local center brand asset directly into the compiler pipeline
 import SalamaLogo from '@/assets/Salama Cancer Centre logo.png';
 
 const REFERENCE_RANGES = {
@@ -62,7 +60,6 @@ const PatientHistory = () => {
             const masterRegistry = {};
             const getGroupKey = (item) => `${item.patient}-${item.visit || item.appointment || 'walk-in'}`;
 
-            // Process Lab Data directly mapping to analytical keys
             labData.forEach(item => {
                 const key = getGroupKey(item);
                 if (!masterRegistry[key]) {
@@ -104,8 +101,6 @@ const PatientHistory = () => {
                     masterRegistry[key].notes.push({ author: "Lab Tech Remarks", content: item.technician_notes, role: 'LAB' });
                 }
             });
-
-            // Process Clinical Notes
             notesData.forEach(item => {
                 const key = getGroupKey(item);
                 if (!masterRegistry[key]) {
@@ -114,7 +109,6 @@ const PatientHistory = () => {
                 masterRegistry[key].notes.push({ author: item.author_name || "Doctor", content: item.content, role: item.note_type || 'CLINICAL' });
             });
 
-            // Process Prescriptions
             prescriptionData.forEach(item => {
                 const key = getGroupKey(item);
                 if (!masterRegistry[key]) {
@@ -154,8 +148,6 @@ const PatientHistory = () => {
 
     return (
         <div className="flex flex-col lg:flex-row gap-8 min-h-screen bg-slate-50/50 p-4 font-['Inter'] text-slate-800 text-left relative">
-            
-            {/* Native Sheet Print Configuration Override CSS rule sets */}
             <style dangerouslySetInnerHTML={{__html: `
                 @media print {
                     body * { visibility: hidden !important; }
@@ -172,8 +164,6 @@ const PatientHistory = () => {
                     .screen-only { display: none !important; }
                 }
             `}} />
-
-            {/* Sidebar Controls Panel */}
             <div className="w-full lg:w-96 bg-white border border-slate-200/60 rounded-[2.5rem] p-6 shadow-sm flex flex-col h-[calc(100vh-4rem)] lg:sticky lg:top-8 screen-only">
                 <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-4">
                     <div className="flex items-center gap-3">
@@ -233,7 +223,7 @@ const PatientHistory = () => {
                 </div>
             </div>
 
-            {/* Active Workspace View Panel */}
+            
             <div className="flex-1 space-y-6 screen-only">
                 {selectedPatientRecord ? (
                     <div className="bg-white border border-slate-200/60 rounded-[3rem] p-8 shadow-sm space-y-8 animate-in fade-in duration-300">
@@ -260,7 +250,7 @@ const PatientHistory = () => {
                             </button>
                         </div>
 
-                        {/* Laboratory Parameters Structured Table */}
+                
                         {selectedPatientRecord.labs.length > 0 && (
                             <div className="space-y-4">
                                 <h3 className="font-black text-xs uppercase text-slate-900 tracking-wider flex items-center gap-2">
@@ -299,8 +289,6 @@ const PatientHistory = () => {
                                 </div>
                             </div>
                         )}
-
-                        {/* Clinical Narratives */}
                         {selectedPatientRecord.notes.length > 0 && (
                             <div className="space-y-4">
                                 <h3 className="font-black text-xs uppercase text-slate-900 tracking-wider flex items-center gap-2">
@@ -316,8 +304,6 @@ const PatientHistory = () => {
                                 </div>
                             </div>
                         )}
-
-                        {/* Pharmaceutical Prescriptions */}
                         {selectedPatientRecord.prescriptions.length > 0 && (
                             <div className="space-y-4">
                                 <h3 className="font-black text-xs uppercase text-slate-900 tracking-wider flex items-center gap-2">
@@ -342,8 +328,6 @@ const PatientHistory = () => {
                     </div>
                 )}
             </div>
-
-            {/* PRINT COMPILER DOM ELEMENT TARGET - ACTIVATES NATIVELY ON WINDOW PRINT */}
             {selectedPatientRecord && (
                 <div id="printable-history-sheet" className="hidden bg-white text-black text-left font-['Inter'] p-8">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '3px solid #020617', paddingBottom: '16px', fontFamily: 'sans-serif' }}>
@@ -372,7 +356,6 @@ const PatientHistory = () => {
                         </div>
                     </div>
 
-                    {/* Labs Printing Element Table */}
                     {selectedPatientRecord.labs.length > 0 && (
                         <div style={{ marginTop: '24px' }}>
                             <h3 style={{ fontSize: '12px', fontWeight: '900', color: '#020617', borderBottom: '1px solid #020617', paddingBottom: '6px', marginBottom: '12px', textTransform: 'uppercase' }}>LABORATORY RESULT PARAMETERS METRICS</h3>
@@ -405,7 +388,6 @@ const PatientHistory = () => {
                         </div>
                     )}
 
-                    {/* Progress Remarks Print Summary */}
                     {selectedPatientRecord.notes.length > 0 && (
                         <div style={{ marginTop: '24px' }}>
                             <h3 style={{ fontSize: '12px', fontWeight: '900', color: '#020617', borderBottom: '1px solid #020617', paddingBottom: '6px', marginBottom: '12px', textTransform: 'uppercase' }}>CLINICAL TIMELINE PROGRESS NARRATIVES</h3>
@@ -417,8 +399,6 @@ const PatientHistory = () => {
                             ))}
                         </div>
                     )}
-
-                    {/* Prescription Print Summary */}
                     {selectedPatientRecord.prescriptions.length > 0 && (
                         <div style={{ marginTop: '24px' }}>
                             <h3 style={{ fontSize: '12px', fontWeight: '900', color: '#020617', borderBottom: '1px solid #020617', paddingBottom: '6px', marginBottom: '12px', textTransform: 'uppercase' }}>PHARMACEUTICAL FORMULATION MEDICATION ORDERS</h3>

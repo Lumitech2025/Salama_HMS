@@ -18,11 +18,7 @@ import {
 const BillingOfficerDashboard = () => {
   const [activeTab, setActiveTab] = useState('home'); 
 
-  
-  // Cross-Module Passing Memory States
   const [targetedPatient, setTargetedPatient] = useState(null);
-
-  // Core API Stream Sync Engines mirroring Registration view
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [regStatus, setRegStatus] = useState('idle'); 
   const [errorMessage, setErrorMessage] = useState('');
@@ -35,7 +31,6 @@ const BillingOfficerDashboard = () => {
       returning_today: 0
   });
 
-  // 🚀 ALIGNED: Keys updated to match Django Serializer & Registration.jsx specifications
   const initialFormState = {
     first_name: '', 
     middle_name: '',
@@ -57,14 +52,12 @@ const BillingOfficerDashboard = () => {
 
   const [formData, setFormData] = useState(initialFormState);
 
-  // 🚀 ALIGNED: Calculates the 'SCC-XXX/YY' format dynamically based on Registration design
   const getLiveHrnPreview = () => {
     const shortYear = String(new Date().getFullYear()).slice(-2);
     const nextSequence = String((analytics.total_patients || 0) + 1).padStart(3, '0');
     return `SCC-${nextSequence}/${shortYear}`;
   };
 
-  // 🚀 ALIGNED: Live Async Data Fetching Engine mirroring Registration dataset dependencies
   const fetchData = useCallback(async () => {
     try {
       const [resList, resStats, resInsurance] = await Promise.all([
@@ -106,7 +99,6 @@ const BillingOfficerDashboard = () => {
     setRegStatus('idle');
     setErrorMessage('');
     
-    // 🚀 ALIGNED: Payload parameters mapping match Registration.jsx structures precisely
     const payload = {
       first_name: formData.first_name.trim(),
       middle_name: formData.middle_name.trim(),
@@ -145,8 +137,6 @@ const BillingOfficerDashboard = () => {
       setIsSubmitting(false);
     }
   };
-
-  // Cross-tab routing operational clearance handover logic
   const handleRedirectToClearance = (patientRecord) => {
     const optimizedPatient = {
       ...patientRecord,
@@ -166,14 +156,12 @@ const BillingOfficerDashboard = () => {
         <BillingOverview 
           // 💳 CASH PATIENTS ROUTING PATHWAY
           onRouteToPayment={(patient) => {
-            // Transform registration record into a shape PaymentPortal understands if needed, or pass directly
             setTargetedPatient(patient); 
-            setActiveTab('billing'); // Automatically slides view to the Payment Terminal
+            setActiveTab('billing'); 
           }}
-          // 🛡️ INSURANCE PATIENTS ROUTING PATHWAY
           onTriggerVerification={(patient) => {
             setTargetedPatient(patient); 
-            setActiveTab('clearance'); // Automatically slides view to Insurance Verification
+            setActiveTab('clearance');
           }}
         />
       );
@@ -189,7 +177,6 @@ const BillingOfficerDashboard = () => {
     case 'billing': 
       return (
         <PaymentPortal 
-          // If your PaymentPortal component can auto-load an active patient instance passed as a prop:
           activePatientRecord={targetedPatient}
           clearActiveRecord={() => setTargetedPatient(null)}
         />
@@ -200,7 +187,6 @@ const BillingOfficerDashboard = () => {
     case 'insurance-providers': return <InsuranceProviders />;
     case 'service-catalogue': return <ServiceCatalogue />;
       
-      // OVERVIEW VIEW: Aligned with the exact Registration workspaces layout
       default: return (
         <div className="max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20 font-['Inter'] space-y-6">
           
@@ -246,11 +232,11 @@ const BillingOfficerDashboard = () => {
             </button>
           </div>
 
-          {/* Registration Form Controls Grid */}
+          
           <form id="dashboard-registration-form" onSubmit={handleSubmit} className="space-y-6">
             <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm space-y-8">
               
-              {/* Row 1: Identification & Names */}
+            
               <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-8">
                 <FormInput label="National ID / Passport" name="id_number" value={formData.id_number} onChange={handleChange} required />
                 <FormInput label="First Name" name="first_name" value={formData.first_name} onChange={handleChange} required />
@@ -258,7 +244,7 @@ const BillingOfficerDashboard = () => {
                 <FormInput label="Last Name" name="last_name" value={formData.last_name} onChange={handleChange} required />
               </div>
 
-              {/* Row 2: Demographics & Contacts */}
+             
               <div className="grid grid-cols-1 md:grid-cols-4 gap-x-6 gap-y-8">
                 <FormInput label="Age" type="number" name="age" value={formData.age} onChange={handleChange} required />
                 

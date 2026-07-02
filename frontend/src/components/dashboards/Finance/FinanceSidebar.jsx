@@ -8,8 +8,6 @@ import {
 
 const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
   const [unreadCount, setUnreadCount] = useState(0);
-
-  // Poll for new pending requisitions to show the notification badge
   useEffect(() => {
     let isMounted = true; 
 
@@ -36,8 +34,6 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
       clearInterval(interval); 
     };
   }, []);
-
-  // Map descriptions & assign the live unread count cleanly using raw class references for icons
   const menuItems = [
     { id: 'overview', label: 'Overview', icon: LayoutDashboard, },
     { 
@@ -58,7 +54,6 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
 
   return (
     <aside className="h-screen w-80 bg-[#020617] text-white flex flex-col p-6 fixed left-0 top-0 shadow-2xl z-50 font-sans antialiased">
-      {/* BRANDING */}
       <div className="mb-10 px-2 flex items-center gap-3">
         <div className="bg-teal-500 p-2.5 rounded-xl shadow-lg shadow-teal-500/20">
           <ShieldCheck size={24} className="text-white" />
@@ -69,8 +64,6 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
           </h1>
         </div>
       </div>
-
-      {/* NAVIGATION */}
       <nav className="flex-1 space-y-3 overflow-y-auto pr-1">
         {menuItems.map((item) => {
           const Icon = item.icon;
@@ -84,13 +77,11 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
                 isActive ? 'bg-white/10 border border-white/10 shadow-xl' : 'hover:bg-white/5 border border-transparent'
               }`}
             >
-              {/* Icon Container */}
               <div className={`p-3 rounded-2xl relative transition-all duration-300 ${
                 isActive ? 'bg-teal-500 text-white' : 'bg-white/5 text-slate-500 group-hover:text-slate-300'
               }`}>
                 <Icon size={20} />
                 
-                {/* NOTIFICATION BADGE */}
                 {item.badge && (
                   <span className="absolute -top-1.5 -right-1.5 flex h-5 min-w-[20px] px-1 items-center justify-center rounded-full bg-rose-500 text-[10px] font-black text-white animate-pulse shadow-lg shadow-rose-500/40 border border-[#020617]">
                     {item.badge}
@@ -98,7 +89,6 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
                 )}
               </div>
 
-              {/* Label & Description */}
               <div className="flex-1 min-w-0">
                 <p className={`text-xs font-black uppercase tracking-widest truncate ${
                   isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'
@@ -119,8 +109,6 @@ const FinanceSidebar = ({ activeTab, setActiveTab, onLogout }) => {
           );
         })}
       </nav>
-
-      {/* LOGOUT */}
       <div className="pt-8 border-t border-white/5">
         <button 
           onClick={onLogout} 

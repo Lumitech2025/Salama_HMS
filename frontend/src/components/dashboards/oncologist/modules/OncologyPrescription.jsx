@@ -49,7 +49,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     const snapshot = activeVitals || selectedPatient?.vitals_snapshot || selectedPatient?.vitals;
     if (!snapshot) return "";
 
-    // 2. Map incoming formula parameter keys to their actual structural snapshot properties
     let rawValue = "";
     if (key === 'bsa') {
       rawValue = snapshot.bsa;
@@ -61,7 +60,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
       rawValue = snapshot[key];
     }
 
-    // 3. Return an empty string if null/undefined so parseFloat handles it cleanly
     return rawValue !== undefined && rawValue !== null ? String(rawValue) : "";
   }, [activeVitals, selectedPatient]);
 
@@ -89,14 +87,13 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     const age = parseFloat(patientMeta?.age);
     const isFemale = /female/i.test(patientMeta?.sex || '');
 
-    // Calculate BSA on the fly using Mosteller formula if metrics allow
     if ((isNaN(bsa) || bsa <= 0) && !isNaN(weight) && !isNaN(height)) {
       bsa = Math.sqrt((height * weight) / 3600);
     }
 
     switch (normalizedFactor) {
       case 'MG/M2':
-        if (isNaN(bsa) || bsa <= 0) return '0 mg (Missing BSA)'; // Provide an explicit zero prefix for parsing safety
+        if (isNaN(bsa) || bsa <= 0) return '0 mg (Missing BSA)'; 
         return `${Math.round(val * bsa)} mg`;
 
       case 'MG/KG':
@@ -236,7 +233,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
       
       let computedDiagnosisStr = '';
     if (dxArray.length > 0 && dxArray[0]) {
-      // ✨ CHANGE HERE: Safe fallback rendering properties matching your API definition layout
       const desc = dxArray[0].description || dxArray[0].icd10_description || '';
       const code = dxArray[0].icd10_code || dxArray[0].code || '';
       computedDiagnosisStr = `${code} - ${desc}`.trim();
@@ -262,12 +258,10 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
   if (selectedPatientFromParent) {
     setSelectedPatient(selectedPatientFromParent);
     
-    // Clear old data first to prevent clinical data bleeding between patients
     setActiveVitals(null);
     setActiveLabs([]);
     setPatientDiagnoses([]);
 
-    // 1. Map demographic metadata safely
     setPatientMeta({
       age: selectedPatientFromParent.patient_age || selectedPatientFromParent.visit_age || '',
       sex: selectedPatientFromParent.patient_gender || selectedPatientFromParent.patient_sex || '',
@@ -279,10 +273,8 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
       allergies: selectedPatientFromParent.allergies || ''
     });
 
-    // 2. Fetch clinical snapshot logs (Vitals, Labs, Historical Prescriptions)
     setIsLoadingClinicalData(true);
     
-    // Check if we are loading an active queue node item directly
     const targetPatientId = selectedPatientFromParent.patient;
     const targetVisitId = selectedPatientFromParent.visit;
 
@@ -294,7 +286,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
           if (results && results.length > 0) {
             const activeRx = results[0];
             
-            // If an existing prescription history profile is found, load snapshots
             if (activeRx.vitals_snapshot) setActiveVitals(activeRx.vitals_snapshot);
             if (activeRx.lab_results_snapshot) {
               const parsedLabs = Object.entries(activeRx.lab_results_snapshot).map(([name, data]) => ({
@@ -304,14 +295,13 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
               setActiveLabs(parsedLabs);
             }
             
-            // 🌟 STEP A: Fallback chain parsing existing saved diagnoses snapshots
             if (activeRx.diagnosis_snapshot && activeRx.diagnosis_snapshot.length > 0) {
               setPatientDiagnoses(activeRx.diagnosis_snapshot);
             } else if (activeRx.diagnosis_detail) {
               setPatientDiagnoses([activeRx.diagnosis_detail]);
             }
           } else {
-            // 🌟 STEP B: Fallback chain parsing brand new patients coming straight from the Consultation Queue 
+            
             if (selectedPatientFromParent.diagnosis_snapshot && selectedPatientFromParent.diagnosis_snapshot.length > 0) {
               setPatientDiagnoses(selectedPatientFromParent.diagnosis_snapshot);
             } else if (selectedPatientFromParent.diagnosis_detail) {
@@ -381,7 +371,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
           }
         }
 
-        // 🔍 DETAILED STATE LOGGER: Watch the row modify itself live
         console.log(`[Pharma State Sync] Row #${id} updated field [${field}] to:`, value, "Resulting Row Object:", updatedRow);
 
         return updatedRow;
@@ -409,7 +398,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     
     
     try {
-      // 1. Rigorous payload construction for items across treatment stages
       const itemsPayload = [
         ...preChemoOrders.filter(o => o.checked).map(o => ({
           stage: 'PRE_CHEMO', 
@@ -426,18 +414,14 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
         
         ...chemoRows
           .filter(r => {
-            // 🌟 Normalize keys so it works whether the property is named drug_id or drug
             const activeDrugId = r.drug_id || r.drug;
             const activeName = r.name || r.medication_name;
             const activeCalculatedDose = r.calculated_dose || '';
 
-            // Check if a drug was actually selected
             const hasValidDrug = activeDrugId && String(activeDrugId).trim() !== "";
-            
-            // Check if the calculation failed due to missing vitals
+
             const calculationFailed = String(activeCalculatedDose).includes('Missing');
 
-            // ⚡ ONLY keep rows that have a selected drug AND didn't fail calculation
             return hasValidDrug && activeName && !calculationFailed;
           })
           .map(r => {
@@ -449,7 +433,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
               stage: 'CHEMO', 
               drug: isNaN(cleanDrugForeignKey) ? null : cleanDrugForeignKey, 
               medication_name: activeName, 
-              // Fall back gracefully to factor_value if calculated_dose isn't built yet
               dosage: r.calculated_dose || `${r.factor_value} mg`,
               calc_factor: r.calc_factor || 'Flat Rate', 
               factor_value: String(r.factor_value || '0'), 
@@ -459,7 +442,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
               duration: r.duration || '30 mins'
             };
           }),
-        // ----------------------------------------
 
         ...postChemoOrders.filter(o => o.checked).map(o => ({
           stage: 'POST_CHEMO', 
@@ -475,13 +457,8 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
         }))
       ];
 
-      // 2. Safely extract core lookups across heterogeneous queue payload contexts
       const resolvedPatientId = parseInt(selectedPatient.patient_id || selectedPatient.patient || selectedPatient.id);
-      
-      // Maintain explicit prioritization for historical visits before referencing queue line rows
       const resolvedVisitId = parseInt(selectedPatient.visit_id || selectedPatient.visit || selectedPatient.queue_id || selectedPatient.id);
-
-      // Pull diagnosis key, ensuring it defaults out safely to satisfy database structure blocks
       const resolvedDiagnosisId = patientDiagnoses.length > 0 && patientDiagnoses[0].id 
         ? parseInt(patientDiagnoses[0].id) 
         : null;
@@ -494,16 +471,13 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
         pharmacy_status: 'PENDING', 
         dose_adjustment_notes: doseAdjustmentNotes || '',
         protocol: patientMeta.protocol || '', 
-        cycle_no: String(patientMeta.cycleNo || '1'), // match your backend model's CharField layout
-        total_cycles: patientMeta.totalCycles ? String(patientMeta.totalCycles) : '', // pass empty string instead of null
+        cycle_no: String(patientMeta.cycleNo || '1'), 
+        total_cycles: patientMeta.totalCycles ? String(patientMeta.totalCycles) : '', 
         allergies: patientMeta.allergies || '',
         items: itemsPayload
       };
 
-      // 3. Commit records to systemic state engine
       await API.post('/prescriptions/', payload);
-
-      // Update workflow tracking station inside queue manager components
       const queueTrackerId = selectedPatient.id || resolvedVisitId;
       await API.patch(`/queue/${queueTrackerId}/`, {
         current_station: 'PHARMACY',
@@ -515,7 +489,6 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
     } catch (err) {
       console.error("Transmission Error Context:", err.response?.data || err);
       
-      // Surface descriptive validation errors directly from Django REST Framework if present
       const backendMessage = err.response?.data ? JSON.stringify(err.response.data) : "";
       alert(`Error submitting oncology records chart registry. ${backendMessage}`);
     } finally { 
@@ -941,7 +914,7 @@ const OncologyPrescription = ({ selectedPatientFromParent, onTabSwitch }) => {
               </div>
               <div className="space-y-4">
                 <div className="border-b border-slate-300 h-6 w-full"></div>
-                <span>Oncology Nurse Reviewer Verification Signature</span>
+                <span>Oncology Nurse Signature</span>
               </div>
             </div>
           </div>

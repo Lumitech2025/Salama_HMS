@@ -264,10 +264,7 @@ const FinanceRequisitionsTab = ({ onCreatePO }) => {
                                                     <span className="text-[11px] text-slate-400 block">
                                                         By: {req.requestedBy || req.requested_by || 'Staff'} • {req.date || req.created_at || 'Recent'}
                                                     </span>
-                                                    <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded flex items-center gap-1 border border-slate-200">
-                                                        <Layers size={10} className="text-slate-400" />
-                                                        Store Stock: {remainingStock}
-                                                    </span>
+                                                    
                                                 </div>
                                             </td>
 

@@ -15,14 +15,10 @@ import LaboratoryResults from "../oncologist/modules/LaboratoryResults";
 
 const getShortForm = (label) => {
   const targetString = label || '';
-  
-  // 1. If it contains parentheses (e.g. "Full Blood Count (CBC)"), extract 'CBC'
   const match = targetString.match(/\(([^)]+)\)/);
   if (match && match[1]) {
     return match[1].toUpperCase();
   }
-
-  // 2. Fallback dictionary matching for key standard panels without parentheses
   const fallbackMap = {
     'full blood count': 'CBC',
     'urea, electrolytes & creatinine': 'U&E',
@@ -53,7 +49,7 @@ const LabTechDashboard = () => {
   const fetchLabData = useCallback(async () => {
     setLoading(true);
     try {
-        // 1. Fetch the basic waiting queue items and aggregate analytics
+
         const [resQueue, resAnalytics] = await Promise.all([
             API.get('/queue', { params: { current_station: 'LAB', status: 'WAITING' } }),
             API.get('/queue/analytics', { params: { station: 'LAB' } })
@@ -61,11 +57,9 @@ const LabTechDashboard = () => {
         
         const queueData = resQueue.data.results || resQueue.data || [];
 
-        // 2. Resolve requested tests for each patient by querying the lab-orders endpoint in parallel
         const enrichedQueue = await Promise.all(queueData.map(async (order) => {
             let rawTests = order.requested_tests || [];
             
-            // 🔴 If requested_tests doesn't exist on the queue object, fetch it via its visit ID
             if (!order.requested_tests || order.requested_tests.length === 0) {
                 try {
                     const visitId = order.visit || order.visit_id;
@@ -73,7 +67,6 @@ const LabTechDashboard = () => {
                         const resOrders = await API.get('/lab-orders/', { params: { visit: visitId } });
                         const ordersList = resOrders.data.results || resOrders.data || [];
                         
-                        // Find the first pending/active lab requisition block
                         const activeOrder = ordersList.find(o => 
                             o.status === 'PENDING' || o.status === 'PROCESSING' || o.status === 'WAITING'
                         );
@@ -86,8 +79,6 @@ const LabTechDashboard = () => {
                     console.error(`Failed resolving lab orders for patient assignment #${order.id}`, orderErr);
                 }
             }
-
-            // 3. Map values safely into short badges
             const longFormTests = rawTests.map(test => {
                 if (!test) return '';
                 if (typeof test === 'object') {
@@ -133,14 +124,12 @@ const LabTechDashboard = () => {
       default: return (
         <div className="space-y-10 animate-in fade-in duration-700">
           
-          {/* 1. KPI SECTION */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             <StatCard icon={Clock} label="Waitlist Queue" value={stats.pending} color="blue" />
             <StatCard icon={Beaker} label="Today's Lab Tests" value={stats.todays_tests} color="teal" />
             <StatCard icon={Layers} label="Total Tests Logged" value={stats.total_lifetime_tests} color="indigo" />
           </div>
 
-          {/* 2. SEARCH & REFRESH */}
           <div className="flex items-center justify-between bg-[#020617] p-5 rounded-[2.5rem] shadow-2xl">
               <div className="relative w-full md:w-[450px] ml-2">
                 <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
@@ -155,7 +144,6 @@ const LabTechDashboard = () => {
               </button>
           </div>
 
-          {/* 3. LIVE QUEUE TABLE */}
           <div className="bg-white rounded-[4rem] shadow-2xl border border-slate-100 overflow-hidden">
             <div className="p-10 border-b border-slate-50 flex items-center gap-4 bg-white">
                 <div className="p-4 bg-teal-50 rounded-2xl text-teal-600 shadow-sm">

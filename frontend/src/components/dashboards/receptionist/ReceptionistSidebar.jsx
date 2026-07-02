@@ -17,7 +17,7 @@ import {
 const ReceptionistSidebar = ({ activeTab, setActiveTab }) => {
     const navigate = useNavigate();
 
-    // Reordered to match the clinical linear workflow
+    
     const menuItems = [
         { id: 'overview', label: 'Home', icon: <LayoutDashboard size={20} /> },
         { id: 'appointments', label: 'Appointments', icon: <CalendarClock size={20} /> },
@@ -35,7 +35,7 @@ const ReceptionistSidebar = ({ activeTab, setActiveTab }) => {
 
     return (
         <aside className="w-80 bg-[#020617] h-screen flex flex-col p-8 border-r border-white/5 font-['Inter'] antialiased">
-            {/* Standardized Brand Identity */}
+           
             <div className="mb-12 px-2 flex items-center gap-3">
                 <div className="bg-teal-600 p-2 rounded-xl text-white shadow-lg shadow-teal-900/40">
                     <UserCircle size={26} />
@@ -50,11 +50,8 @@ const ReceptionistSidebar = ({ activeTab, setActiveTab }) => {
                 </div>
             </div>
 
-            {/* Workflow Navigation - Now clearly labeled as a Main Workflow */}
             <nav className="flex-1 space-y-2 overflow-y-auto no-scrollbar pr-2">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-6 px-6">
-                    Main Workflow
-                </p>
+                
                 {menuItems.map((item) => (
                     <button
                         key={item.id}
@@ -75,14 +72,9 @@ const ReceptionistSidebar = ({ activeTab, setActiveTab }) => {
                 ))}
             </nav>
 
-            {/* Profile & Logout Section */}
+          
             <div className="pt-8 border-t border-white/5 space-y-2">
-                <button className="flex items-center justify-start space-x-4 px-6 py-4 text-slate-400 hover:bg-white/5 rounded-2xl transition-all w-full font-['Inter'] group">
-                    <div className="w-8 flex justify-start text-slate-500 group-hover:text-teal-400">
-                        <Settings size={18} />
-                    </div>
-                    <span className="text-[11px] font-black uppercase tracking-[0.2em]">Profile Settings</span>
-                </button>
+                
 
                 <button 
                     onClick={handleLogout}

@@ -10,7 +10,6 @@ const LabInventory = () => {
   const [inventory, setInventory] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Form Fields State locked directly to LAB department
   const [formData, setFormData] = useState({
     name: '',
     sku: '',
@@ -23,14 +22,12 @@ const LabInventory = () => {
     expiry_date: ''
   });
 
-  // Non-clinical item rule helper (Lab items generally don't utilize medicinal metrics)
   const isMedicinal = false;
 
   useEffect(() => {
     fetchInventory();
   }, []);
 
-  // AUTOMATED BATCH ENGINE: Generates real-time template strings inside modal
   useEffect(() => {
     if (formData.name) {
       const today = new Date();
@@ -52,7 +49,6 @@ const LabInventory = () => {
     try {
       const res = await API.get('/inventory-items/');
       const extractedData = res.data?.results || res.data || [];
-      // Strict scope: only extract items that natively belong to the LAB department
       const labOnlyData = (Array.isArray(extractedData) ? extractedData : []).filter(
         item => item.department === 'LAB'
       );
@@ -114,8 +110,6 @@ const LabInventory = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700 font-['Inter'] text-left">
-      
-      {/* 1. KPI COUNTER SECTION */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-xl group hover:border-teal-500 transition-all">
           <div className="p-3 bg-teal-50 text-teal-600 rounded-xl w-fit mb-4"><TrendingUp size={20}/></div>
@@ -143,8 +137,6 @@ const LabInventory = () => {
           </h3>
         </div>
       </div>
-
-      {/* 2. CONTROLS BAR */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 bg-white p-6 rounded-[2.5rem] border border-slate-50 shadow-sm">
         <div className="relative w-full sm:max-w-xs">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
@@ -164,8 +156,6 @@ const LabInventory = () => {
           <Plus size={18} /> New Lab Entry
         </button>
       </div>
-
-      {/* 3. TABLE GENERAL LEDGER */}
       <div className="bg-white rounded-[3.5rem] border border-slate-100 shadow-2xl overflow-hidden min-h-[500px]">
         <table className="w-full text-left">
           <thead>
@@ -228,7 +218,6 @@ const LabInventory = () => {
         </table>
       </div>
 
-      {/* REGISTRATION ONBOARDING MODAL SHEET */}
       {showModal && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 text-left">
           <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-md" onClick={() => setShowModal(false)}></div>

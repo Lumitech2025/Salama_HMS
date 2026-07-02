@@ -11,7 +11,6 @@ import ICD10DiagnosisSearch from "@/components/ICD10DiagnosisSearch";
 
 import { submitRadiologyRequisition } from "@/services/api";
 
-// Kept SKUs intact for backend billing downstream processing, removed from UI display
 const AVAILABLE_LAB_TESTS = [
     { id: 'CBC', sku: 'LAB-CBC', label: 'Full Blood Count (CBC)' },
     { id: 'PSA', sku: 'LAB-PSA', label: 'Prostate Specific Antigen (PSA)' },
@@ -22,7 +21,6 @@ const AVAILABLE_LAB_TESTS = [
     { id: 'MALARIA_BS', sku: 'LAB-BS_MP', label: 'Blood Slide for Malaria' },
 ];
 
-// Radiology / Ultrasound Test Definitions mapping 1:1 with your signal triggers
 const AVAILABLE_IMAGING_TESTS = [
     { id: 'US_CAROTID', sku: 'RAD-US_CAROTID', label: 'Ultrasound Carotid Study' },
     { id: 'US_DUPLEX_LOW_EXT', sku: 'RAD-US_DUPLEX_LOW_EXT', label: 'Ultrasound Duplex Lower Extremity' },
@@ -33,7 +31,6 @@ const AVAILABLE_IMAGING_TESTS = [
     { id: 'US_HEMODIALYSIS', sku: 'RAD-US_HEMODIALYSIS', label: 'Ultrasound Hemodialysis Access Study' },
 ];
 
-// ✨ NEW: Nurse Station Service Definitions matching backend signals exactly
 const AVAILABLE_NURSE_SERVICES = [
     { id: 'WOUND_DRESSING', sku: 'NUR-WOUND', flag: 'has_wound_dressing', label: 'Wound Dressing Procedure' },
     { id: 'CATHETER_CHANGE', sku: 'NUR-CATH', flag: 'has_catheter_change', label: 'Catheter Change' },
@@ -45,14 +42,12 @@ const INITIAL_LAB_STATE = {
     UE: false, LFT: false, MALARIA_BS: false
 };
 
-// Imaging checklist state holder
 const INITIAL_IMAGING_STATE = {
     US_CAROTID: false, US_DUPLEX_LOW_EXT: false, US_VENOUS_EXT: false,
     US_VENOUS_UNILA: false, US_DOPPLER_ABD_PEL: false, US_LIMITED_DUPLEX: false,
     US_HEMODIALYSIS: false
 };
 
-// ✨ NEW: Nurse procedures default checkbox state holder
 const INITIAL_NURSE_STATE = {
     WOUND_DRESSING: false,
     CATHETER_CHANGE: false,
@@ -98,6 +93,7 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     const [labRequests, setLabRequests] = useState(INITIAL_LAB_STATE);
     const [imagingRequests, setImagingRequests] = useState(INITIAL_IMAGING_STATE); 
     const [nurseRequests, setNurseRequests] = useState(INITIAL_NURSE_STATE); // ✨ NEW: Nurse procedures selection state tracker
+    
 
     const [servicePrices, setServicePrices] = useState({});
     const [loadingPrices, setLoadingPrices] = useState(true);
@@ -359,7 +355,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     setIsSavingImaging(true);
 
     try {
-        // 1. Map selected scans to retrieve pricing details
         const requestedScansDetails = AVAILABLE_IMAGING_TESTS.filter(scan => imagingRequests[scan.id]);
         const totalRadiologyCharge = requestedScansDetails.reduce((sum, scan) => sum + (scan.price || 0), 0);
         const realPatientId = selectedPatient.patient_id || 
@@ -372,33 +367,27 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
             console.warn("WARNING: realPatientId resolved identical to visit ID (32). Check your console object schema:", selectedPatient);
         }
 
-        // 3. Fire the centralized Axios service with correct distinct ID values
         await submitRadiologyRequisition(
-            realPatientId, // Parameter 1 -> Maps cleanly to Django's patient field
-            realVisitId,   // Parameter 2 -> Maps cleanly to Django's visit field (32)
+            realPatientId, 
+            realVisitId,   
             requestedScansDetails
         );
 
         await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'RADIOLOGY' });
 
-        // 4. Success Flow
         alert(`Successfully billed $${totalRadiologyCharge} and routed patient to Radiology!`);
         
-        // Reset the checkmarks local state dictionary cleanly
         setImagingRequests({}); 
         onTabSwitch('home');
         
     } catch (error) {
         console.error("Radiology integration failure:", error);
-        // Display backend error arrays cleanly if they exist
         const serverError = typeof error === 'object' ? JSON.stringify(error) : error;
         alert(`Failed to process desk requisition charges: ${serverError}`);
     } finally {
         setIsSavingImaging(false);
     }
 };
-
-    // ✨ NEW: Nurse Orders Submission & Re-routing Pipeline
     const handleReferToNurse = async () => {
         const activeOrderedServices = AVAILABLE_NURSE_SERVICES.filter(service => nurseRequests[service.id]);
 
@@ -419,15 +408,12 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                 total_estimated_charge: totalNurseRequisitionCost
             };
 
-            // Inject the explicit boolean keys expected by models.py and signals.py
             activeOrderedServices.forEach(srv => {
                 nursePayload[srv.flag] = true;
             });
 
-            // 1. Posts the order -> automatically posts invoice line charges on backend via trigger_completed_nurse_charges signal
             await API.post('/nurse-orders/', nursePayload);
             
-            // 2. Re-routes tracking token context directly into the physical Nurse's workstation panel
             await API.post(`/queue/${selectedPatient.id}/move_next/`, { target_station: 'NURSE' });
             
             alert(`Success: Nursing requisition submitted. Patient advanced to Nurse desk queue.`);
@@ -448,7 +434,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
     return (
         <div className="space-y-6 animate-in fade-in duration-700 font-['Inter'] pb-20 max-w-[1600px] mx-auto px-4">
             
-            {/* PATIENT BANNER */}
             {selectedPatient && (
                 <div className="bg-gradient-to-r from-slate-900 to-slate-950 border border-slate-800 rounded-[2rem] p-6 shadow-xl flex items-center justify-between">
                     <div className="flex items-center gap-5">
@@ -470,7 +455,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                 </div>
             )}
 
-            {/* QUEUE CONTROLLER */}
             <div className="bg-white border border-slate-100 rounded-[2rem] p-6 shadow-sm">
                 <div className="flex flex-col md:flex-row items-center gap-6">
                     <div className="flex items-center gap-4 flex-1 w-full">
@@ -585,13 +569,12 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                             )}
                         </div>
 
-                        {/* CLINICAL NOTES */}
                             <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
                                 <div className="flex items-center justify-between mb-5">
                                     <div className="flex items-center gap-3">
                                         <div className="bg-slate-900 p-2.5 rounded-xl text-white"><MessageSquare size={18} /></div>
                                         <h4 className="text-md font-bold text-slate-900">Notes</h4>
-                                    </div> {/* Reclosed the inner layout wrapper properly */}
+                                    </div> 
                                     <button onClick={handleSaveNotes} disabled={isSaving || !doctorNote} className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 transition-all disabled:opacity-50">
                                         {isSaving ? <Loader2 className="animate-spin" size={14}/> : <Save size={14}/>} Save Notes
                                     </button>
@@ -641,7 +624,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                             </button>
                         </div>
 
-                        {/* RADIOLOGY / IMAGING REQUESTS PANEL */}
                             <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
                                 <div className="flex items-center justify-between mb-6">
                                     <div className="flex items-center gap-3">
@@ -660,7 +642,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                                             >
                                                 <div className="flex flex-col gap-0.5">
                                                     <span className={`text-xs font-bold ${imagingRequests[scan.id] ? 'text-purple-900' : 'text-slate-600'}`}>{scan.label}</span>
-                                                    {/* ✨ ADDED: Dynamic price visualization sub-tag */}
                                                     <span className="text-[10px] font-mono text-slate-400 mt-0.5">
                                                         KES {(scan.price || 0).toLocaleString()}
                                                     </span>
@@ -681,7 +662,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                                 </button>
                             </div>
 
-                        {/* ✨ NEW: NURSING STATION PROCEDURES PANEL */}
                         <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 shadow-md">
                             <div className="flex items-center justify-between mb-6">
                                 <div className="flex items-center gap-3">
@@ -717,7 +697,6 @@ const OncologyVitals = ({ selectedPatientFromParent, onTabSwitch }) => {
                             </button>
                         </div>
 
-                    {/* ✨ NEW: PATIENT DOSING TAB ROUTING ACTION LINK BUTTON */}
                         <div className="pt-2 flex justify-end">
                             <button 
                                 onClick={() => onTabSwitch('prescriptions')}

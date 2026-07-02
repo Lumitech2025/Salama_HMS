@@ -138,7 +138,6 @@ const TriagePortal = () => {
             </header>
 
             <div className="flex flex-1 gap-6 overflow-hidden">
-                {/* QUEUE SIDEBAR */}
                 <aside className="w-[420px] flex flex-col bg-white rounded-[3rem] border border-slate-200 shadow-xl overflow-hidden">
                     <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
                         <div className="flex items-center gap-3">
@@ -235,7 +234,6 @@ const TriagePortal = () => {
                             </div>
                         </div>
 
-                        {/* VISUAL BILLING BANNER NOTICE */}
                         {nextStation === 'DOCTOR' && selectedPatient && (
                             <div className="bg-amber-50 border border-amber-200 rounded-[2rem] p-6 flex items-center gap-4 text-amber-900 animate-in fade-in slide-in-from-bottom-2 duration-200">
                                 

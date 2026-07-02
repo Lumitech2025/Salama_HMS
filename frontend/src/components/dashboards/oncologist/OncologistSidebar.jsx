@@ -5,7 +5,7 @@ import {
     FlaskConical, 
     History, 
     Pill, 
-    BookOpen, // Added for the Protocol Master training tab
+    BookOpen, 
     LogOut 
 } from 'lucide-react';
 
@@ -15,7 +15,7 @@ const OncologistSidebar = ({ activeModule, setActiveModule, onLogout }) => {
         { id: 'home', label: 'Home', icon: <LayoutDashboard size={20} /> },
         { id: 'vitals', label: 'Vitals', icon: <Activity size={20} /> },
         { id: 'lab', label: 'Lab Results', icon: <FlaskConical size={20} /> },
-        { id: 'history', label: 'Medical History', icon: <History size={20} /> },
+        // { id: 'history', label: 'Medical History', icon: <History size={20} /> },
         // { id: 'protocol-master', label: 'Protocol Master', icon: <BookOpen size={20} /> }, 
         { id: 'prescriptions', label: 'Patient Dosing', icon: <Pill size={20} /> },
         { id: 'regimens', label: 'Regimens', icon: <BookOpen size={20} />}

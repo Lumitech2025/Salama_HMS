@@ -17,7 +17,6 @@ const LabSidebar = ({ activeTab, setActiveTab, onLogout }) => {
         { id: 'requisitions', label: 'Lab Requisitions', icon: <PackageSearch size={18} /> }
     ];
 
-    // Defensive handle logout controller fallback layer
     const handleLogoutClick = () => {
         if (typeof onLogout === 'function') {
             onLogout();
@@ -30,7 +29,6 @@ const LabSidebar = ({ activeTab, setActiveTab, onLogout }) => {
 
     return (
         <aside className="w-80 bg-[#020617] h-screen flex flex-col p-8 border-r border-white/5 font-['Inter'] antialiased">
-            {/* Standardized Corporate Identity Branding */}
             <div className="mb-8 px-2">
                 <h1 className="text-3xl font-black text-white tracking-tighter uppercase italic">
                     SALAMA <span className="text-teal-400 not-italic font-light">LAB</span>
@@ -40,7 +38,6 @@ const LabSidebar = ({ activeTab, setActiveTab, onLogout }) => {
                 </p>
             </div>
 
-            {/* Navigation - Locked to layout-optimized text-12 sizing */}
             <nav className="flex-1 space-y-2 overflow-y-auto pr-1">
                 {menuItems.map((item) => (
                     <button
@@ -60,7 +57,6 @@ const LabSidebar = ({ activeTab, setActiveTab, onLogout }) => {
                 ))}
             </nav>
 
-            {/* Footer Actions */}
             <div className="pt-8 border-t border-white/5 space-y-4">
                 <div className="px-6 text-left">
                     <p className="text-[9px] text-slate-600 font-mono">Version 1.0.0 (Salama Lab)</p>

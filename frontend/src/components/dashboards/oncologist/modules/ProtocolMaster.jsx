@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
 const ProtocolMaster = () => {
-  // --- BASE API URL CONFIGURATION ---
   const API_BASE_URL = 'http://localhost:8000/api/protocols/';
 
   // --- 1. STATE MANAGEMENT ---
@@ -9,11 +8,8 @@ const ProtocolMaster = () => {
   const [biomarkerInput, setBiomarkerInput] = useState('');
   const [savedProtocols, setSavedProtocols] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  
-  // Track if we are editing an existing record or saving a new one
   const [editingProtocolId, setEditingProtocolId] = useState(null);
 
-  // Entire protocol schema configuration state
   const [formData, setFormData] = useState({
     cancerType: '',
     stages: [],
@@ -25,7 +21,6 @@ const ProtocolMaster = () => {
     drugs: [], 
   });
 
-  // Temporarily holds a single drug input before adding to the protocol array
   const [tempDrug, setTempDrug] = useState({
     drugName: '',
     baseDose: '',
@@ -35,7 +30,6 @@ const ProtocolMaster = () => {
     rules: [] 
   });
 
-  // Local UI state to build a brand new custom guardrail inside Step 3
   const [activeRuleTargetDrugId, setActiveRuleTargetDrugId] = useState(null);
   const [tempRule, setTempRule] = useState({
     parameter: 'CrCl (Renal)',
@@ -45,17 +39,11 @@ const ProtocolMaster = () => {
     actionValue: ''
   });
 
-  // --- 2. BACKEND API INTEGRATION LIFECYCLES ---
-  
-  // Fetch all saved protocols from database when component loads
   const fetchProtocols = async () => {
     setIsLoading(true);
-    
-    // 🌟 1. Grab the correct token from localStorage
     const token = localStorage.getItem('access_token'); 
     
     try {
-      // 🌟 2. Add the headers block with your Bearer token
       const response = await fetch(API_BASE_URL, {
         method: 'GET',
         headers: {
@@ -81,8 +69,6 @@ const ProtocolMaster = () => {
   useEffect(() => {
     fetchProtocols();
   }, []);
-
-  // Hydrate form inputs with chosen saved blueprint record for full updates
   const handleLoadEditMode = (protocol) => {
   setEditingProtocolId(protocol.id);
   
@@ -113,11 +99,10 @@ const ProtocolMaster = () => {
       }))
     }))
   });
-    setCurrentStep(1); // Reset workflow step back to start for validation editing
+    setCurrentStep(1); 
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Dispatch full relational configuration data package to Django engine
   const handleSubmitAll = async () => {
     if (!formData.protocolName || !formData.cancerType) {
       return alert("Protocol Identity and Malignancy Type must be populated to save.");
@@ -155,14 +140,12 @@ const ProtocolMaster = () => {
               action: rule.action,
               action_value: rule.actionValue ? parseInt(rule.actionValue) : null
             };
-            // Only include integer primary keys if editing an existing entry
             if (editingProtocolId && rule.id && String(rule.id).length <= 10) {
               ruleData.id = parseInt(rule.id);
             }
             return ruleData;
           })
         };
-        // Only include integer primary keys if editing an existing entry
         if (editingProtocolId && drug.id && String(drug.id).length <= 10) {
           drugData.id = parseInt(drug.id);
         }
@@ -184,14 +167,12 @@ const ProtocolMaster = () => {
 
       const responseData = await response.json();
 
-      // 🚨 CRITICAL STAGE GUARD: If it's not a 200 or 201, do NOT proceed!
       if (!response.ok) {
         console.error("❌ BACKEND VALIDATION FAILED:", responseData);
         alert(`Database rejected save: ${JSON.stringify(responseData)}`);
-        return; // Break execution immediately
+        return; 
       }
       
-      // ✅ If we get here, it actually saved!
       alert(editingProtocolId ? "Protocol Architecture modified successfully!" : "New Protocol Blueprint successfully written to Database!");
       handleClearForm();
       fetchProtocols();
@@ -218,7 +199,6 @@ const ProtocolMaster = () => {
     setCurrentStep(1);
   };
 
-  // --- 3. FRONTEND DATA HANDLERS ---
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -251,7 +231,7 @@ const ProtocolMaster = () => {
     if (!tempDrug.drugName || !tempDrug.baseDose) return alert('Enter Drug Name and Base Dose');
     setFormData(prev => ({
       ...prev,
-      drugs: [...prev.drugs, { ...tempDrug, id: Date.now() }] // Fresh items receive temp numeric IDs
+      drugs: [...prev.drugs, { ...tempDrug, id: Date.now() }] 
     }));
     setTempDrug({ drugName: '', baseDose: '', unit: 'mg/m²', route: 'IV Infusion', administrationDay: 'Day 1', rules: [] });
   };
@@ -290,9 +270,6 @@ const ProtocolMaster = () => {
   return (
     <div className="space-y-6 p-4 bg-slate-50 min-h-screen font-['Inter']">
       
-      {/* ========================================================
-          TOP UTILITY: DIRECTORY OVERVIEW DRAWER PANEL
-         ======================================================== */}
       <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm">
         <div className="flex justify-between items-center mb-4">
           <div>
@@ -329,10 +306,8 @@ const ProtocolMaster = () => {
         )}
       </div>
 
-      {/* MAIN CONTAINER CONFIGURATOR WORKSPACE */}
       <div className="flex flex-col lg:flex-row gap-6 bg-white p-2 rounded-3xl">
         
-        {/* LEFT PANEL: WORKFLOW FORM WIZARD */}
         <div className="flex-1 border border-slate-100 rounded-3xl p-6 flex flex-col justify-between bg-white">
           <div>
             <div className="flex justify-between items-center mb-8 border-b border-slate-100 pb-4">
@@ -351,7 +326,7 @@ const ProtocolMaster = () => {
               </div>
             </div>
 
-            {/* STEP 1: BASE DIAGNOSTICS MAPPING */}
+            
             {currentStep === 1 && (
               <div className="space-y-6">
                 <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">1. Disease & Staging Filters</h3>
@@ -402,7 +377,6 @@ const ProtocolMaster = () => {
               </div>
             )}
 
-            {/* STEP 2: REGIMEN & MEDICATION ARCHITECTURE */}
             {currentStep === 2 && (
               <div className="space-y-6">
                 <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">2. Protocol Regimen Setup</h3>
@@ -463,7 +437,6 @@ const ProtocolMaster = () => {
               </div>
             )}
 
-            {/* STEP 3: SAFETY GUARDRAILS */}
             {currentStep === 3 && (
               <div className="space-y-6 max-h-[520px] overflow-y-auto pr-2">
                 <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest">3. Dynamic Guardrail Constructor</h3>
@@ -533,7 +506,6 @@ const ProtocolMaster = () => {
             )}
           </div>
 
-          {/* Footer Navigation Buttons */}
           <div className="flex justify-between items-center border-t border-slate-100 pt-5 mt-8">
             <button type="button" disabled={currentStep === 1} onClick={() => setCurrentStep(prev => prev - 1)} className="px-5 py-3 border border-slate-200 rounded-2xl text-xs font-black uppercase text-slate-600 hover:bg-slate-50 disabled:opacity-30">Back</button>
             {currentStep < 3 ? (
@@ -546,9 +518,6 @@ const ProtocolMaster = () => {
           </div>
         </div>
 
-        {/* ========================================================
-            RIGHT PANEL: LIVE BLUEPRINT PREVIEW
-           ======================================================== */}
         <div className="w-full lg:w-[360px] bg-[#020617] text-slate-200 border border-white/5 rounded-3xl shadow-xl p-5 sticky top-6 h-fit flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 border-b border-white/5 pb-4 mb-5">

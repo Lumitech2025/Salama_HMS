@@ -5,7 +5,6 @@ import {
   Stethoscope, RefreshCcw, AlertTriangle, Loader2, UserPlus, Timer
 } from 'lucide-react';
 
-// FIX: Initializing the structural stations option matrix map for the clinical dropdown
 const CLINICAL_STATIONS = [
   { id: 'ALL', label: 'All Departments' },
   { id: 'TRIAGE', label: 'Triage / Vitals' },
@@ -70,7 +69,6 @@ const QueueStatus = () => {
   return (
     <div className="max-w-[1500px] mx-auto space-y-8 pb-20 font-['Inter'] animate-in fade-in duration-700">
       
-      {/* HEADER */}
       <div className="bg-[#020617] p-10 rounded-[3rem] shadow-2xl flex flex-col md:flex-row justify-between items-center border border-white/5 relative overflow-hidden">
         <div className="relative z-10 flex items-center gap-6">
           <div className="bg-teal-500 p-4 rounded-[1.5rem] text-white shadow-lg">
@@ -80,9 +78,7 @@ const QueueStatus = () => {
             <h1 className="text-4xl font-black text-white tracking-tighter italic uppercase">
                 Salama <span className="text-teal-400">Monitor</span>
             </h1>
-            <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.4em] mt-2">
-                Live Clinical Distribution Center
-            </p>
+            
           </div>
         </div>
         
@@ -97,8 +93,7 @@ const QueueStatus = () => {
         <Activity className="absolute -right-10 -top-10 text-white/5 w-64 h-64 rotate-12" />
       </div>
 
-      {/* KPI METRICS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 px-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-2">
         <KpiItem icon={<UserPlus size={22} />} label="Registered" value={analytics.today_total} color="blue" />
         <div className="bg-white border border-slate-100 p-6 rounded-[2.5rem] shadow-sm relative group transition-all hover:shadow-md">
             <div className="absolute left-6 top-1/2 -translate-y-1/2 p-3.5 bg-slate-900 text-white rounded-2xl z-10 group-hover:bg-teal-500 transition-colors">
@@ -109,16 +104,14 @@ const QueueStatus = () => {
               onChange={(e) => setActiveStation(e.target.value)}
               className="w-full h-full pl-16 pr-4 bg-transparent font-black text-slate-900 text-[11px] uppercase tracking-widest outline-none appearance-none cursor-pointer relative z-10"
             >
-              {/* FIXED: Reading from our newly declared CLINICAL_STATIONS constant matrix array */}
               {CLINICAL_STATIONS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
             </select>
             <ChevronDown size={14} className="absolute right-6 top-1/2 -translate-y-1/2 text-slate-400" />
         </div>
         <KpiItem icon={<Users size={22} />} label="Station Queue" value={analytics.station_queue} color="teal" />
-        <KpiItem icon={<Timer size={22} />} label="Avg Wait" value={analytics.avg_wait_time} color="amber" />
+        
       </div>
 
-      {/* DATA TABLE */}
       <div className="bg-white rounded-[3.5rem] border border-slate-200 shadow-xl overflow-hidden mx-2">
         <div className="p-10 border-b border-slate-100 flex flex-col md:flex-row justify-between items-center gap-6 bg-white">
           <div className="relative w-full md:w-[450px]">

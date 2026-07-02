@@ -11,7 +11,6 @@ import {
 
 import SalamaLogo from "@/assets/Salama Cancer Centre logo.png";
 
-// Comprehensive multi-panel reference standard registry matching Django models
 const REFERENCE_REGISTRY = {
   // 1. CBC PANEL
   cbc_hb: { name: 'Hb (Hemoglobin)', unit: 'g/dL', low: 12.0, high: 17.5, type: 'numeric' },
@@ -288,7 +287,6 @@ const LaboratoryResults = () => {
   return (
     <div className="w-full h-full flex flex-col max-w-none px-4 pb-6 text-left animate-in fade-in duration-300 antialiased font-sans bg-slate-50 min-h-screen text-slate-800 print:p-0 print:bg-white">
       
-      {/* Control Actions Frame */}
       <div className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4 mb-5 mt-2 print:hidden shrink-0">
         <div>
           <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
@@ -308,7 +306,6 @@ const LaboratoryResults = () => {
         </div>
       )}
 
-      {/* Dropdown Selector Component */}
       <div className="w-full bg-white border border-slate-200 rounded-2xl p-5 mb-4 shadow-2xs shrink-0 z-30 print:hidden">
         
         <div className="relative max-w-xl w-full">
@@ -352,10 +349,8 @@ const LaboratoryResults = () => {
       {activePatientData ? (
   <div className="w-full flex-1 min-h-0 space-y-4">
     
-    {/* Demographics & Clinical Telemetry Workspace Card */}
     <div className="w-full bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs transition-all print:hidden">
       
-      {/* Section Header */}
       <div className="flex items-center justify-between border-b border-slate-100 pb-2.5 mb-4">
         <h2 className="text-[11px] font-black uppercase tracking-wider text-teal-700 flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-teal-500 animate-pulse"></span>
@@ -364,7 +359,6 @@ const LaboratoryResults = () => {
         
       </div>
       
-      {/* Row 1: Core Demographics Split Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-3.5">
         
         <div className="bg-slate-50/70 p-3 rounded-xl border border-slate-100 transition-hover hover:bg-slate-50">
@@ -397,7 +391,6 @@ const LaboratoryResults = () => {
 
       </div>
 
-      {/* Row 2: Clinical Vitals Telemetry Grid */}
       <div className="mt-4 pt-4 border-t border-slate-100">
         <span className="block text-[12px] font-bold uppercase tracking-widest text-slate-400 mb-2.5">
           Vitals
@@ -406,7 +399,6 @@ const LaboratoryResults = () => {
         {activeVitals ? (
           <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
             
-            {/* Temperature Tile */}
             <div className="bg-linear-to-b from-slate-50/30 to-slate-50 p-3 rounded-xl border border-slate-100">
               <span className="text-slate-400 block text-[9px] font-bold uppercase tracking-tight">Temperature</span>
               <div className="flex items-baseline gap-1 mt-0.5">
@@ -415,7 +407,6 @@ const LaboratoryResults = () => {
               </div>
             </div>
 
-            {/* Blood Pressure Tile */}
             <div className="bg-linear-to-b from-slate-50/30 to-slate-50 p-3 rounded-xl border border-slate-100">
               <span className="text-slate-400 block text-[9px] font-bold uppercase tracking-tight">Blood Pressure</span>
               <div className="flex items-baseline gap-1 mt-0.5">
@@ -426,7 +417,6 @@ const LaboratoryResults = () => {
               </div>
             </div>
 
-            {/* Pulse & SpO2 Tile */}
             <div className="bg-linear-to-b from-slate-50/30 to-slate-50 p-3 rounded-xl border border-slate-100">
               <span className="text-slate-600 block text-[9px] font-bold uppercase tracking-tight">Pulse / O₂ Saturation</span>
               <div className="flex items-baseline gap-1 mt-0.5">
@@ -438,7 +428,6 @@ const LaboratoryResults = () => {
               </div>
             </div>
 
-            {/* BMI & BSA Summary Tile */}
             <div className="bg-teal-50/30 p-3 rounded-xl border border-teal-100/60">
               <span className="text-teal-800 block text-[9px] font-bold uppercase tracking-tight">(BMI | BSA)</span>
               <span className="text-xs font-black text-teal-900 block mt-1 tracking-tight">
@@ -456,7 +445,6 @@ const LaboratoryResults = () => {
 
     </div>
 
-          {/* Download Action row */}
           <div className="flex justify-between items-center pt-1 print:hidden">
             <button 
               onClick={() => setActivePatientData(null)}
@@ -466,21 +454,11 @@ const LaboratoryResults = () => {
             </button>
             <button 
               onClick={() => {
-                // 1. Grab the clean HTML layout structure of just the laboratory sheet element
                 const printContents = document.getElementById('printable-lab-sheet').innerHTML;
-                // 2. Save the complete active application layout state in memory
                 const originalContents = document.body.innerHTML;
-
-                // 3. Temporarily isolate the document body context down to ONLY the targeted report
                 document.body.innerHTML = `<div id="printable-lab-sheet" style="padding:20px;">${printContents}</div>`;
-
-                // 4. Fire the print dialog
                 window.print();
-
-                // 5. Instantly restore your original live web application state seamlessly
                 document.body.innerHTML = originalContents;
-                
-                // Forcing a clean window reload ensures all React button action click bindings re-initialize perfectly
                 window.location.reload();
               }}
               className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white font-bold tracking-wide px-5 py-2.5 rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
@@ -489,10 +467,8 @@ const LaboratoryResults = () => {
           </button>
           </div>
 
-          {/* Printable Report Form Layout — Now takes full screen preview container width */}
           <div id="printable-lab-sheet" className="bg-white rounded-2xl shadow-xs border border-slate-200 p-8 w-full max-w-none print:border-none print:shadow-none print:p-0 print:mx-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            
-            {/* Letterhead */}
+
             <div className="flex items-start justify-between border-b-2 border-slate-800 pb-4">
               <div className="flex items-center gap-4">
                 <img src={SalamaLogo} alt="Salama Cancer Centre" className="h-14 w-14 object-contain" onError={(e) => e.target.style.display='none'} />
@@ -511,7 +487,6 @@ const LaboratoryResults = () => {
               </div>
             </div>
 
-            {/* Meta Indexes — Fully displays Name, HRN, Age, Gender directly in preview pane layout */}
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-y-2 py-4 text-[11px] border-b border-slate-200">
               <div className="sm:col-span-7 space-y-1">
                 <p className="text-slate-800"><span className="font-bold text-slate-900">Patient Full Name:</span> {activePatientData.info.name}</p>
@@ -526,7 +501,6 @@ const LaboratoryResults = () => {
               </div>
             </div>
 
-            {/* Results Table */}
             <div className="mt-5 overflow-x-auto">
               <table className="w-full border-collapse text-left text-[11px] bg-white">
                 <thead>
@@ -558,7 +532,6 @@ const LaboratoryResults = () => {
               </table>
             </div>
 
-            {/* Technician Notes Footer section */}
             <div className="mt-6 pt-4 border-t border-slate-200">
               <h3 className="text-[9px] font-bold tracking-wider text-slate-400 uppercase">Technician Remarks & Notes</h3>
               <div className="mt-1.5 p-3 bg-slate-50/60 rounded-xl border border-slate-100 text-[11px] text-slate-700 min-h-[45px] print:bg-white print:border-none print:p-0">
@@ -570,7 +543,6 @@ const LaboratoryResults = () => {
               </div>
             </div>
 
-            {/* Footnote stamp marker */}
             <div className="mt-14 pt-4 border-t border-slate-100 grid grid-cols-2 text-[10px] text-slate-400 font-medium">
               <div><p>Report Generated Electronically — Salama HMS Lab Platform</p></div>
               <div className="text-right"><p className="italic font-semibold text-slate-500">Authorized Signatory Stamp: ______________________</p></div>
@@ -584,7 +556,7 @@ const LaboratoryResults = () => {
           <ShieldAlert size={36} className="text-slate-300 mb-2 stroke-[1.5]" />
           <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Workspace View Locked</h4>
           <p className="text-xs text-slate-400 max-w-xs mt-1">
-            Select a verified patient profile from the drop-down menu above to load laboratory reports.
+            Select a patient to load laboratory reports.
           </p>
         </div>
       )}

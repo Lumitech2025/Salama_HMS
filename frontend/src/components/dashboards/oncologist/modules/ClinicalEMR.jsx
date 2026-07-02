@@ -47,7 +47,6 @@ const ClinicalEMR = ({ patient }) => {
     fetchMedicalHistory(); 
   }, [fetchMedicalHistory]);
 
-  // Helper helper function to parse wide-table field entry data down for the table matrix
   const parseLabMetrics = (labRecord) => {
     const metrics = [];
     const fields = [
@@ -105,7 +104,6 @@ const ClinicalEMR = ({ patient }) => {
           </p>
         </div>
 
-        {/* TABS CONTAINER (TIMELINE TAB SUCCESSFULLY REMOVED) */}
         <nav className="bg-slate-100/80 p-1 rounded-xl flex flex-wrap gap-1 border border-slate-200/60">
           <TabBtn active={activeCategory === 'vitals'} onClick={() => setActiveCategory('vitals')} icon={<Activity size={14}/>} label="Vitals Metrics" />
           <TabBtn active={activeCategory === 'labs'} onClick={() => setActiveCategory('labs')} icon={<FlaskConical size={14}/>} label="Laboratory Summary" />
@@ -125,8 +123,7 @@ const ClinicalEMR = ({ patient }) => {
         </div>
       ) : (
         <div className="animate-in slide-in-from-bottom-2 duration-300">
-          
-          {/* CATEGORY 1: VITALS METRICS INDIVIDUAL CARD BOXES */}
+ 
           {activeCategory === 'vitals' && (
             <div className="space-y-8">
               {historyData.vitals.length === 0 ? <EmptyState /> : historyData.vitals.map((v, idx) => (
@@ -146,7 +143,6 @@ const ClinicalEMR = ({ patient }) => {
                     </span>
                   </div>
 
-                  {/* Isolated Box Layout Grid per metric */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div className="bg-slate-50/50 border border-slate-200 p-4 rounded-xl shadow-xs">
                       <div className="flex items-center gap-2 text-blue-600 mb-1">
@@ -187,7 +183,6 @@ const ClinicalEMR = ({ patient }) => {
             </div>
           )}
 
-          {/* CATEGORY 2: LAB RESULTS TABLE FORMAT */}
           {activeCategory === 'labs' && (
             <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
               {historyData.labs.length === 0 ? <EmptyState /> : (
@@ -254,7 +249,6 @@ const ClinicalEMR = ({ patient }) => {
             </div>
           )}
 
-          {/* CATEGORY 3: PRESCRIPTIONS STAGING TABLE FORMAT */}
           {activeCategory === 'prescriptions' && (
             <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
               {historyData.prescriptions.length === 0 ? <EmptyState /> : (
@@ -325,11 +319,10 @@ const ClinicalEMR = ({ patient }) => {
             </div>
           )}
 
-          {/* CATEGORY 4: CLINICAL NOTES & DIAGNOSIS COMBINED LAYOUT */}
           {activeCategory === 'notes' && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               
-              {/* Left Column: Active Patient Diagnosis Mappings */}
+
               <div className="lg:col-span-5 space-y-4">
                 <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
                   <div className="px-5 py-4 bg-slate-900 text-white flex items-center gap-2">
@@ -361,7 +354,6 @@ const ClinicalEMR = ({ patient }) => {
                 </div>
               </div>
 
-              {/* Right Column: Longitudinal Consultation Narratives */}
               <div className="lg:col-span-7 space-y-4">
                 {historyData.clinicalNotes.length === 0 ? <EmptyState /> : historyData.clinicalNotes.map((n, i) => (
                   <div key={i} className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-xs relative">
@@ -395,7 +387,6 @@ const ClinicalEMR = ({ patient }) => {
   );
 };
 
-// Reusable Sub-Buttons Layout
 const TabBtn = ({ active, onClick, icon, label }) => (
   <button 
     onClick={onClick}

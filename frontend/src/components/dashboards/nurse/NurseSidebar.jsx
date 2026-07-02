@@ -22,7 +22,7 @@ const NurseSidebar = ({ activeModule, setActiveModule, onLogout }) => {
         { id: 'labs', name: 'Lab Results', icon: <Beaker size={18} /> },
         { id: 'wards', name: 'Ward Management', icon: <Users size={18} /> },
         { id: 'palliative', name: 'Palliative Care', icon: <HeartHandshake size={18} /> },
-        { id: 'history', name: 'Patient History', icon: <FileSearch size={18} /> },
+        // { id: 'history', name: 'Patient History', icon: <FileSearch size={18} /> },
         { id: 'requisitions', name: 'Requisition Hub', icon: <FileSearch size={18} />  }
     ];
 

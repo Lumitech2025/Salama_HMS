@@ -66,22 +66,20 @@ const DischargeSummaryTab = () => {
         };
     };
 
-    // Fetch patients who have an oncology prescription available for discharge summaries
+    // Fetch patients who have completed the pharmacy queue stage
     useEffect(() => {
-        const fetchPrescriptionEligibleQueue = async () => {
+        const fetchCompletedPharmacyQueue = async () => {
             try {
-                // Pointing directly to our new endpoint instead of the old queue filters
-                const response = await fetch('/api/discharge-summaries/eligible-patients/', {
+                const response = await fetch('/api/queue/?current_station=PHARMACY&status=COMPLETED', {
                     method: 'GET',
                     headers: getAuthHeaders()
                 });
                 if (response.status === 401) throw new Error("Session expired. Please log in again.");
-                if (!response.ok) throw new Error("Failed to load prescription eligibility profiles.");
+                if (!response.ok) throw new Error("Failed to load completed pharmacy workflow queue.");
                 
                 const data = await response.json();
-                console.log("Prescription Eligibility Raw Response Data:", data);
+                console.log("Pharmacy Queue Raw Response Data:", data);
 
-                // Safe parsing fallback for paginated results or raw array envelopes
                 if (data && Array.isArray(data.results)) {
                     setCompletedQueue(data.results);
                 } else if (Array.isArray(data)) {
@@ -92,10 +90,10 @@ const DischargeSummaryTab = () => {
                 }
             } catch (err) {
                 console.error(err);
-                setError(err.message || "Error pulling eligible prescription records.");
+                setError(err.message || "Error pulling pharmacy queue elements.");
             }
         };
-        fetchPrescriptionEligibleQueue();
+        fetchCompletedPharmacyQueue();
     }, []);
 
     // Fetch or prefill discharge details when a patient is selected
@@ -109,7 +107,6 @@ const DischargeSummaryTab = () => {
         setError(null);
 
         try {
-            // 1. Try to fetch an existing discharge summary
             const response = await fetch(`/api/discharge-summaries/?visit=${visitId}`, {
                 method: 'GET',
                 headers: getAuthHeaders()
@@ -120,6 +117,7 @@ const DischargeSummaryTab = () => {
             if (response.ok) {
                 const data = await response.json();
                 if (data && data.length > 0) {
+                    // Normalize backend structure safely if chemo_meds_matrix doesn't exist yet
                     const record = data[0];
                     if (!record.chemo_meds_matrix) {
                         record.chemo_meds_matrix = [
@@ -136,7 +134,6 @@ const DischargeSummaryTab = () => {
                 }
             }
 
-            // 2. Fall back to pulling automated prefill vectors if a summary does not exist yet
             const prefillResponse = await fetch(`/api/discharge-summaries/prefill/?visit_id=${visitId}`, {
                 method: 'GET',
                 headers: getAuthHeaders()
@@ -144,11 +141,6 @@ const DischargeSummaryTab = () => {
             if (!prefillResponse.ok) throw new Error("Failed to pull automated prefill vectors.");
             const prefillData = await prefillResponse.json();
             
-            // 🟢 SAFE FIX: Coerce to string to avoid runtime type crashes
-            if (prefillData.visit && String(prefillData.visit).startsWith('rx-')) {
-                prefillData.visit = null;
-            }
-
             if (!prefillData.chemo_meds_matrix) {
                 prefillData.chemo_meds_matrix = [
                     { text_left: '', text_right: '', checked_left: false, checked_right: false },
@@ -156,11 +148,10 @@ const DischargeSummaryTab = () => {
                     { text_left: '', text_right: '', checked_left: false, checked_right: false },
                     { text_left: '', text_right: '', checked_left: false, checked_right: false },
                     { text_left: '', text_right: '', checked_left: false, checked_right: false }
-                        ];
-                    }
+                ];
+            }
             setFormData(prefillData);
         } catch (err) {
-            console.error("Error loading patient data:", err);
             setError(err.message);
         } finally {
             setIsLoading(false);
@@ -237,14 +228,13 @@ const DischargeSummaryTab = () => {
                         >
                             <option value="">-- Choose Patient --</option>
                             {completedQueue && completedQueue.length > 0 ? (
-                                completedQueue.map((ticket, idx) => {
-                                    // Safely fall back to the flattened keys provided by the new prescriptions eligibility API
-                                    const visitId = ticket.visit_id || ticket.id || ticket.visit?.id || "";
-                                    const token = ticket.token_id || ticket.visit?.queue_id || "Rx";
+                                completedQueue.map((ticket) => {
+                                    const visitId = ticket.visit_id || ticket.visit?.id || "";
+                                    const token = ticket.token_id || ticket.visit?.queue_id || "N/A";
                                     const patientName = ticket.patient_name || ticket.patient?.name || "Unknown Patient";
 
                                     return (
-                                        <option key={visitId || idx} value={visitId}>
+                                        <option key={ticket.id || visitId} value={visitId}>
                                             {token} - {patientName}
                                         </option>
                                     );

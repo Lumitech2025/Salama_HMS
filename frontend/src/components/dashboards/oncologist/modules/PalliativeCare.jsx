@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Heart, Activity, Wind, Brain, Sliders, MessageSquare } from 'lucide-react';
 
 const PalliativeCare = () => {
-    // ESAS Scores (0-10)
+    
     const [symptoms, setSymptoms] = useState([
         { id: 'pain', label: 'Pain', score: 6, icon: <Activity size={18}/>, color: 'rose' },
         { id: 'tired', label: 'Tiredness', score: 8, icon: <Wind size={18}/>, color: 'amber' },
@@ -25,7 +25,6 @@ const PalliativeCare = () => {
             </div>
 
             <div className="grid grid-cols-12 gap-8">
-                {/* Symptom Scoring (ESAS) */}
                 <div className="col-span-12 lg:col-span-7 bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm">
                     <div className="flex items-center gap-3 mb-10">
                         <Sliders className="text-slate-400" />
@@ -53,7 +52,6 @@ const PalliativeCare = () => {
                     </div>
                 </div>
 
-                {/* Psychosocial & Spiritual Support */}
                 <div className="col-span-12 lg:col-span-5 space-y-6">
                     <div className="bg-indigo-900 p-8 rounded-[3rem] text-white shadow-xl relative overflow-hidden">
                         <div className="relative z-10">
@@ -74,7 +72,6 @@ const PalliativeCare = () => {
                         <Heart className="absolute -right-10 -bottom-10 text-indigo-800" size={200} strokeWidth={1} />
                     </div>
 
-                    {/* Care Coordination Note */}
                     <div className="bg-white p-8 rounded-[3rem] border border-slate-200">
                         <div className="flex items-center gap-3 mb-4 text-slate-900">
                             <MessageSquare size={20} />

@@ -2,20 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Send, Clock, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 const LabRequisitionsTab = () => {
-    // Core state matrices for basket handling - justification is now tracked per row
     const [basket, setBasket] = useState([
         { inventory_item_id: '', item_name: '', sku: '', quantity: 1, cost: 0, reason: '' }
     ]);
-    
-    // Live tracking ledger connected to Salama Core API
+
     const [inventoryItems, setInventoryItems] = useState([]);
     const [historicalReqs, setHistoricalReqs] = useState([]);
     const [isInventoryLoading, setIsInventoryLoading] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [apiError, setApiError] = useState(null);
-
-    // Extraction helper for the explicit 'access_token' layouts
     const getAuthHeaders = () => {
         const token = 
             localStorage.getItem('access_token') || 
@@ -30,7 +26,6 @@ const LabRequisitionsTab = () => {
         };
     };
 
-    // 1. FETCH LAB FILTERED INVENTORY
     const fetchLabInventory = async () => {
         setIsInventoryLoading(true);
         try {
@@ -51,8 +46,6 @@ const LabRequisitionsTab = () => {
             setIsInventoryLoading(false);
         }
     };
-
-    // 2. FETCH HISTORICAL REQUISITION LEDGER
     const fetchRequisitionHistory = async () => {
         setIsLoading(true);
         try {
@@ -120,22 +113,18 @@ const LabRequisitionsTab = () => {
     const getBasketGrandTotal = () => {
         return basket.reduce((acc, curr) => acc + (Number(curr.quantity || 0) * Number(curr.cost || 0)), 0);
     };
-
-    // 4. SUBMIT REQUISITION PAYLOAD WITH INTEGRATED MULTI-LINE REASONS
     const handleSubmitRequisition = async (e) => {
         e.preventDefault();
         
         const validLines = basket.filter(b => b.inventory_item_id !== '');
         if (validLines.length === 0) return alert("Please specify at least one valid laboratory inventory item.");
 
-        // Validation Guard: Ensure every row has an explicit justification reason
         const missingReason = validLines.some(line => !line.reason.trim());
         if (missingReason) return alert("Please specify a justification reason for all selected items in the table.");
 
         setIsSubmitting(true);
         setApiError(null);
 
-        // Concatenate row reasons into a structured string payload for the backend overview tracker
         const finalReasonPayload = validLines
             .map(i => `[${i.item_name}]: ${i.reason.trim()}`)
             .join(' | ');
@@ -146,7 +135,7 @@ const LabRequisitionsTab = () => {
             reason: finalReasonPayload, 
             items: validLines.map(line => ({
                 inventory_item: line.inventory_item_id, 
-                quantity: parseInt(line.quantity, 10) || 1, // Defensive fallback to prevent NaN submissions
+                quantity: parseInt(line.quantity, 10) || 1, 
                 unit_price: parseFloat(line.cost || 0).toFixed(2)
             }))
         };
@@ -179,7 +168,6 @@ const LabRequisitionsTab = () => {
     return (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 p-6 font-sans antialiased text-slate-800">
             
-            {/* LEFT SIDE: Entry Grid Spreadsheet Workspace */}
             <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-6">
                 <div className="flex justify-between items-center border-b border-slate-100 pb-4">
                     <div>
@@ -204,7 +192,6 @@ const LabRequisitionsTab = () => {
                 <form onSubmit={handleSubmitRequisition} className="space-y-6">
                     <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50">
                         
-                        {/* Aligned Grid Headers */}
                         <div className="grid grid-cols-12 gap-3 bg-slate-100/90 px-4 py-3.5 text-xs font-bold uppercase tracking-wider text-slate-700 border-b border-slate-200">
                             <div className="col-span-4">Item Name / Product</div>
                             <div className="col-span-3">Justification / Reason</div>
@@ -214,12 +201,10 @@ const LabRequisitionsTab = () => {
                             <div className="col-span-1"></div>
                         </div>
 
-                        {/* Interactive Row Items */}
                         <div className="divide-y divide-slate-200 bg-white">
                             {basket.map((line, idx) => (
                                 <div key={idx} className="grid grid-cols-12 gap-3 px-4 py-4 items-center hover:bg-slate-50/50 transition-colors">
                                     
-                                    {/* 1. Aligned Dropdown Selector */}
                                     <div className="col-span-4">
                                         <select
                                             required
@@ -237,7 +222,6 @@ const LabRequisitionsTab = () => {
                                         </select>
                                     </div>
 
-                                    {/* 2. Embedded Inline Row Reason/Justification */}
                                     <div className="col-span-3">
                                         <input
                                             type="text"
@@ -250,14 +234,12 @@ const LabRequisitionsTab = () => {
                                         />
                                     </div>
 
-                                    {/* 3. SKU Reference Display */}
                                     <div className="col-span-2 text-center">
                                         <span className="font-mono bg-slate-100 px-1.5 py-1 rounded text-xs font-bold text-slate-700 block tracking-wide truncate mx-auto w-fit max-w-full">
                                             {line.sku || '---'}
                                         </span>
                                     </div>
 
-                                    {/* 4. Quantity Input */}
                                     <div className="col-span-1">
                                         <input
                                             type="number"
@@ -270,7 +252,6 @@ const LabRequisitionsTab = () => {
                                         />
                                     </div>
 
-                                    {/* 5. Dynamic Cost Layout Metrics */}
                                     <div className="col-span-1 text-right">
                                         <span className="font-mono text-xs font-semibold text-slate-600 block">
                                             {Number(line.cost).toFixed(2)}
@@ -280,7 +261,6 @@ const LabRequisitionsTab = () => {
                                         </span>
                                     </div>
 
-                                    {/* Line Item Removal Trigger */}
                                     <div className="col-span-1 text-center">
                                         <button
                                             type="button"
@@ -296,7 +276,6 @@ const LabRequisitionsTab = () => {
                         </div>
                     </div>
 
-                    {/* Submit Bar Action Dashboard Footer */}
                     <div className="flex justify-between items-center bg-slate-900 text-white p-5 rounded-xl border border-slate-800 shadow-md">
                         <div>
                             <span className="text-xs uppercase tracking-widest text-slate-400 font-bold block">Estimated Gross Valuation</span>
@@ -322,8 +301,6 @@ const LabRequisitionsTab = () => {
                     </div>
                 </form>
             </div>
-
-            {/* RIGHT SIDE: Real-time Ledger Tracking Sidebar */}
             <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 shadow-xs p-6 flex flex-col h-fit space-y-4">
                 <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
                     <h4 className="text-lg font-bold text-slate-900">Requisition Tracker</h4>

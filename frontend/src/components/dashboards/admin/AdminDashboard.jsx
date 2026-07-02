@@ -47,14 +47,13 @@ const AdminDashboard = () => {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#F8F9FA] font-sans antialiased text-slate-900 selection:bg-teal-500/10">
-      {/* Sidebar remains fixed */}
+
       <AdminSidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         onLogout={handleLogout} 
       />
       
-      {/* UPDATED: Reduced padding for "breathing space" and removed max-width constraint */}
       <main className="flex-1 h-full overflow-y-auto p-4 lg:p-6">
         <div className="w-full">
           {renderContent()}

@@ -72,7 +72,6 @@ const InsuranceVerification = () => {
   return (
     <div className="max-w-[1600px] mx-auto p-6 space-y-6 animate-in fade-in duration-500">
       
-      {/* Top Utility Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
         <div>
           <h1 className="text-xl font-black text-slate-800 flex items-center gap-2">
@@ -93,10 +92,8 @@ const InsuranceVerification = () => {
 
       <div className="grid grid-cols-12 gap-6">
         
-        {/* Left Column: Search & Verification */}
         <div className="col-span-12 lg:col-span-8 space-y-6">
           
-          {/* Enhanced Search Section */}
           <div className="bg-slate-900 rounded-3xl p-8 shadow-xl relative overflow-hidden">
             <div className="absolute top-0 right-0 p-8 opacity-10">
               <Search size={120} className="text-white" />
@@ -114,7 +111,6 @@ const InsuranceVerification = () => {
               />
             </div>
 
-            {/* Dropdown Results */}
             {searchResults.length > 0 && (
               <div className="absolute left-8 right-8 mt-2 bg-white rounded-2xl shadow-2xl z-50 border border-slate-200 divide-y divide-slate-50 overflow-hidden">
                 {searchResults.map((p) => (
@@ -139,7 +135,6 @@ const InsuranceVerification = () => {
             )}
           </div>
 
-          {/* Result Card: The Billing Specialist's View */}
           {status === 'active' && insuranceData && (
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden animate-in slide-in-from-bottom-4 duration-500">
               <div className="bg-teal-600 p-6 flex justify-between items-center text-white">
@@ -188,7 +183,6 @@ const InsuranceVerification = () => {
           )}
         </div>
 
-        {/* Right Column: Audit Trail & Analytics */}
         <div className="col-span-12 lg:col-span-4 space-y-6">
           <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm">
             <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">

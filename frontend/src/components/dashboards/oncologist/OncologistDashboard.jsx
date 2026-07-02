@@ -1,22 +1,19 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import OncologistSidebar from './OncologistSidebar';
-
-// Module Imports
 import DoctorHome from './modules/DoctorHome';
 import OncologyVitals from './modules/OncologyVitals';
 import LaboratoryResults from './modules/LaboratoryResults';
 import ClinicalEMR from './modules/ClinicalEMR'; 
-import ProtocolMaster from './modules/ProtocolMaster'; // Tab 1: System Master Rules
-import OncologyPrescription from './modules/OncologyPrescription'; // Tab 2: The Execution Engine
-import RegimenTab from './modules/RegimenTab'; // Patient-Agnostic Blueprint Builder
+// import ProtocolMaster from './modules/ProtocolMaster'; 
+import OncologyPrescription from './modules/OncologyPrescription'; 
+import RegimenTab from './modules/RegimenTab'; 
 
 const OncologistDashboard = () => {
     const navigate = useNavigate();
     const [activeModule, setActiveModule] = useState('home');
     const [selectedPatient, setSelectedPatient] = useState(null);
     
-    // Tracks how many patients have been attended in this browser session
     const [attendedCount, setAttendedCount] = useState(0);
 
     const handleLogout = () => {
@@ -30,7 +27,6 @@ const OncologistDashboard = () => {
         setActiveModule('vitals'); 
     };
 
-    // Helper arrays to handle layout conditions cleanly
     const globalModules = ['home', 'protocol-master', 'regimens', 'lab'];
     const isProtocolModule = activeModule === 'protocol-master' || activeModule === 'regimens';
 
@@ -60,16 +56,9 @@ const OncologistDashboard = () => {
                             </h1>
                         </div>
                         
-                        <div className="bg-white px-5 py-3 rounded-[1.5rem] border border-slate-200 shadow-sm flex items-center gap-3">
-                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                            <div className="text-right">
-                                <p className="text-[10px] font-bold text-slate-400 uppercase leading-none text-left">Clinic Status</p>
-                                <p className="text-sm font-black text-slate-800 italic">Active Session</p>
-                            </div>
-                        </div>
+                        
                     </div>
 
-                    {/* Patient Context Bar - Automatically hidden on Home and Protocol Master modules */}
                     {selectedPatient && !globalModules.includes(activeModule) && (
                         <div className="mb-8 p-6 bg-white rounded-3xl border-l-4 border-l-blue-600 shadow-sm flex items-center justify-between animate-in fade-in slide-in-from-top-4 duration-500">
                             <div className="flex items-center gap-6">
@@ -94,10 +83,8 @@ const OncologistDashboard = () => {
                         </div>
                     )}
                     
-                    {/* View Container Card */}
                     <div className="bg-white rounded-[3rem] p-8 min-h-[75vh] shadow-xl shadow-slate-200/60 border border-slate-100 overflow-hidden">
                         
-                        {/* 1. GLOBAL WORKSTATION MODULES (No Patient Selection Context Enforced) */}
                         {activeModule === 'home' && (
                             <DoctorHome 
                                 onSelectPatient={handleAttendPatient} 
@@ -120,7 +107,6 @@ const OncologistDashboard = () => {
                             />
                         )}
 
-                        {/* 2. CLINICAL TRACKS (Strictly Requires Selection of Active Patient) */}
                         {!globalModules.includes(activeModule) && (
                             selectedPatient ? (
                                 <>
@@ -138,7 +124,6 @@ const OncologistDashboard = () => {
                                     )}
                                 </>
                             ) : (
-                                /* Fallback Intercept Window for Protected Clinical Modules */
                                 <div className="flex flex-col items-center justify-center h-[60vh] text-center">
                                     <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mb-6 text-slate-300 text-2xl font-serif italic">!</div>
                                     <h3 className="text-xl font-black text-slate-900 uppercase italic">Patient Selection Required</h3>

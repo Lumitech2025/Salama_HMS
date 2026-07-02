@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import FinanceSidebar from './FinanceSidebar';
 import FinanceDashboard from './FinanceDashboard';
-
-// Import all functional modules
 import MainStoreLedger from './modules/MainStoreLedger';
 import StockTakeManager from './modules/StockTakeManager';
 import AssetLedger from './modules/AssetLedger';
@@ -79,17 +77,12 @@ const [prefilledRequisition, setPrefilledRequisition] = useState(null);
 
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans antialiased text-slate-800">
-      {/* Fixed sidebar container handling local state and background threads */}
       <FinanceSidebar 
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         onLogout={handleLogout} 
       />
-      
-      {/* MAIN CONTENT VIEWPORT CONTAINER
-        Using w-80 sidebar width offset (pl-80) instead of ml-80 to create a rigid spacing block.
-        This provides a safe bounding box for your tables and dashboard metrics.
-      */}
+     
       <main className="flex-1 pl-80 min-h-screen w-full transition-all duration-300">
         <div className="p-8 md:p-12 max-w-[1600px] mx-auto w-full animate-in fade-in duration-300">
           {renderContent()}

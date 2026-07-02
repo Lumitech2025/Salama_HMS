@@ -8,7 +8,7 @@ import {
 // Imported Salama Cancer Centre Logo
 import SalamaLogo from "@/assets/Salama Cancer Centre logo.png";
 
-// Receives standard incoming routed properties seamlessly from active queue desk triggers
+
 const PaymentPortal = ({ routedPatient, onClearRoute }) => {
   const [billingMode, setBillingMode] = useState('self_pay'); 
   const [paymentMethod, setPaymentMethod] = useState('mpesa');
@@ -37,7 +37,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
 
   useEffect(() => {
-    // Clear any active background check intervals when the clerk leaves this screen
+    
     return () => {
       if (window.mpesaIntervalId) {
         clearInterval(window.mpesaIntervalId);
@@ -46,7 +46,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
     };
   }, []);
 
-  // Helper to retrieve the CSRF token from Django cookies
+  
   const getCookie = (name) => {
     let cookieValue = null;
     if (document.cookie && document.cookie !== '') {
@@ -163,7 +163,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
     fetchMasterCatalogPrices();
   }, [fetchMasterCatalogPrices]);
 
-  // Live Patient Index search stream tracker
+  
   useEffect(() => {
     if (searchPatient.trim().length > 2) {
       setIsSearching(true);
@@ -205,7 +205,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
   setErrorMessage('');
   setInvoiceCounter(1); 
 
-  // 🌟 FIXED: Changed from patientRecord.active_bill to patientRecord.active_invoice
+  
   if (patientRecord.active_invoice && Array.isArray(patientRecord.active_invoice.items)) {
     const dynamicallyPricedCart = patientRecord.active_invoice.items.map(item => {
       const fallbackPrice = parseFloat(item.price || 0);
@@ -227,13 +227,11 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
 
   const total = useMemo(() => {
     return cart.reduce((sum, item) => {
-      // Safely extract the unit price metric
+      
       const itemPrice = item.price !== undefined && item.price !== null ? Number(item.price) : 0;
       
-      // Safely extract the quantity metric (defaulting cleanly to 1 if missing or undefined)
       const itemQuantity = item.quantity !== undefined && item.quantity !== null ? Number(item.quantity) : 1;
       
-      // Calculate line total and accumulate into the subtotal sum
       return sum + (itemPrice * itemQuantity);
     }, 0);
   }, [cart]);
@@ -242,7 +240,6 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
     setCart(cart.filter(item => item.id !== id));
   };
 
-  // ✨ EXECUTE MPESA OR PHYSICAL CASH TERMINATION SETTLEMENTS
   const handleProcessPayment = async () => {
     if (paymentMethod === 'mpesa' && (!phoneNumber || phoneNumber.trim() === '')) {
       alert("Please enter a valid M-Pesa phone number.");
@@ -253,7 +250,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
     setErrorMessage('');
 
     if (paymentMethod === 'cash') {
-      // Execute Direct Physical Cash Ledger Ingestion Workflow
+      
       try {
         const response = await fetch(`/api/invoices/${invoiceId}/settle-cash/`, {
           method: 'POST',
@@ -283,12 +280,10 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
       return;
     }
 
-    // Standard automated M-Pesa STK Flow
     try {
       setPaymentStatus('prompting'); 
       setCountdown(60);             
 
-      // 1. FIXED: Pointed to your actual backend view route trigger path
       const response = await fetch('/api/mpesa-trigger/', {
         method: 'POST',
         headers: {
@@ -309,13 +304,11 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
         throw new Error(data.error || "Failed to initiate M-Pesa payment.");
       }
 
-      // 2. FIXED: Turned off processing state here so the overlay doesn't block the screen, 
-      // allowing the prompting/countdown UI states to display correctly
       setIsProcessing(false);
 
       const pollInterval = setInterval(async () => {
         try {
-          // 3. FIXED: Pointed to your exact lightweight backend status tracking path
+          
           const statusResponse = await fetch(`/api/check-invoice-status/${invoiceId}/`, {
             headers: getAuthHeaders()
           });
@@ -325,10 +318,8 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
             clearInterval(pollInterval);
             setPaymentStatus('success');
             
-            // Immediately inform the user and attach receipt data
             alert(`Payment Confirmed Successfully! M-Pesa Receipt: ${statusData.receipt_number || 'N/A'}`);
             
-            // Advance the Queue Tracker to clear them from Billing instantly
             if (typeof onClearRoute === 'function') {
               onClearRoute();
             }
@@ -343,7 +334,6 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
         }
       }, 2500); // Polls every 2.5 seconds
 
-      // 4. Safety backup window loop clearing timeout
       setTimeout(() => {
         clearInterval(pollInterval);
         setPaymentStatus((currentStatus) => {
@@ -400,7 +390,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
     window.print();
   };
 
-  // Reset routed context state properties on clear terminal action calls
+
   const handleClearTerminal = () => {
     setPaymentStatus('idle');
     setSelectedPatient(null);
@@ -413,7 +403,6 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
   return (
     <div className="w-full max-w-7xl mx-auto space-y-5 text-slate-700 font-sans p-4 print:p-0">
       
-      {/* HEADER SECTION (HIDDEN ON PRINT) */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[#0a0f1d] p-5 rounded-xl border border-slate-800 shadow-sm print:hidden">
         <div>
           <h1 className="text-lg font-bold text-white tracking-tight">
@@ -430,21 +419,12 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
           >
             <User size={14} /> Self Pay (M-Pesa / Cash)
           </button>
-          <button 
-            type="button"
-            onClick={() => { setBillingMode('insurance'); setPaymentStatus('idle'); setErrorMessage(''); }}
-            className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all flex items-center gap-2 ${billingMode === 'insurance' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
-          >
-            <ShieldCheck size={14} /> Insurance Schemes
-          </button>
+          
         </div>
       </div>
 
-      {/* PATIENT SELECTOR (HIDDEN ON PRINT) */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs relative print:hidden">
         <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Active Patient</label>
-        
-        {/* Render interactive inputs only if no patient is routed to maintain workflow isolation */}
         {!selectedPatient ? (
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
@@ -469,7 +449,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
                   <span className="ml-2 font-mono text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded text-xs font-bold">HRN: {selectedPatient.health_record_number}</span>
                 </span>
                 <span className="block text-slate-500 font-medium text-[11px] mt-0.5">
-                  Registered Mode: <span className="font-bold text-slate-800">{selectedPatient.scheme || 'CASH'}</span> | Active Token Reference: <span className="font-mono text-slate-700 font-bold">{selectedPatient.queue_id}</span>
+                  Registered Mode: <span className="font-bold text-slate-800">{selectedPatient.scheme || 'CASH'}</span>
                 </span>
               </div>
             </div>
@@ -511,10 +491,8 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
         )}
       </div>
 
-      {/* CORE WORKFLOW AREA (HIDDEN ON PRINT) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start print:hidden">
         
-        {/* INTEGRATED SERVICE CHARGES & PHARMACY INVOICES MATRIX */}
         <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-3.5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
@@ -535,9 +513,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
               <tbody className="divide-y divide-slate-100 text-xs">
                 {cart.length === 0 ? (
                   <tr>
-                    <td colSpan="4" className="py-12 text-center text-slate-400 font-medium">
-                      {selectedPatient ? 'All clinical invoices cleared.' : 'Forward patient encounters from the Desk Queue to load pharmacy and procedural itemized logs.'}
-                    </td>
+                    
                   </tr>
                 ) : (
                   cart.map((item) => {
@@ -588,8 +564,6 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
             </div>
           )}
         </div>
-
-        {/* PAYMENT SETTLEMENT AND CLEARING DASHBOARD PANEL */}
         <div className="lg:col-span-5">
           {billingMode === 'self_pay' ? (
             <div className="bg-[#020617] rounded-xl p-5 text-white shadow-sm border border-slate-800 space-y-4">
@@ -714,7 +688,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
               )}
             </div>
           ) : (
-            /* INSURANCE VERIFICATION VIEW */
+           
             <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-xs space-y-3.5 print:hidden">
               <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
                 <ShieldCheck className="text-blue-600" size={16} />
@@ -806,9 +780,7 @@ const PaymentPortal = ({ routedPatient, onClearRoute }) => {
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* ✨ INVOICE GENERATOR MODAL VIEW (AUTO-ISOLATED FOR PRINT & PDF)          */}
-      {/* ========================================================================= */}
+     
       {showInvoiceModal && selectedPatient && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto print:absolute print:inset-0 print:bg-white print:p-0 print:z-auto">
           

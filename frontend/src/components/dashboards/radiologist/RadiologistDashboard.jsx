@@ -119,51 +119,22 @@ const RadiologistDashboard = () => {
             <div className="bg-slate-900 p-2.5 rounded-xl text-white shadow-md">
               <Activity size={18} className="text-teal-400 animate-pulse" />
             </div>
-            <div>
-              <h1 className="text-md font-black text-slate-950 uppercase tracking-wider font-mono">
-                {selectedPatient ? 'Diagnostic Session' : activeTab.replace('-', ' ')}
-              </h1>
-              {selectedPatient ? (
-                <p className="text-[9px] text-red-500 font-black uppercase tracking-widest flex items-center gap-1.5 mt-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
-                  Isolating Critical Acquisition Data
-                </p>
-              ) : (
-                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
-                  Salama HMS / Radiology Portal
-                </p>
-              )}
-            </div>
+            
           </div>
 
           <div className="flex items-center space-x-6">
             {/* Context Search Utility */}
-            <div className="relative group hidden md:block">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-slate-900 transition-colors" size={16} />
-              <input 
-                type="text" 
-                value={globalSearch}
-                onChange={(e) => setGlobalSearch(e.target.value)}
-                placeholder="Global telemetry search..." 
-                className="bg-slate-100 border border-transparent rounded-xl py-2.5 pl-12 pr-6 text-xs focus:bg-white focus:border-slate-200 w-64 transition-all outline-none font-bold tracking-tight text-slate-800"
-              />
-            </div>
             
-            {/* System Notifications Alert Hook */}
-            <button className="relative text-slate-400 hover:text-slate-900 transition-colors p-2 rounded-xl hover:bg-slate-50">
-              <Bell size={20} />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-red-600 rounded-full ring-4 ring-white"></span>
-            </button>
+            
+            
 
             {/* Profile Context Tier Layout */}
             <div className="flex items-center space-x-3 pl-4 border-l border-slate-200">
               <div className="text-right hidden sm:block">
-                <p className="text-[10px] font-black text-slate-900 leading-none tracking-wide">DR. COLLINS</p>
+                
                 <p className="text-[9px] font-black text-teal-600 uppercase tracking-widest mt-1">Senior Radiologist</p>
               </div>
-              <div className="h-10 w-10 bg-slate-900 rounded-xl flex items-center justify-center text-teal-400 font-black text-xs shadow-md border border-slate-800">
-                CK
-              </div>
+              
             </div>
           </div>
         </header>

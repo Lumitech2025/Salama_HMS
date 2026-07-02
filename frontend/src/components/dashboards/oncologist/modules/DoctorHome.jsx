@@ -94,7 +94,6 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
         }
     };
 
-    // Navigation triggers for routing the doctor directly into specific sub-tab contexts
     const routeToPatientAction = (patient, targetActionTab) => {
         const structuralPatientWrapper = {
             ...patient,
@@ -267,7 +266,6 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
                                         </td>
                                         <td className="px-10 py-8 text-right pr-16">
                                             <div className="flex gap-2 justify-end items-center">
-                                                {/* VITALS BUTTON */}
                                                 <button 
                                                     onClick={() => routeToPatientAction(pat, 'vitals')}
                                                     className="bg-blue-50 text-slate-900 border border-blue-100 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 hover:bg-blue-600 hover:text-white shadow-md transition-all duration-300"
@@ -275,7 +273,6 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
                                                     <Activity size={12} /> Vitals
                                                 </button>
 
-                                                {/* LAB BUTTON */}
                                                 <button 
                                                     onClick={() => routeToPatientAction(pat, 'lab')}
                                                     className="bg-blue-50 text-slate-900 border border-blue-100 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 hover:bg-green-600 hover:text-white shadow-md transition-all duration-300"
@@ -283,7 +280,6 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
                                                     <FlaskConical size={12} /> Lab
                                                 </button>
 
-                                                {/* PRESCRIPTION BUTTON */}
                                                 <button 
                                                     onClick={() => routeToPatientAction(pat, 'prescriptions')}
                                                     className="bg-blue-50 text-slate-900 border border-blue-100 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 hover:bg-purple-600 hover:text-white shadow-md transition-all duration-300"
@@ -291,7 +287,6 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
                                                     <Pill size={12} /> Prescription
                                                 </button>
 
-                                                {/* MEDICAL HISTORY BUTTON */}
                                                 <button 
                                                     onClick={() => routeToPatientAction(pat, 'history')}
                                                     className="bg-blue-50 text-slate-900 border border-blue-100 px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 hover:bg-slate-700 hover:text-white shadow-md transition-all duration-300"
@@ -314,7 +309,6 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
                 ) : (
                     <div className="p-10 grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in slide-in-from-right duration-500">
                         
-                        {/* DYNAMIC CALENDAR SIDEBAR */}
                         <div className="lg:col-span-4 bg-slate-50 rounded-[2.5rem] p-8 h-fit border border-slate-100 shadow-inner">
                             <div className="flex justify-between items-center mb-8">
                                 <h5 className="font-black text-slate-900 uppercase text-xs tracking-widest">
@@ -370,7 +364,6 @@ const DoctorHome = ({ onSelectPatient, attendedSessionCount }) => {
                             </div>
                         </div>
 
-                        {/* APPOINTMENT SCHEDULE DISPLAY */}
                         <div className="lg:col-span-8 space-y-4">
                             <div className="flex justify-between items-center mb-6">
                                 <h4 className="font-black text-slate-900 text-2xl tracking-tighter italic uppercase border-b-4 border-blue-500 pb-2">
