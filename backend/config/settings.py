@@ -53,6 +53,7 @@ AUTH_USER_MODEL = 'authentication.User'
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware', 
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -92,9 +93,33 @@ DATABASES = {
         'PASSWORD': env('DB_PASSWORD'),
         'HOST': env('DB_HOST'),
         'PORT': env('DB_PORT'),
+
+        'CONN_MAX_AGE': 600,
     }
 }
 
+
+# --- Dynamic Caching Architecture ---
+try:
+    import django_redis
+    REDIS_URL = env('REDIS_URL', default='redis://127.0.0.1:6379/1')
+    CACHES = {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': REDIS_URL,
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            }
+        }
+    }
+except ImportError:
+    # Fallback for local development when running outside of Docker without django-redis
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'unique-snowflake',
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
@@ -129,24 +154,38 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
-
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-CORS_ALLOWED_ORIGINS = [
+# WhiteNoise storage optimization for caching & compression
+# Static File Storage Optimization ---
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
+    },
+}
 
-]
+# --- Security & Cross-Origin Resource Sharing (CORS) ---
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
+    "http://localhost",
+    "http://127.0.0.1",
     "http://127.0.0.1:5173",
+    "http://localhost:80",      
+    "http://192.168.100.108:5173", 
 ]
 
-# CORS_ALLOW_ALL_ORIGINS = True # <-- Comment this out!
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:80",
+    "http://192.168.100.108:5173",
 ]
 
 CORS_ALLOW_HEADERS = [
@@ -181,6 +220,19 @@ SIMPLE_JWT = {
 }
 
 env_path = BASE_DIR / '.env'
+
+# --- Redis Caching Architecture ---
+REDIS_URL = env('REDIS_URL', default='redis://127.0.0.1:6379/1')
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': REDIS_URL,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    }
+}
 
 # --- Core Email Architecture Config (SMTP Configuration) ---
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
